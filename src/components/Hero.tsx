@@ -5,7 +5,7 @@ import { ArrowRight, ClipboardPaste, Link2, Sparkles } from 'lucide-react'
 import { Mascot } from './Mascot'
 import { HeroPreview } from './HeroPreview'
 import { Button } from './ui'
-import { ease, haptic, listItem, listStagger, spring } from '@/lib/motion'
+import { ease, haptic, listItem, listStagger, spring, wordIn, wordStagger } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 
 /**
@@ -98,10 +98,23 @@ export function Hero({
         </span>
       </m.div>
 
-      <m.h1 variants={listItem} className="hed hed-grad mt-5 text-4xl">
-        Read any post
+      {/* Assembles word by word. Each word is its own transform, so the line
+          arrives with authorship rather than appearing finished. */}
+      <m.h1
+        className="hed hed-grad mt-5 text-4xl"
+        variants={wordStagger}
+        initial="hidden"
+        animate="show"
+      >
+        {['Read', 'any', 'post'].map((w) => (
+          <m.span key={w} variants={wordIn} className="mr-[0.22em] inline-block">
+            {w}
+          </m.span>
+        ))}
         <br />
-        properly.
+        <m.span variants={wordIn} className="inline-block">
+          properly.
+        </m.span>
       </m.h1>
 
       <m.p
@@ -184,7 +197,7 @@ export function Hero({
           )}
         </AnimatePresence>
 
-        <Button onClick={submit} size="lg" className="mt-3 w-full">
+        <Button onClick={submit} size="lg" className="sheen mt-3 w-full">
           <Sparkles size={17} />
           Analyse this post
           <ArrowRight size={17} />

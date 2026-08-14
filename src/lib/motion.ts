@@ -145,3 +145,40 @@ function buzz(pattern: number | number[]) {
     /* never let a nice-to-have throw */
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Arrival
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * A headline that assembles itself, word by word.
+ *
+ * The page had one entrance stagger on whole blocks, which is not enough to
+ * read as motion — the eye sees a finished screen. Per-word arrival is the
+ * cheapest thing that makes a page feel authored: it is still transform and
+ * opacity, and it runs once.
+ */
+export const wordStagger: Variants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.055, delayChildren: 0.08 } },
+}
+
+export const wordIn: Variants = {
+  hidden: { opacity: 0, y: '0.4em', rotate: -1.5 },
+  show: {
+    opacity: 1,
+    y: 0,
+    rotate: 0,
+    transition: { type: 'spring', visualDuration: 0.55, bounce: 0.28 },
+  },
+}
+
+/** Sections arriving on scroll: further and slower than a list item. */
+export const revealUp: Variants = {
+  hidden: { opacity: 0, y: 26 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { type: 'spring', visualDuration: 0.55, bounce: 0.18 },
+  },
+}

@@ -330,25 +330,109 @@ h4 {
 }
 
 /* ---------------------------------------------------------------------------
-   Ambient field.
+   Ambient field — three drifting blobs.
 
-   Colour is what made this feel alive, and removing it made the product look
-   drab rather than restrained. It is back — but built from radial gradients
-   with soft alpha stops instead of a blur filter. Same look, one rasterisation,
-   no per-frame filter work, and it never animates or resizes.
+   The page was static, which is what made it read as flat no matter what the
+   palette was. These give it life without costing anything: each blob is a
+   radial gradient on its own layer, and the ONLY thing animated is transform,
+   so the compositor moves an already-rasterised texture and never repaints.
+
+   Deliberately not `filter: blur()` — that re-runs the filter every frame it
+   composites. Soft alpha stops in the gradient give the same softness for the
+   price of one rasterisation. Killed on low-end devices and under
+   reduced-motion, where the blobs stay put rather than disappearing.
    --------------------------------------------------------------------------- */
 .field {
   position: fixed;
-  inset: 0;
+  inset: -20%;
   z-index: 0;
   pointer-events: none;
-  background:
-    radial-gradient(60% 50% at 12% 0%, color-mix(in oklab, var(--aurora-1) 26%, transparent) 0%, transparent 62%),
-    radial-gradient(52% 44% at 92% 12%, color-mix(in oklab, var(--aurora-2) 22%, transparent) 0%, transparent 64%),
-    radial-gradient(64% 52% at 50% 104%, color-mix(in oklab, var(--aurora-3) 20%, transparent) 0%, transparent 66%);
+  overflow: hidden;
 }
+
+.field span {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  will-change: transform;
+}
+
+.field span:nth-child(1) {
+  top: -6%;
+  left: -12%;
+  width: 62vmax;
+  height: 62vmax;
+  background: radial-gradient(circle, color-mix(in oklab, var(--aurora-1) 40%, transparent) 0%, transparent 66%);
+  animation: drift-a 34s ease-in-out infinite;
+}
+.field span:nth-child(2) {
+  top: -14%;
+  right: -16%;
+  width: 54vmax;
+  height: 54vmax;
+  background: radial-gradient(circle, color-mix(in oklab, var(--aurora-2) 34%, transparent) 0%, transparent 66%);
+  animation: drift-b 42s ease-in-out infinite;
+}
+.field span:nth-child(3) {
+  bottom: -22%;
+  left: 22%;
+  width: 58vmax;
+  height: 58vmax;
+  background: radial-gradient(circle, color-mix(in oklab, var(--aurora-3) 32%, transparent) 0%, transparent 66%);
+  animation: drift-c 38s ease-in-out infinite;
+}
+
+@keyframes drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(8vmax, 5vmax, 0) scale(1.12); }
+}
+@keyframes drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.06); }
+  50% { transform: translate3d(-7vmax, 7vmax, 0) scale(1); }
+}
+@keyframes drift-c {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(6vmax, -6vmax, 0) scale(1.1); }
+}
+
 .low-end .field {
   display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .field span {
+    animation: none;
+  }
+}
+
+/* A sweep that crosses a control once on hover. Transform only. */
+@keyframes sheen {
+  from { transform: translateX(-120%) skewX(-18deg); }
+  to { transform: translateX(320%) skewX(-18deg); }
+}
+.sheen {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.sheen::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34%;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.28), transparent);
+  transform: translateX(-120%) skewX(-18deg);
+}
+.sheen:hover::after {
+  animation: sheen 900ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheen:hover::after {
+    animation: none;
+  }
 }
 
 /* ===========================================================================

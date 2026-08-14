@@ -119,8 +119,13 @@ export default function App() {
   return (
     <LazyMotion features={domAnimation} strict>
       <div className="relative min-h-screen-safe overflow-x-hidden">
-        {/* Ambient colour, behind everything, never animated. */}
-        <div className="field" aria-hidden />
+        {/* Ambient colour. Three blobs drifting on transform only, so the
+            compositor moves rasterised textures and never repaints. */}
+        <div className="field" aria-hidden>
+          <span />
+          <span />
+          <span />
+        </div>
 
         <header className="relative z-10 mx-auto flex w-full max-w-2xl items-center justify-between gap-2 px-4 safe-t no-print">
           <button

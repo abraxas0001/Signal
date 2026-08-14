@@ -1,4 +1,6 @@
+import { useRef } from 'react'
 import * as m from 'motion/react-m'
+import { useMotionValue, useSpring, useTransform, useReducedMotion } from 'motion/react'
 import { ArrowUpRight, Heart, MessageCircle, Repeat2, Eye } from 'lucide-react'
 import { spring } from '@/lib/motion'
 
@@ -16,16 +18,50 @@ import { spring } from '@/lib/motion'
  * the figures are from the worked example the demo route already serves.
  */
 export function HeroPreview({ onOpen }: { onOpen: () => void }) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const reduced = useReducedMotion()
+
+  // Pointer position, normalised to -0.5…0.5 across the card.
+  const px = useMotionValue(0)
+  const py = useMotionValue(0)
+  // Springs rather than raw values: the card settles instead of snapping,
+  // which is the difference between a gimmick and something that feels solid.
+  const rx = useSpring(useTransform(py, [-0.5, 0.5], ['7deg', '-7deg']), {
+    stiffness: 220,
+    damping: 22,
+  })
+  const ry = useSpring(useTransform(px, [-0.5, 0.5], ['-9deg', '9deg']), {
+    stiffness: 220,
+    damping: 22,
+  })
+
+  const track = (e: React.PointerEvent) => {
+    if (reduced) return
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    px.set((e.clientX - r.left) / r.width - 0.5)
+    py.set((e.clientY - r.top) / r.height - 0.5)
+  }
+
+  const release = () => {
+    px.set(0)
+    py.set(0)
+  }
+
   return (
     <m.button
+      ref={ref}
       type="button"
       onClick={onOpen}
+      onPointerMove={track}
+      onPointerLeave={release}
       aria-label="Open a worked example report"
-      className="group relative block w-full text-left"
+      className="group relative block w-full text-left [perspective:1200px]"
       initial={{ opacity: 0, y: 22, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ ...spring.glide, delay: 0.24 }}
-      whileTap={{ scale: 0.99 }}
+      whileTap={{ scale: 0.985 }}
     >
       {/* The glow that gives the card somewhere to sit. Pure gradient, no
           blur filter — this sits behind a card on every page load. */}
@@ -38,7 +74,10 @@ export function HeroPreview({ onOpen }: { onOpen: () => void }) {
         }}
       />
 
-      <div className="card overflow-hidden p-0 shadow-[var(--e3)]">
+      <m.div
+        className="card overflow-hidden p-0 shadow-[var(--e3)] [transform-style:preserve-3d]"
+        style={{ rotateX: rx, rotateY: ry }}
+      >
         {/* Header strip */}
         <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface-2)] px-4 py-2.5">
           <span className="flex items-center gap-2">
@@ -102,7 +141,7 @@ export function HeroPreview({ onOpen }: { onOpen: () => void }) {
           See the full report
           <ArrowUpRight size={14} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
         </span>
-      </div>
+      </m.div>
     </m.button>
   )
 }
