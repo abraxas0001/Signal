@@ -1,0 +1,19 @@
+{
+  "name": "Signal",
+  "short_name": "Signal",
+  "description": "Paste a link to any public social media post and get a full intelligence readout.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07080C",
+  "theme_color": "#07080C",
+  "categories": ["news", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

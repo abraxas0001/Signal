@@ -1,0 +1,55 @@
+{
+  "name": "signal",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Signal — paste any public social media post link and get a full intelligence readout: what it says, what it means, how it landed, and what to do about it.",
+  "scripts": {
+    "dev": "netlify dev",
+    "dev:vite": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test:extract": "tsx scripts/test-extract.ts",
+    "test:sheet": "tsx scripts/test-sheet.ts",
+    "test:model": "tsx scripts/test-model.ts",
+    "compare:models": "tsx scripts/compare-models.ts",
+    "test:endpoint": "tsx scripts/test-endpoint.ts",
+    "test:schema": "tsx scripts/test-schema.ts",
+    "test:contrast": "tsx scripts/test-contrast.ts",
+    "test:ssrf": "tsx scripts/test-ssrf.ts",
+    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:contrast && npm run test:extract"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "@mozilla/readability": "^0.6.0",
+    "@number-flow/react": "^0.6.2",
+    "canvas-confetti": "^1.9.4",
+    "cheerio": "^1.2.0",
+    "clsx": "^2.1.1",
+    "linkedom": "^0.18.13",
+    "lucide-react": "^1.31.0",
+    "motion": "^13.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.6.0",
+    "undici": "^7.29.0"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^5.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.2",
+    "vite": "^8.2.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

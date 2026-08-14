@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.netlify/
+.env
+.env.local
+*.local
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+.gstack/
+
+# ── Client data — never publish ──────────────────────────────────────────────
+# The workbook names real officials, real allegations and named citizens, and
+# the derived link list reveals which posts an office is monitoring. Both are
+# the client's working intelligence, not project source. `npm run test:sheet`
+# reads sheet-links.json and says so plainly when it is absent.
+Eluru_Social_Listening.xlsx
+*.xlsx
+scripts/sheet-links.json
+

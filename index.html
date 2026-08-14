@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#07080C" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#FBFBFD" media="(prefers-color-scheme: light)" />
+
+    <title>Signal — read any social post properly</title>
+    <meta
+      name="description"
+      content="Paste a link to any public social media post and get a full readout: what it says, what it means, how it landed, and what to do about it."
+    />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Signal" />
+    <meta
+      property="og:description"
+      content="Paste a link to any public social post and get a full intelligence readout."
+    />
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Sets the theme before first paint. External, not inline, because the
+         CSP is script-src 'self' and an inline block would be refused. -->
+    <script src="/theme.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
