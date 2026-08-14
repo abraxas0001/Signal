@@ -17,8 +17,9 @@
     "test:endpoint": "tsx scripts/test-endpoint.ts",
     "test:schema": "tsx scripts/test-schema.ts",
     "test:contrast": "tsx scripts/test-contrast.ts",
+    "test:typography": "tsx scripts/test-typography.ts",
     "test:ssrf": "tsx scripts/test-ssrf.ts",
-    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:contrast && npm run test:extract"
+    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:contrast && npm run test:typography && npm run test:extract"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

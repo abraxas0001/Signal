@@ -112,7 +112,10 @@ export function Hero({
           </m.span>
         ))}
         <br />
-        <m.span variants={wordIn} className="inline-block">
+        {/* The one classic note on the screen: a high-contrast italic serif,
+            set slightly larger to hold its weight against the sans. Used here
+            and on pull quotes, nowhere else. */}
+        <m.span variants={wordIn} className="serif inline-block text-[1.08em]">
           properly.
         </m.span>
       </m.h1>
@@ -121,7 +124,9 @@ export function Hero({
         variants={listItem}
         className="mt-4 max-w-[36ch] text-base leading-relaxed text-ink-2"
       >
-        Paste a link to a public post. You get what it says, what it means, and what to do about it.
+        Paste a link to a public post. You get{' '}
+        <span className="marked font-medium text-ink">what it says, what it means</span>, and what
+        to do about it.
       </m.p>
 
       {/* ── The wire slot ───────────────────────────────────────────────────

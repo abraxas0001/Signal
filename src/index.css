@@ -1,6 +1,42 @@
 @import 'tailwindcss';
 
 /* ===========================================================================
+   Fonts — self-hosted, Latin subset only.
+
+   The earlier build ran on the system stack because a CDN webfont is a
+   render-blocking third-party round trip, which is not affordable on Indian
+   4G. Self-hosting removes that objection: these are same-origin, cached, and
+   69KB combined against a 131KB JS bundle. `swap` means text paints
+   immediately in the fallback and upgrades when the file lands, so a slow
+   connection costs polish rather than content.
+
+   Indic text never uses either of these — neither has Telugu coverage, and
+   --font-telugu keeps those runs on a stack that does.
+   =========================================================================== */
+
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/instrument-serif.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/inter.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+/* ===========================================================================
    SIGNAL - design tokens
    Direction: "Ink & Rule". A wire dispatch, not a dashboard: newsprint-warm
    ground, a serif display voice, mono for anything machine-stated, and hairline
@@ -11,12 +47,12 @@
    =========================================================================== */
 
 @theme {
-  --font-display: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-ui: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
   /* The display voice. System serifs only — a webfont is a render-blocking
      round trip this audience cannot afford on 4G. */
-  --font-serif: ui-serif, Georgia, 'Noto Serif', 'Times New Roman', serif;
+  --font-serif: 'Instrument Serif', ui-serif, Georgia, 'Noto Serif', serif;
   /* Indic runs get their own stack. Georgia has no Telugu coverage, so without
      this the browser silently substitutes and the conjuncts break. */
   --font-telugu: 'Noto Sans Telugu', 'Nirmala UI', Gautami, ui-sans-serif, system-ui, sans-serif;
@@ -447,21 +483,36 @@ h4 {
 
 .hed {
   font-family: var(--font-display);
-  font-weight: 700;
-  letter-spacing: -0.035em;
-  line-height: 1.03;
+  font-weight: 800;
+  letter-spacing: -0.038em;
+  line-height: 1.02;
+  /* Inter's optical-size and contextual alternates: the difference between a
+     headline that looks set and one that looks typed. */
+  font-feature-settings: 'cv11' 1, 'ss01' 1, 'calt' 1;
 }
 
-/* A headline that carries the accent through it, so the page has colour in its
-   most prominent element rather than only in the button. Falls back to solid
-   ink where background-clip is unsupported. */
+/**
+ * The classic voice — a high-contrast serif, used sparingly and always in
+ * italic. It appears on exactly two things: the accent word in a headline and
+ * a pull quote. Rationing it is what keeps it feeling deliberate rather than
+ * decorative.
+ */
+.serif {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: -0.012em;
+}
+
+/* Colour carried through the type itself, so the largest element on a screen
+   is also the most colourful one. */
 .hed-grad {
   background: linear-gradient(
     104deg,
     var(--text) 0%,
-    var(--text) 26%,
-    var(--accent) 72%,
-    color-mix(in oklab, var(--accent) 72%, var(--aurora-2)) 100%
+    var(--text) 24%,
+    var(--accent) 68%,
+    color-mix(in oklab, var(--accent) 62%, var(--aurora-2)) 100%
   );
   -webkit-background-clip: text;
   background-clip: text;
@@ -471,6 +522,22 @@ h4 {
   .hed-grad {
     color: var(--text);
   }
+}
+
+/* A marker stroke under a key phrase. Sits behind the baseline so descenders
+   stay legible, and it is drawn with a gradient rather than a border so it
+   reads as ink rather than as a rule. */
+.marked {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in oklab, var(--accent) 26%, transparent),
+    color-mix(in oklab, var(--aurora-2) 26%, transparent)
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 0.34em;
+  background-position: 0 88%;
+  border-radius: 2px;
+  padding: 0 0.06em;
 }
 
 .kicker {
@@ -484,18 +551,26 @@ h4 {
 
 .num {
   font-variant-numeric: tabular-nums lining-nums;
-  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-feature-settings: 'tnum' 1, 'lnum' 1, 'ss01' 1;
   letter-spacing: -0.035em;
-  font-weight: 600;
+  font-weight: 700;
+}
+
+/* Body copy earns its own refinements: real ligatures and kerning. */
+body {
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+  text-rendering: optimizeLegibility;
 }
 
 /* ---------------------------------------------------------------------------
    Indic carve-out.
 
-   Enforced here rather than left to component discipline, because an editorial
-   direction is exactly the one that reaches for a drop cap or tight tracking
-   and breaks a conjunct cluster. Telugu needs its own stack (Georgia has no
-   coverage), a looser line box, and no letter-spacing at all.
+   Enforced in CSS rather than left to component discipline, because neither
+   Latin face here has Telugu coverage and both display treatments — the
+   gradient fill, the italic serif, the tight tracking — break conjunct
+   clusters. The browser's per-glyph fallback would render the text anyway, but
+   it would pick the font, not us, and it would keep the Latin line-height,
+   which crowds the matras above and below the baseline.
    --------------------------------------------------------------------------- */
 :lang(te),
 :lang(hi),
@@ -504,26 +579,44 @@ h4 {
 :lang(ml),
 .te {
   font-family: var(--font-telugu);
-  line-height: 1.8;
+  line-height: 1.85;
   letter-spacing: 0;
   font-style: normal;
   text-transform: none;
 }
+
+/* Display treatments do not survive contact with an Indic run. */
 :lang(te) .hed,
 :lang(te).hed,
 :lang(hi) .hed,
-:lang(hi).hed {
+:lang(hi).hed,
+:lang(te) .serif,
+:lang(te).serif,
+:lang(hi) .serif,
+:lang(hi).serif {
   font-family: var(--font-telugu);
+  font-style: normal;
+  font-weight: 700;
   letter-spacing: 0;
   line-height: 1.5;
 }
-/* A gradient text fill on a conjunct cluster clips the reph and the matras. */
+
+/* A gradient fill clips the reph and the vowel signs; a marker stroke lands
+   across them. Both are removed rather than adjusted. */
 :lang(te).hed-grad,
 :lang(hi).hed-grad,
 :lang(te) .hed-grad,
 :lang(hi) .hed-grad {
   background: none;
+  -webkit-text-fill-color: currentColor;
   color: var(--text);
+}
+:lang(te) .marked,
+:lang(hi) .marked,
+:lang(te).marked,
+:lang(hi).marked {
+  background-image: none;
+  padding: 0;
 }
 
 /* The one filled container left in a document made of rules. */
