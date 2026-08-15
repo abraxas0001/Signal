@@ -115,7 +115,11 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
 
       // Intermediaries drop idle SSE connections; a comment frame keeps it warm
       // without the client having to parse anything.
-      beat = setInterval(() => write(': ping\n\n'), 15_000)
+      // Every three seconds, not fifteen: the whole request finishes in 13-16s,
+      // so a 15s beat never fired once. The ~10s silence between the model
+      // starting and the deadline was losing the report queued at the end of
+      // it — runs that streamed partials through that window delivered fine.
+      beat = setInterval(() => write(': ping\n\n'), 3_000)
 
       try {
         const keys = {
