@@ -102,11 +102,12 @@ async function guardedFetch(
   startUrl: string,
   initial: RequestInit,
   timeout: number,
+  maxRedirects = MAX_REDIRECTS,
 ): Promise<GuardedResponse> {
   let current = startUrl
   let init = initial
 
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+  for (let hop = 0; hop <= maxRedirects; hop++) {
     const target = await resolvePublicTarget(current)
 
     const agent = new Agent({
@@ -137,7 +138,7 @@ async function guardedFetch(
       })
 
       const location = res.headers.get('location')
-      if (res.status >= 300 && res.status < 400 && location) {
+      if (res.status >= 300 && res.status < 400 && location && maxRedirects > 0) {
         // Resolve relative Location values against the current URL, then loop
         // so the next hop is validated exactly like the first.
         current = new URL(location, current).toString()
@@ -171,6 +172,8 @@ export interface FetchTextResult {
   agent: AgentName
   /** Set when the SSRF boundary refused the URL, so callers can explain why. */
   blockedReason?: string
+  /** The Location header, when the caller stopped at a redirect. */
+  location?: string | null
 }
 
 /**
@@ -237,7 +240,18 @@ async function decodeBody(res: Response): Promise<{ text: string; contentType: s
 
 export async function fetchText(
   url: string,
-  opts: { agent?: AgentName; timeout?: number; headers?: Record<string, string> } = {},
+  opts: {
+    agent?: AgentName
+    timeout?: number
+    headers?: Record<string, string>
+    /**
+     * Set to 0 to stop at the first redirect and hand back the 3xx itself, with
+     * its Location header intact. Some sites answer a redirect from the edge —
+     * before any decision about what body to serve — so the Location can carry
+     * information the eventual page does not.
+     */
+    maxRedirects?: number
+  } = {},
 ): Promise<FetchTextResult> {
   const agent = opts.agent ?? 'browser'
 
@@ -254,6 +268,7 @@ export async function fetchText(
         },
       },
       opts.timeout ?? DEFAULT_TIMEOUT,
+      opts.maxRedirects,
     )
 
     const len = Number(res.headers.get('content-length') ?? 0)
@@ -266,6 +281,7 @@ export async function fetchText(
       ok: res.ok,
       status: res.status,
       url: finalUrl,
+      location: res.headers.get('location'),
       body: text.slice(0, MAX_BYTES),
       contentType,
       agent,

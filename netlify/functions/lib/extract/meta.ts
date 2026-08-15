@@ -208,6 +208,83 @@ function readFacebookComments(html: string, limit = 100): Comment[] {
   return out
 }
 
+/**
+ * Turn a /share/p/<code>/ link into the canonical permalink, from the redirect.
+ *
+ * This is the one route that survives the network production runs on. Measured
+ * from the deployed server against the same share link, in the same second:
+ *
+ *   GET /share/p/<code>/  followed, Googlebot   -> 200, 417KB, no payload
+ *   GET /share/p/<code>/  manual, Chrome UA     -> 400
+ *   GET /share/p/<code>/  manual, Googlebot     -> 302, 0KB, 130ms  ★
+ *   GET /share/p/<code>/  manual, no UA         -> 302, 0KB,  92ms  ★
+ *
+ * and that 302's Location is
+ *   /story.php?story_fbid=1537808798393401&id=100064928850532&...
+ *
+ * Both ids, for nothing: no body, under a tenth of a second. It works because a
+ * redirect is issued at the edge before any decision about what body to serve,
+ * so the gating that strips the page never comes into it. The canonical
+ * /<page>/posts/<story> form built from those ids then returns the full 967KB
+ * page from the same server.
+ *
+ * Note which User-Agent works. A browser identity gets 400 here while Googlebot
+ * and no User-Agent at all get the redirect — the opposite of what the page
+ * fetch below wants, which is why this is its own request rather than a flag on
+ * that one.
+ */
+async function resolveShareLink(url: string): Promise<string | null> {
+  if (!/facebook\.com\/share\/[a-z]\//i.test(url)) return null
+
+  try {
+    // Walk the chain a hop at a time rather than reading only the first hop.
+    //
+    // The URL reaching us is normalised to facebook.com without the www, so the
+    // first 302 is Facebook canonicalising the host and its Location still
+    // points at /share/. Reading that one and stopping — which an earlier
+    // version did — finds no ids and gives up one hop short of the answer.
+    let current = url
+    let target = ''
+    for (let hop = 0; hop < 4; hop++) {
+      const res = await fetchText(current, {
+        agent: 'google',
+        timeout: 6000,
+        // Stop at each redirect: the Location is the whole point, and following
+        // it to the end lands on the placeholder page that has none of this.
+        maxRedirects: 0,
+      })
+      const next = res.location
+      if (!next) break
+      target = new URL(next, current).toString()
+      if (!/\/share\/[a-z]\//i.test(target)) break
+      current = target
+    }
+
+    if (!target) return null
+
+    // Two shapes come back, and both are useful.
+    //
+    // Most share codes resolve to story.php with the numeric pair, which builds
+    // the canonical permalink. Others resolve straight to a vanity permalink
+    // whose id is a `pfbid…` string rather than digits — usable exactly as it
+    // is, so it only needs its tracking parameters stripped. An earlier version
+    // insisted on digits and threw that second kind away.
+    const story = /[?&]story_fbid=(\d{6,})/.exec(target)?.[1]
+    const page = /[?&]id=(\d{6,})/.exec(target)?.[1]
+    if (story && page) return `https://www.facebook.com/${page}/posts/${story}`
+
+    if (/facebook\.com\/[^/]+\/(?:posts|videos|reel|photos)\//.test(target)) {
+      const clean = new URL(target)
+      clean.search = ''
+      return clean.toString()
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Facebook
 // ─────────────────────────────────────────────────────────────────────────────
@@ -374,11 +451,24 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
   // point of the switch, and it is what the README promises it does.
   const agents = AGGRESSIVE ? (['google', 'facebook', 'twitter'] as const) : (['browser'] as const)
 
+  // Resolve a share link to its canonical permalink first, because from a
+  // datacentre the share form is answered with a placeholder and the canonical
+  // form is answered in full. Costs one redirect: no body, ~100ms.
+  const canonical = await resolveShareLink(id.canonical)
+  if (canonical) {
+    attempts.push({
+      strategy: 'facebook:share-redirect',
+      ok: true,
+      note: `share link resolved to ${canonical.replace('https://www.facebook.com', '')}`,
+    })
+  }
+  const target = canonical ?? id.canonical
+
   let best: { body: string; url: string; rich: boolean } | null = null
   let deleted = false
 
   for (const agent of agents) {
-    const res = await fetchText(id.canonical, { agent, timeout: 9000, headers })
+    const res = await fetchText(target, { agent, timeout: 9000, headers })
     const size = res.body.length
 
     if (VIDEO_NOT_FOUND.test(res.body)) {
