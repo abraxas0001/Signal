@@ -32,6 +32,12 @@ const CASES: Array<{ label: string; url: string }> = [
   { label: 'Pinterest (pin resource)', url: 'https://www.pinterest.com/pin/99360735500167749/' },
   { label: 'Snapchat Spotlight (__NEXT_DATA__)', url: 'https://www.snapchat.com/@mrblackstack1/spotlight/W7_EDlXWTBiXAEEniNoMPwAAYeXlodGxjbGJ0AZ9mPVehAZ9mPVd6AAAAAw' },
   { label: 'TikTok (embed v2) — blocked from Indian IPs', url: 'https://www.tiktok.com/@zachking/video/6749520869598481669' },
+  // Instagram, LinkedIn and Telegram had adapters but no case here, which is
+  // exactly how a reel shipped with Facebook's bootstrap JavaScript rendered
+  // as the author's name: every synthetic test used an invalid shortcode,
+  // which fails before reaching the line that was broken.
+  { label: 'Instagram reel (embed + og)', url: 'https://www.instagram.com/reel/Dbvhbzzg5Su/' },
+  { label: 'Telegram channel post', url: 'https://t.me/telegram/83' },
 ]
 
 const GREEN = '\x1b[32m'
