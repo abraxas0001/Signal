@@ -15,10 +15,16 @@ import { resolveProviders } from './lib/provider'
  * never fired: the platform always got there first. Extraction takes 2-5s of
  * that, which leaves the model 8-11s.
  *
- * 13s is the safe default for a site on Netlify's stock function timeout. It is
- * also, measured, too tight for a full analysis: this schema costs ~2,000
- * output tokens, which took Groq 19.4s and Gemini 25.7s on the same post. So
- * most runs return figures only.
+ * The default is 24s, not the 13s it started at. 13s was chosen when the
+ * platform appeared to kill the request at ~16s, and it then became the thing
+ * doing the killing: Gemini finishes this schema in 15-20s, so every run that
+ * fell through to it was cut off a few seconds short and returned figures only.
+ *
+ * A longer default is strictly safer now that the client salvages a truncated
+ * stream. If the platform allows the time, the analysis completes; if it cuts
+ * the connection first, the browser still renders the measured figures — which
+ * is exactly what the short deadline was producing anyway. There is nothing to
+ * win by giving up early.
  *
  * The fix is not in this file. Raise the function timeout in the Netlify site
  * settings (`timeout` in netlify.toml is not a supported key and does nothing),
@@ -34,7 +40,7 @@ const RESPONSE_DEADLINE_MS = (() => {
   // at 25s silently discarded a longer timeout the operator had already paid
   // for — and the slowest measured provider needs ~28s on a 5,600-character
   // post, which 25s cuts off a few seconds short of an answer.
-  return Number.isFinite(raw) && raw >= 8_000 && raw <= 60_000 ? raw : 13_000
+  return Number.isFinite(raw) && raw >= 8_000 && raw <= 60_000 ? raw : 24_000
 })()
 
 
@@ -264,6 +270,9 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
         const abort = new AbortController()
 
         let assessStarted = false
+        // Kept so the figures-only report can say what actually happened
+        // instead of always blaming the clock.
+        let modelFailure: string | null = null
 
         // Raced, not merely aborted.
         //
@@ -305,7 +314,8 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
           }).catch((err: unknown) => {
             // A real provider failure still deserves to surface, but not at the
             // cost of the report — it is recorded and the run degrades.
-            console.log(`[signal] analysis failed: ${err instanceof Error ? err.message : String(err)}`)
+            modelFailure = err instanceof Error ? err.message : String(err)
+            console.log(`[signal] analysis failed: ${modelFailure}`)
             return null
           }),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), remaining)),
@@ -330,8 +340,9 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
                 model: null,
                 durationMs: Date.now() - started,
                 heuristicOnly: false,
-                incomplete:
-                  'The figures below were measured. The written analysis did not finish in time and was left out rather than guessed at.',
+                incomplete: modelFailure
+                  ? `The figures below were measured. The written analysis could not be produced: ${modelFailure}`
+                  : 'The figures below were measured. The written analysis did not finish in time and was left out rather than guessed at.',
               },
             },
           })
