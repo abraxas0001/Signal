@@ -24,6 +24,60 @@ const empty = {
 }
 
 /**
+ * LinkedIn comment bodies, from the JSON-LD already on the page.
+ *
+ * Free: `extractLinkedIn` fetches this page for the counts, and the same
+ * `SocialMediaPosting` node carries a `comment` array. Ten of them, and only
+ * ten — no pagination exists. `?sortBy=RECENT`, `?commentsPage=2`,
+ * `?start=10&count=100`, the `/feed/update/urn:li:activity:{id}/` form and four
+ * different crawler User-Agents all return the identical ten. So on a post with
+ * 1,577 comments this is a top-comment sample, good for tone and not a census —
+ * which is why the count is reported alongside it.
+ *
+ * The author key is not stable: it is `author` on a text post and `creator` on
+ * a video post. Reading only one silently drops every name on the other kind.
+ */
+function readLinkedInComments(html: string, limit = 100): Comment[] {
+  const out: Comment[] = []
+
+  for (const block of html.matchAll(
+    /<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi,
+  )) {
+    let node: unknown
+    try {
+      node = JSON.parse((block[1] ?? '').trim())
+    } catch {
+      continue
+    }
+
+    const comments = (node as { comment?: unknown })?.comment
+    if (!Array.isArray(comments)) continue
+
+    for (const raw of comments) {
+      const c = raw as Record<string, unknown>
+      const text = typeof c['text'] === 'string' ? c['text'].trim() : ''
+      if (!text) continue
+
+      const who = (c['author'] ?? c['creator']) as Record<string, unknown> | undefined
+      const stat = c['interactionStatistic'] as Record<string, unknown> | undefined
+
+      out.push({
+        text,
+        author: typeof who?.['name'] === 'string' ? (who['name'] as string) : null,
+        likes:
+          typeof stat?.['userInteractionCount'] === 'number'
+            ? (stat['userInteractionCount'] as number)
+            : null,
+        publishedAt: typeof c['datePublished'] === 'string' ? (c['datePublished'] as string) : null,
+        isReply: false,
+      })
+      if (out.length >= limit) return out
+    }
+  }
+  return out
+}
+
+/**
  * Full article text via Readability. Loaded lazily so news-site parsing does
  * not add ~250ms of cold-start import to a YouTube or X request that will
  * never need it.
@@ -63,6 +117,7 @@ async function extractLinkedIn(id: UrlIdentity): Promise<ExtractResult> {
   }
 
   const meta = parseMetadata(res.body, res.url)
+  const commentBodies = readLinkedInComments(res.body)
   // LinkedIn publishes a schema.org SocialMediaPosting with real counts in it.
   const likes = meta.interactions.like ?? null
   const comments = meta.interactions.comment ?? null
@@ -99,7 +154,12 @@ async function extractLinkedIn(id: UrlIdentity): Promise<ExtractResult> {
   attempts.push({
     strategy: 'linkedin:json-ld',
     ok: likes != null || Boolean(meta.description),
-    note: likes != null ? `likes=${likes} comments=${comments ?? '—'}` : 'metadata only',
+    note:
+      likes != null
+        ? `likes=${likes} comments=${comments ?? '—'}${
+            commentBodies.length ? ` · ${commentBodies.length} comment bodies` : ''
+          }`
+        : 'metadata only',
   })
 
   const text = meta.articleText ?? meta.description
@@ -114,6 +174,7 @@ async function extractLinkedIn(id: UrlIdentity): Promise<ExtractResult> {
     confidence: likes != null ? 'high' : text ? 'medium' : 'low',
     snapshot: {
       platform: 'LinkedIn',
+      ...(commentBodies.length ? { comments: commentBodies } : {}),
       postType: 'Original Post',
       publishedAt: meta.publishedAt,
       author: {

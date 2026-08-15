@@ -151,35 +151,76 @@ interface InnerTubeNext {
  * (`commentViewModel.commentViewModel.commentKey`); reading it one level up
  * returns undefined and yields zero comments rather than an error.
  */
+/**
+ * How many comments to read, and how long to spend reading them.
+ *
+ * A hundred is what makes the public-narrative reading a measurement rather
+ * than an impression, and it is five sequential requests at roughly 3.1s. That
+ * is real money against a request the platform closes at about sixteen
+ * seconds, so the budget is the binding constraint, not the target: whatever
+ * arrived when it expires is what gets analysed. The first twenty are free —
+ * that request was already being made for the count alone.
+ */
+const COMMENT_TARGET = 100
+const COMMENT_BUDGET_MS = 3_000
+
 async function fetchExactComments(
   videoId: string,
+  target = COMMENT_TARGET,
+  budgetMs = COMMENT_BUDGET_MS,
 ): Promise<{ count: number | null; comments: Comment[] }> {
   const empty = { count: null, comments: [] as Comment[] }
-  const continuation = commentsContinuation(videoId)
-  if (!continuation) return empty
+  let token: string | null = commentsContinuation(videoId)
+  if (!token) return empty
 
-  const res = await fetchJson<InnerTubeNext>(
-    'https://www.youtube.com/youtubei/v1/next?prettyPrint=false',
-    {
-      timeout: 6000,
-      // clientVersion is load-bearing: without it InnerTube answers 400
-      // "failedPrecondition". No API key and no User-Agent are required.
-      json: {
-        context: { client: { clientName: 'WEB', clientVersion: '2.20240726.00.00', hl: 'en', gl: 'US' } },
-        continuation,
+  const started = Date.now()
+  const out: ReadComment[] = []
+  const seen = new Set<string>()
+  let count: number | null = null
+
+  // Twenty per request is a hard ceiling — there is no page-size parameter, and
+  // the mobile client that returns more returns no bodies at all. So a hundred
+  // comments is five hops, and the loop stops on whichever of target, budget or
+  // end-of-thread arrives first rather than on hop count alone.
+  while (token && out.length < target && Date.now() - started < budgetMs) {
+    const res = await fetchJson<InnerTubeNext>(
+      'https://www.youtube.com/youtubei/v1/next?prettyPrint=false',
+      {
+        timeout: 6000,
+        // clientVersion is load-bearing: without it InnerTube answers 400
+        // "failedPrecondition". No API key and no User-Agent are required.
+        json: {
+          context: {
+            client: { clientName: 'WEB', clientVersion: '2.20240726.00.00', hl: 'en', gl: 'US' },
+          },
+          continuation: token,
+        },
       },
-    },
-  )
+    )
+    if (!res.data) break
 
-  const text =
-    res.data?.onResponseReceivedEndpoints?.[0]?.reloadContinuationItemsCommand
-      ?.continuationItems?.[0]?.commentsHeaderRenderer?.countText?.runs?.[0]?.text
+    if (count == null) {
+      const text =
+        res.data.onResponseReceivedEndpoints?.[0]?.reloadContinuationItemsCommand
+          ?.continuationItems?.[0]?.commentsHeaderRenderer?.countText?.runs?.[0]?.text
+      const digits = (text ?? '').replace(/\D/g, '')
+      const n = digits ? Number(digits) : NaN
+      count = Number.isSafeInteger(n) ? n : null
+    }
 
-  const digits = (text ?? '').replace(/\D/g, '')
-  const n = digits ? Number(digits) : NaN
-  const count = Number.isSafeInteger(n) ? n : null
+    const page = readComments(res.data)
+    if (!page.length) break
+    for (const c of page) {
+      if (out.length >= target) break
+      if (seen.has(c.id)) continue
+      seen.add(c.id)
+      out.push(c)
+    }
 
-  return { count, comments: readComments(res.data) }
+    token = nextCommentsToken(res.data)
+  }
+
+  return { count, comments: out }
 }
 
 /**
@@ -191,7 +232,46 @@ async function fetchExactComments(
  * absence of content, so absence is what this returns — an empty list, never a
  * throw, because a post with no readable comments is a normal result.
  */
-function readComments(data: unknown): Comment[] {
+
+/**
+ * The token for the next page of comments.
+ *
+ * Two traps here. The continuation lives in `onResponseReceivedEndpoints`, but
+ * under a different command on page one (`reloadContinuationItemsCommand`) than
+ * on every page after (`appendContinuationItemsAction`), so both have to be
+ * read. And each comment thread carries its own `continuationItemRenderer` for
+ * "show replies" — those have a `button`. Taking the first match walks into a
+ * reply thread instead of the next page; the page token is the one without it.
+ */
+function nextCommentsToken(data: unknown): string | null {
+  const endpoints = (data as { onResponseReceivedEndpoints?: unknown[] })?.onResponseReceivedEndpoints
+  if (!Array.isArray(endpoints)) return null
+
+  for (const ep of endpoints) {
+    const cmd =
+      (ep as Record<string, Record<string, unknown>>)?.['reloadContinuationItemsCommand'] ??
+      (ep as Record<string, Record<string, unknown>>)?.['appendContinuationItemsAction']
+    const items = cmd?.['continuationItems']
+    if (!Array.isArray(items)) continue
+
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i] as Record<string, Record<string, unknown>> | undefined
+      const renderer = item?.['continuationItemRenderer']
+      if (!renderer || renderer['button']) continue
+      const token = (
+        (renderer['continuationEndpoint'] as Record<string, Record<string, unknown>>)?.[
+          'continuationCommand'
+        ] as Record<string, unknown> | undefined
+      )?.['token']
+      if (typeof token === 'string' && token) return token
+    }
+  }
+  return null
+}
+
+type ReadComment = Comment & { id: string }
+
+function readComments(data: unknown): ReadComment[] {
   if (!data || typeof data !== 'object') return []
 
   // Text, author and like count live in a flat mutation list, keyed.
@@ -224,7 +304,7 @@ function readComments(data: unknown): Comment[] {
   const entities = ordered.length ? ordered : [...byKey.values()]
 
   return entities
-    .map((entity): Comment | null => {
+    .map((entity): ReadComment | null => {
       const content = entity['properties'] as Record<string, unknown> | undefined
       const body = (content?.['content'] as Record<string, unknown> | undefined)?.['content']
       if (typeof body !== 'string' || !body.trim()) return null
@@ -239,6 +319,7 @@ function readComments(data: unknown): Comment[] {
       const likes = typeof rawLikes === 'string' ? parseCount(rawLikes.trim()) : null
 
       return {
+        id: typeof content?.['commentId'] === 'string' ? (content['commentId'] as string) : body,
         text: body,
         author: typeof author?.['displayName'] === 'string' ? (author['displayName'] as string) : null,
         likes,
@@ -248,7 +329,7 @@ function readComments(data: unknown): Comment[] {
         isReply: Number(content?.['replyLevel'] ?? 0) > 0,
       }
     })
-    .filter((c): c is Comment => c !== null)
+    .filter((c): c is ReadComment => c !== null)
 }
 
 /**
