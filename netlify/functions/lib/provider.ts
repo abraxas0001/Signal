@@ -41,6 +41,13 @@ export interface Provider {
    * what the model could theoretically emit.
    */
   maxTokens: number
+  /**
+   * The provider's tokens-per-minute ceiling, where it has one that is counted
+   * per request rather than as a rolling budget. Groq refuses outright when
+   * input + max_tokens exceeds this, so the output reserve has to be sized
+   * against the actual prompt instead of being a constant.
+   */
+  tpmLimit?: number
 }
 
 interface Candidate {
@@ -91,13 +98,19 @@ const CANDIDATES: Candidate[] = [
       // The free tier allows 12,000 tokens per minute and counts max_tokens
       // against it up front. The prompt and inlined schema are ~5,000, so this
       // leaves room for the request to be accepted at all.
-      // Groq counts max_tokens against its tokens-per-minute allowance BEFORE
-      // generating, so an inflated ceiling is spent whether or not it is used.
-      // Reserving 4096 against a 12,000/min budget made the request fail
-      // outright ("too large for its tokens-per-minute allowance") while the
-      // real output measured 2,129 tokens. 3072 keeps ~40% headroom over that
-      // and leaves room for a second request inside the same minute.
-      maxTokens: Number(process.env['LLM_MAX_TOKENS']) || 3072,
+      // Groq counts max_tokens against the allowance BEFORE generating, so an
+      // inflated ceiling is spent whether or not it is used — and the ceiling
+      // for this model is 8,000/min, not the 12,000 the llama models get.
+      //
+      // The arithmetic that has to hold: the schema in response_format is
+      // ~2,100 input tokens, the prompt is capped at ~2,600 (PROMPT_LIMIT in
+      // analyse.ts), and this reserve is the third term. 2,100 + 2,600 + 2,900
+      // = 7,600, inside 8,000. Measured output is ~2,100 tokens, and 2,048 was
+      // not enough — it returned "Failed to generate JSON" — so this is real
+      // headroom, not slack.
+      maxTokens: Number(process.env['LLM_MAX_TOKENS']) || 3400,
+      // Measured on this key: 8,000 for gpt-oss, 12,000 for the llama models.
+      tpmLimit: 8_000,
     }),
   },
   {

@@ -53,6 +53,29 @@ Assess whether the post looks false, but be careful. An angry post is not a fals
 const ANALYSIS_TOOL_NOTE = `Return your analysis in the required structure. Fill every field — use empty strings and empty arrays rather than omitting anything.`
 
 /**
+ * The prompt has a hard size budget, because the provider does.
+ *
+ * Groq allows 8,000 tokens per minute on this model and counts the request
+ * whole: the JSON schema in response_format is ~2,100 input tokens on its own,
+ * the reserved output ceiling is counted before a word is generated, and the
+ * prompt is the only part left to control. A 5,602-character LinkedIn post
+ * pushed one request to 8,210 against the 8,000 limit and was refused outright
+ * — in 392ms, with no analysis at all.
+ *
+ * So the parts that can grow without bound are clipped: the post body, the
+ * transcript, and the comment block. Clipping is announced in the text rather
+ * than done silently, so the model knows it is reading an excerpt and does not
+ * report on the missing part as if it were absent.
+ */
+const POST_TEXT_LIMIT = 3_500
+const PROMPT_LIMIT = 9_000
+
+function clip(text: string, limit: number): string {
+  if (text.length <= limit) return text
+  return `${text.slice(0, limit)}\n[…trimmed for length; ${text.length - limit} more characters not shown]`
+}
+
+/**
  * Render the comment section of the prompt.
  *
  * Two problems have to be solved at once here.
@@ -77,7 +100,7 @@ export function renderComments(comments: Comment[] | undefined): string[] {
   const PER_COMMENT = 240
   // Trimmed from 12,000: the comment block is prompt input, and prompt input
   // is latency, against a window the platform closes at ~16s.
-  const TOTAL = 5_000
+  const TOTAL = 2_400
   // How many reach the model — not how many we keep.
   //
   // Measured on the deployed site: 4 comments finished the full analysis in
@@ -86,7 +109,7 @@ export function renderComments(comments: Comment[] | undefined): string[] {
   // "Resentment" into something else, it costs the user the written analysis
   // entirely. The full set still reaches the report and the spreadsheet — this
   // caps only what is spent on judgement.
-  const TO_MODEL = 25
+  const TO_MODEL = 20
 
   const ranked = [...comments].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
 
@@ -163,10 +186,10 @@ function buildUserContent(
   if (s.content.title) lines.push('', 'TITLE', s.content.title)
 
   lines.push('', 'POST TEXT (verbatim, original script)')
-  lines.push(s.content.text?.trim() || '(no text was retrievable)')
+  lines.push(clip(s.content.text?.trim() || '(no text was retrievable)', POST_TEXT_LIMIT))
 
   if (s.content.transcript) {
-    lines.push('', 'TRANSCRIPT', s.content.transcript.slice(0, 8000))
+    lines.push('', 'TRANSCRIPT', clip(s.content.transcript, 3_000))
   }
 
   lines.push(...renderComments(s.comments))
@@ -208,7 +231,17 @@ function buildUserContent(
   }
 
   lines.push('', ANALYSIS_TOOL_NOTE)
-  return lines.join('\n')
+
+  // Last guard: the caps above bound the parts, this bounds the whole. A post
+  // with a long body AND many hashtags AND many entities still adds up, and
+  // one token over is not a degraded answer — it is a 413 and no answer.
+  const prompt = lines.join('\n')
+  if (prompt.length <= PROMPT_LIMIT) return prompt
+
+  // Keep the head: platform, author, counts and the post itself. The tail is
+  // supporting detail, and the instruction is re-appended so it is never what
+  // gets cut.
+  return `${prompt.slice(0, PROMPT_LIMIT)}\n[trimmed to fit the model's per-request budget]\n\n${ANALYSIS_TOOL_NOTE}`
 }
 
 /** Beta flag that gates the `fallbacks: "default"` scalar form. */
