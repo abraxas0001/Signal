@@ -74,8 +74,10 @@ export function renderComments(comments: Comment[] | undefined): string[] {
   if (!comments?.length) return []
 
   const FENCE = '<<<COMMENTS_A7F3>>>'
-  const PER_COMMENT = 320
-  const TOTAL = 12_000
+  const PER_COMMENT = 240
+  // Trimmed from 12,000: the comment block is prompt input, and prompt input
+  // is latency, against a window the platform closes at ~16s.
+  const TOTAL = 5_000
 
   const ranked = [...comments].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
 

@@ -8,11 +8,19 @@ import { resolveProviders } from './lib/provider'
  * How long the whole request may take before we stop and return what we have.
  *
  * Netlify kills a synchronous function at its execution limit by dropping the
- * connection — the client sees a truncated stream, not an error. Finishing
- * ourselves a few seconds early is the difference between a partial report and
- * no report.
+ * connection — the client sees a truncated stream, not an error frame.
+ *
+ * This number is measured, not chosen. Against the deployed site the kill
+ * lands at 16.4s, 17.2s, 17.3s and 17.6s across four runs, so a 22s deadline
+ * never fired: the platform always got there first. Extraction takes 2-5s of
+ * that, which leaves the model 8-11s.
+ *
+ * If that proves too tight for a full analysis, the fix is to raise the
+ * function timeout in the Netlify site settings — `timeout` in netlify.toml is
+ * not a supported key and does nothing. Lowering this number further would
+ * only trade a truncated stream for an emptier report.
  */
-const RESPONSE_DEADLINE_MS = 22_000
+const RESPONSE_DEADLINE_MS = 13_000
 
 
 /**
