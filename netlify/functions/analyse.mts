@@ -37,10 +37,8 @@ import { resolveProviders } from './lib/provider'
  */
 const RESPONSE_DEADLINE_MS = (() => {
   const raw = Number(process.env['ANALYSIS_DEADLINE_MS'])
-  // Clamped: below ~8s the model never finishes and every run is figures-only;
-  // above 25s Netlify's own ceiling arrives first and the deadline is moot.
-  // The ceiling belongs to the function timeout configured on the site, not to
-  // a number picked in this file. The floor stays at 8s because below that
+  // The real ceiling belongs to the function timeout configured on the site,
+  // not to a number picked in this file. The 8s floor is because below that
   // nothing ever finishes; the 60s bound is only a guard against a typo.
   return Number.isFinite(raw) && raw >= 8_000 && raw <= 60_000 ? raw : 40_000
 })()
