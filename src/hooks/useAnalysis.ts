@@ -266,11 +266,45 @@ export function useAnalysis() {
       }
 
       // The stream ended without a report or an explicit error.
-      setState((s) =>
-        s.status === 'running'
-          ? { ...s, status: 'error', error: 'The analysis stopped before it finished.' }
-          : s,
-      )
+      //
+      // On the deployed site this happens when the function hits its execution
+      // limit: the connection is dropped mid-stream, with no error frame. But
+      // by then the snapshot has almost always arrived — the platform fetch
+      // finishes in about two seconds, and it is the model that runs long.
+      //
+      // Discarding it to show "analysis failed" was the single most misleading
+      // thing this app did: it reported a failure to extract over an extraction
+      // that had already succeeded, and threw away counts the user could have
+      // exported. Keep them, and say plainly which half is missing.
+      setState((s) => {
+        if (s.status !== 'running') return s
+        if (!s.snapshot) {
+          return { ...s, status: 'error', error: 'The analysis stopped before it finished.' }
+        }
+        return {
+          ...s,
+          status: 'done',
+          progress: 1,
+          stages: s.stages.map((x) =>
+            x.state === 'pending' || x.state === 'active'
+              ? { ...x, state: 'skipped' as StageState }
+              : x,
+          ),
+          report: {
+            id: `rep_local_${Date.now().toString(36)}`,
+            createdAt: new Date().toISOString(),
+            snapshot: s.snapshot,
+            analysis: null,
+            meta: {
+              model: null,
+              durationMs: 0,
+              heuristicOnly: false,
+              incomplete:
+                'The figures below were measured from the post. The written analysis did not finish in time, so it is left out rather than guessed at — you can run it again for the interpretation.',
+            },
+          },
+        }
+      })
     } catch (err) {
       if (controller.signal.aborted) return
       setState((s) => ({

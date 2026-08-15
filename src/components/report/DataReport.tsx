@@ -8,6 +8,7 @@ import {
   MessageCircle,
   Repeat2,
   Users,
+  Download,
 } from 'lucide-react'
 import type { Metric, PostSnapshot, Report } from '@shared/types'
 import { Button, Card, Chip, SectionTitle } from '../ui'
@@ -15,6 +16,7 @@ import { StatTile } from '../charts'
 import { PostCard } from './PostCard'
 import { ExtractionNotice } from './ExtractionNotice'
 import { absoluteDate, compact, relativeTime } from '@/lib/utils'
+import { downloadWorkbook } from '@/lib/export'
 import { fadeUp, listStagger } from '@/lib/motion'
 
 /**
@@ -58,6 +60,19 @@ export function DataReport({
       initial="hidden"
       animate="show"
     >
+      {/* The run returned figures but no interpretation. Say why, once, at the
+          top — otherwise the empty analysis reads as a broken report. */}
+      {report.meta.incomplete && (
+        <m.div variants={fadeUp}>
+          <Card>
+            <div className="flex flex-wrap items-center gap-2">
+              <Chip tone="warning">Figures only</Chip>
+            </div>
+            <p className="mt-2 text-sm text-ink-2">{report.meta.incomplete}</p>
+          </Card>
+        </m.div>
+      )}
+
       {/* ── What we measured ────────────────────────────────────────────── */}
       <m.div variants={fadeUp}>
         <Card tone="accent" className="grain">
@@ -172,9 +187,18 @@ export function DataReport({
 
       {/* ── Sticky action ───────────────────────────────────────────────── */}
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--border)] bg-[var(--surface-1)]/92 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl">
-        <div className="mx-auto max-w-2xl">
-          <Button onClick={onReset} className="w-full">
+        <div className="mx-auto flex max-w-2xl gap-2">
+          <Button onClick={onReset} className="flex-1">
             Read another post
+          </Button>
+          <Button
+            onClick={() => void downloadWorkbook([report])}
+            variant="outline"
+            aria-label="Download this report as a spreadsheet"
+            className="shrink-0 px-4"
+          >
+            <Download size={16} />
+            CSV
           </Button>
         </div>
       </div>

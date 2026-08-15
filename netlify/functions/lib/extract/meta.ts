@@ -1,8 +1,8 @@
-import type { MediaItem, Metric, PostSnapshot } from '../../../../shared/types'
+import type { Comment, MediaItem, Metric, PostSnapshot } from '../../../../shared/types'
 import type { UrlIdentity } from '../platform'
 import { fetchText, fetchJson, ALLOW_CRAWLER_UA } from '../fetcher'
 import { parseMetadata, parseCount } from '../metadata'
-import { readJsonStringField } from './json-scan'
+import { readJsonStringField, decodeEntities } from './json-scan'
 import type { ExtractContext, ExtractResult } from './types'
 
 /**
@@ -140,6 +140,72 @@ async function fetchPageFollowers(ref: string): Promise<number | null> {
   // — running this through parseCount would misread a dot as a K/M separator.
   const n = Number(raw.replace(/,/g, ''))
   return Number.isSafeInteger(n) && n > 0 && n < 5e9 ? n : null
+}
+
+/**
+ * Comment bodies, out of the payload the adapter has already downloaded.
+ *
+ * These cost nothing: the Googlebot fetch that carries the reaction counts also
+ * carries `"body":{"text":...}` nodes for the comments Facebook chose to serve.
+ * The adapter used to hold all of that in memory and throw it away.
+ *
+ * YIELD IS NOT UNIFORM, and the difference matters more than the parsing:
+ *   - `/posts/` permalinks serve a real slice (4 of 4, 5 of 7, 11 of 31).
+ *   - `/reel/` and `/videos/` pages serve EXACTLY TWO, whatever the total.
+ *     Measured at totals of 3, 15, 30, 109 and 361 — the 361-comment reel
+ *     yields two. Requesting the alternate /videos/ permalink of the same reel
+ *     returns byte-identical comments, so a second request buys nothing.
+ *
+ * That cap is why the count is reported alongside: two comments out of 361 is a
+ * sample, and presenting it as the reaction to the post would be a
+ * misrepresentation dressed up as data.
+ *
+ * Paging further is not possible without guessing a persisted query id. The
+ * cursors are in the page and `has_next_page` is true, but no `doc_id` appears
+ * anywhere in the payload, and guessing one would make an invented number look
+ * like a measurement.
+ */
+function readFacebookComments(html: string, limit = 100): Comment[] {
+  const MARK = '"body":{"text":"'
+  const out: Comment[] = []
+  const seen = new Set<string>()
+
+  let at = html.indexOf(MARK)
+  while (at !== -1 && out.length < limit) {
+    const text = readJsonStringField(html, 'text', at)
+    const next = html.indexOf(MARK, at + MARK.length)
+
+    if (text && text.trim() && !seen.has(text)) {
+      seen.add(text)
+      // Author, time and reactions sit after the body inside the same node.
+      // Bounded so a comment with no author cannot borrow the next one's.
+      const windowEnd = next === -1 ? at + 2400 : Math.min(at + 2400, next)
+      const prev = out.length ? html.lastIndexOf(MARK, at - 1) : -1
+      const windowStart = prev === -1 ? Math.max(0, at - 1200) : Math.max(prev + MARK.length, at - 1200)
+      const win = html.slice(windowStart, windowEnd)
+
+      const authorAt = win.indexOf('"author":{')
+      const author = authorAt === -1 ? null : readJsonStringField(win, 'name', authorAt)
+
+      const unix = /"created_time":(\d{9,11})/.exec(win)?.[1]
+      // Facebook writes this three different ways in the same payload.
+      const likes =
+        parseCount(/"reaction_count":\{[^}]*?"count":(\d+)/.exec(win)?.[1] ?? null) ??
+        parseCount(/"reaction_count":(\d+)/.exec(win)?.[1] ?? null) ??
+        parseCount(/"count_reduced":"([^"]{1,12})"/.exec(win)?.[1] ?? null) ??
+        parseCount(/"i18n_reaction_count":"([^"]{1,12})"/.exec(win)?.[1] ?? null)
+
+      out.push({
+        text,
+        author: author && author.length <= 80 ? author : null,
+        likes,
+        publishedAt: unix ? new Date(Number(unix) * 1000).toISOString() : null,
+        isReply: false,
+      })
+    }
+    at = next
+  }
+  return out
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,6 +474,7 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
 
   const fromTitle = readOgTitleCounts(meta.title)
   const fromJson = readAnchoredCounts(best.body, storyId)
+  const commentBodies = readFacebookComments(best.body)
 
   // The JSON is authoritative everywhere, including video. og:title is a cached
   // crawler card and goes stale: on one reel it advertised "5.3K views · 1.7K
@@ -424,7 +491,13 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
     strategy: 'facebook:counts',
     ok: gotCounts,
     note: gotCounts
-      ? `reactions=${reactions ?? '—'} comments=${comments ?? '—'} shares=${shares ?? '—'} views=${views ?? '—'}`
+      ? `reactions=${reactions ?? '—'} comments=${comments ?? '—'} shares=${shares ?? '—'} views=${views ?? '—'}${
+          commentBodies.length
+            ? ` · ${commentBodies.length} comment ${commentBodies.length === 1 ? 'body' : 'bodies'}${
+                comments != null ? ` of ${comments}` : ''
+              }`
+            : ''
+        }`
       : fromJson.anchored
         ? 'this post carries no engagement counters'
         : 'could not locate this post inside the page payload',
@@ -485,6 +558,7 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
 
   const snapshot: Partial<PostSnapshot> = {
     platform: 'Facebook',
+    ...(commentBodies.length ? { comments: commentBodies } : {}),
     postType: isVideo ? 'Video' : 'Original Post',
     publishedAt: creationTime
       ? new Date(Number(creationTime) * 1000).toISOString()
@@ -645,10 +719,13 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
     username = readEmbedUsername(embed.body)
     const capMatch = /<div class="Caption">([\s\S]*?)<\/div>/.exec(embed.body)?.[1]
     if (capMatch) {
-      caption = capMatch
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
+      caption =
+        decodeEntities(
+          capMatch
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim(),
+        ) ?? ''
       // The embed prints the username as the first token of the caption block.
       // Strip it so the post text is the post text.
       if (username && caption.startsWith(username)) {

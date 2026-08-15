@@ -249,3 +249,45 @@ export function readJsonStringField(source: string, key: string, from = 0): stri
   if (i >= source.length) return null
   return decodeJsonString(source.slice(at + marker.length, i))
 }
+
+/**
+ * Decode HTML entities in text pulled out of markup.
+ *
+ * Instagram's embed prints the caption HTML-escaped, so a post reading
+ * "'अभिव्यक्ति की आजादी'" arrived as "&#039;अभिव्यक्ति की आजादी&#039;" and was
+ * shown to the user, and handed to the model, exactly like that. Stripping
+ * tags is not enough — the entities have to come out too.
+ */
+export function decodeEntities(input: string | null | undefined): string | null {
+  if (input == null) return null
+  if (!input.includes('&')) return input
+
+  const named: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+    hellip: '…',
+    mdash: '—',
+    ndash: '–',
+    rsquo: '’',
+    lsquo: '‘',
+    ldquo: '“',
+    rdquo: '”',
+  }
+
+  return input.replace(/&(#x?[0-9a-fA-F]+|\w+);/g, (whole, body: string) => {
+    if (body.startsWith('#')) {
+      const code = body[1] === 'x' || body[1] === 'X'
+        ? parseInt(body.slice(2), 16)
+        : parseInt(body.slice(1), 10)
+      // Codepoints above the BMP are legitimate here — emoji in captions.
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : whole
+    }
+    return named[body.toLowerCase()] ?? whole
+  })
+}

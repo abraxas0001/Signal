@@ -1,13 +1,14 @@
 import { useEffect, useRef } from 'react'
 import * as m from 'motion/react-m'
 import { AnimatePresence } from 'motion/react'
-import { Trash2, X } from 'lucide-react'
+import { Download, Trash2, X } from 'lucide-react'
 import type { HistoryEntry } from '@/hooks/useHistory'
 import { Button, Chip, type ChipTone } from './ui'
 import { SENTIMENT_TONE } from '@shared/taxonomy'
 import type { Sentiment } from '@shared/taxonomy'
 import { ease, listItem, listStagger, spring } from '@/lib/motion'
 import { relativeTime } from '@/lib/utils'
+import { downloadWorkbook } from '@/lib/export'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 const TONE_TO_CHIP: Record<string, ChipTone> = {
@@ -152,9 +153,22 @@ export function HistoryPanel({
               </m.ul>
 
               {entries.length > 0 && (
-                <Button variant="ghost" onClick={onClear} className="mt-4 w-full">
-                  Clear all
-                </Button>
+                <div className="mt-4 space-y-2">
+                  {/* Exporting the whole history is the one that matters: it
+                      turns a session of one-off lookups into the weekly sheet
+                      this team already files. */}
+                  <Button
+                    variant="outline"
+                    onClick={() => void downloadWorkbook(entries.map((e) => e.report))}
+                    className="w-full"
+                  >
+                    <Download size={15} />
+                    Export all {entries.length} as CSV
+                  </Button>
+                  <Button variant="ghost" onClick={onClear} className="w-full">
+                    Clear all
+                  </Button>
+                </div>
               )}
             </div>
           </m.aside>

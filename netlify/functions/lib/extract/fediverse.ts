@@ -1,4 +1,4 @@
-import type { MediaItem, Metric, PostSnapshot } from '../../../../shared/types'
+import type { Comment, MediaItem, Metric, PostSnapshot } from '../../../../shared/types'
 import type { UrlIdentity } from '../platform'
 import { fetchJson } from '../fetcher'
 import type { ExtractContext, ExtractResult } from './types'
@@ -81,6 +81,49 @@ interface BskyPost {
 
 interface BskyThread {
   thread?: { $type?: string; post?: BskyPost }
+}
+
+/**
+ * Direct replies to a Bluesky post, as comments.
+ *
+ * Only `thread.replies[]` is read, never the nested `replies` inside each of
+ * them: those are commenters talking to each other, which is a different thing
+ * from the audience reacting to the post, and folding them in would inflate the
+ * apparent volume of reaction.
+ *
+ * Blocked and deleted replies come back as marker objects carrying no record,
+ * so anything without text is skipped rather than rendered as a blank comment.
+ */
+function readBskyReplies(thread: unknown): Comment[] {
+  const replies = (thread as { replies?: unknown[] } | undefined)?.replies
+  if (!Array.isArray(replies)) return []
+
+  const out: Comment[] = []
+  for (const node of replies) {
+    const post = (node as { post?: Record<string, unknown> })?.post
+    const record = post?.['record'] as Record<string, unknown> | undefined
+    const text = record?.['text']
+    if (typeof text !== 'string' || !text.trim()) continue
+
+    const authorRec = post?.['author'] as Record<string, unknown> | undefined
+    const handle = authorRec?.['handle']
+    const display = authorRec?.['displayName']
+
+    out.push({
+      text,
+      author:
+        typeof display === 'string' && display.trim()
+          ? display
+          : typeof handle === 'string'
+            ? handle
+            : null,
+      likes: typeof post?.['likeCount'] === 'number' ? (post['likeCount'] as number) : null,
+      publishedAt:
+        typeof record?.['createdAt'] === 'string' ? (record['createdAt'] as string) : null,
+      isReply: false,
+    })
+  }
+  return out
 }
 
 /** Pull tags and mentions out of the richtext facets rather than re-parsing text. */
@@ -186,9 +229,14 @@ export async function extractBluesky(
 
   // The thread carries the post and its counts; the profile carries followers.
   // They are independent, so fetch them together.
+  //
+  // depth=1 rather than 0: one level down is the direct replies, which is the
+  // public reaction we want, and it costs nothing — same request, same round
+  // trip, a larger body. Going deeper would pull in replies-to-replies, which
+  // are conversations between commenters rather than reactions to the post.
   const [threadRes, profileRes] = await Promise.all([
     fetchJson<BskyThread>(
-      `${BSKY}/app.bsky.feed.getPostThread?uri=${encodeURIComponent(atUri)}&depth=0&parentHeight=0`,
+      `${BSKY}/app.bsky.feed.getPostThread?uri=${encodeURIComponent(atUri)}&depth=1&parentHeight=0`,
       { headers: HEADERS, timeout: 8000 },
     ),
     fetchJson<BskyProfile>(`${BSKY}/app.bsky.actor.getProfile?actor=${encodeURIComponent(did)}`, {
@@ -197,12 +245,15 @@ export async function extractBluesky(
     }),
   ])
 
+  const replies = readBskyReplies(threadRes.data?.thread)
   const post = threadRes.data?.thread?.post
   const ok = Boolean(post?.record?.text != null || post?.embed)
   attempts.push({
     strategy: 'bluesky:getPostThread',
     ok,
-    note: ok ? 'likes, reposts, replies, quotes' : `HTTP ${threadRes.status}`,
+    note: ok
+      ? `likes, reposts, replies, quotes${replies.length ? ` + ${replies.length} reply bodies` : ''}`
+      : `HTTP ${threadRes.status}`,
   })
 
   if (!ok || !post) {
@@ -234,6 +285,7 @@ export async function extractBluesky(
 
   const snapshot: Partial<PostSnapshot> = {
     platform: 'Bluesky',
+      ...(replies.length ? { comments: replies } : {}),
     // Bluesky threads a reply to a parent; the sheet treats those differently.
     postType: post.record?.reply ? 'Comment' : 'Original Post',
     publishedAt: post.record?.createdAt ?? null,
@@ -369,6 +421,16 @@ function htmlToText(html: string): string {
     .trim()
 }
 
+interface MastoContext {
+  descendants?: Array<{
+    content?: string
+    in_reply_to_id?: string | null
+    favourites_count?: number
+    created_at?: string
+    account?: { acct?: string; display_name?: string }
+  }>
+}
+
 export async function extractMastodon(
   id: UrlIdentity,
   _ctx: ExtractContext,
@@ -381,17 +443,42 @@ export async function extractMastodon(
     return { ok: false, attempts: [{ strategy: 'mastodon:parse-url', ok: false, note: 'No status id' }] }
   }
 
+  // The status and its replies are independent reads, so they overlap — the
+  // context call adds a measured ~220ms of wall clock rather than its own ~450.
+  const contextPromise = fetchJson<MastoContext>(
+    `https://${host}/api/v1/statuses/${statusId}/context`,
+    { headers: HEADERS, timeout: 7000 },
+  ).catch(() => null)
+
   const res = await fetchJson<MastoStatus>(`https://${host}/api/v1/statuses/${statusId}`, {
     headers: HEADERS,
     timeout: 8000,
   })
+
+  // Only direct replies to this status. `descendants` is the whole subtree, so
+  // it also contains commenters replying to each other — a different thing from
+  // the audience reacting to the post, and counting it as reaction would
+  // overstate the volume.
+  const context = await contextPromise
+  const replies: Comment[] = (context?.data?.descendants ?? [])
+    .filter((d) => d?.in_reply_to_id === statusId)
+    .map((d) => ({
+      text: htmlToText(d.content ?? ''),
+      author: d.account?.display_name?.trim() || d.account?.acct || null,
+      likes: typeof d.favourites_count === 'number' ? d.favourites_count : null,
+      publishedAt: d.created_at ?? null,
+      isReply: false,
+    }))
+    .filter((c) => c.text.trim().length > 0)
 
   const raw = res.data
   const ok = Boolean(raw && !raw.error && (raw.content != null || raw.media_attachments?.length))
   attempts.push({
     strategy: 'mastodon:api-v1-statuses',
     ok,
-    note: ok ? 'favourites, boosts, replies, quotes' : raw?.error ?? `HTTP ${res.status}`,
+    note: ok
+      ? `favourites, boosts, replies, quotes${replies.length ? ` + ${replies.length} reply bodies` : ''}`
+      : raw?.error ?? `HTTP ${res.status}`,
   })
 
   // Not every /@user/12345 URL is a Mastodon instance — the router detects this
@@ -430,6 +517,7 @@ export async function extractMastodon(
 
   const snapshot: Partial<PostSnapshot> = {
     platform: 'Mastodon',
+    ...(replies.length ? { comments: replies } : {}),
     postType: boosted ? 'Repost / Share' : s.in_reply_to_id ? 'Comment' : 'Original Post',
     publishedAt: s.created_at ?? null,
     author: {

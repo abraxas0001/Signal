@@ -5,6 +5,17 @@ import { analysePost } from './lib/analyse'
 import { resolveProviders } from './lib/provider'
 
 /**
+ * How long the whole request may take before we stop and return what we have.
+ *
+ * Netlify kills a synchronous function at its execution limit by dropping the
+ * connection — the client sees a truncated stream, not an error. Finishing
+ * ourselves a few seconds early is the difference between a partial report and
+ * no report.
+ */
+const RESPONSE_DEADLINE_MS = 22_000
+
+
+/**
  * POST /api/analyse — the whole pipeline, streamed as Server-Sent Events.
  *
  * Streaming rather than a single JSON response for two reasons: a 20–40 second
@@ -207,11 +218,35 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
         }
 
         // ── Analyse ────────────────────────────────────────────────────────
+        //
+        // Under a deadline, because the platform has one too.
+        //
+        // Measured on the deployed site: extraction finishes in ~2s, and the
+        // model then takes 15-19s. Runs landed at 17.2s and 20.5s on the same
+        // post — one died mid-stream, one completed. That is the function
+        // execution limit being crossed, and when it is crossed the connection
+        // simply stops: no error frame, no report, and the counts we already
+        // had in hand are lost. The user is told extraction failed, which is
+        // precisely backwards — extraction had already succeeded.
+        //
+        // So we stop the model ourselves, a little early, and return the
+        // measured data instead of gambling on finishing in time.
         send({ type: 'stage', stage: 'analyse', status: 'start' })
 
+        const remaining = RESPONSE_DEADLINE_MS - (Date.now() - started)
+        const abort = new AbortController()
+        let timedOut = false
+        const deadline = setTimeout(() => {
+          timedOut = true
+          abort.abort()
+        }, Math.max(1_000, remaining))
+
         let assessStarted = false
-        const outcome = await analysePost(snapshot, extra, {
+        let outcome: Awaited<ReturnType<typeof analysePost>> | null = null
+        try {
+          outcome = await analysePost(snapshot, extra, {
           providers,
+          signal: abort.signal,
           screenshot: body.screenshot,
           onProviderSwitch: (from, to, reason) => {
             // Visible in the function log, so an operator can see the primary
@@ -231,7 +266,37 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
             }
             send({ type: 'partial', text: section })
           },
-        })
+          })
+        } catch (err) {
+          if (!timedOut) throw err
+        } finally {
+          clearTimeout(deadline)
+        }
+
+        // The deadline fired, or the model returned nothing usable. Either way
+        // the measurements are real and worth handing back.
+        if (!outcome) {
+          for (const stage of ['analyse', 'assess', 'compose'] as const) {
+            send({ type: 'stage', stage, status: 'skip' })
+          }
+          send({
+            type: 'report',
+            report: {
+              id: cryptoId(),
+              createdAt: new Date().toISOString(),
+              snapshot,
+              analysis: null,
+              meta: {
+                model: null,
+                durationMs: Date.now() - started,
+                heuristicOnly: false,
+                incomplete:
+                  'The figures below were measured. The written analysis did not finish in time and was left out rather than guessed at.',
+              },
+            },
+          })
+          return
+        }
 
         if (!assessStarted) send({ type: 'stage', stage: 'analyse', status: 'done' })
         send({ type: 'stage', stage: 'assess', status: 'done' })

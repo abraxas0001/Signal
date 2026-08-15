@@ -104,6 +104,26 @@ export interface ExtractionMeta {
   blocked?: { reason: string; suggestion: string }
 }
 
+/**
+ * One public comment on a post.
+ *
+ * Comment text is the only direct evidence of how a post actually landed.
+ * Everything else in this product is a property of the post; this is a property
+ * of the audience, and it is what turns `sentiment.publicNarrative` from an
+ * inference about the post into a reading of the replies.
+ *
+ * Treated as untrusted throughout: it is attacker-controlled text from the open
+ * internet, and it is handed to a model.
+ */
+export interface Comment {
+  text: string
+  author: string | null
+  likes: number | null
+  publishedAt: string | null
+  /** A reply to another comment rather than to the post itself. */
+  isReply: boolean
+}
+
 export interface PostSnapshot {
   inputUrl: string
   canonicalUrl: string
@@ -113,6 +133,12 @@ export interface PostSnapshot {
   author: Author
   content: PostContent
   engagement: Engagement
+  /**
+   * Top public comments, best-effort. Absent where the platform publishes no
+   * comments, exposes none without a login, or ran out of time — which is why
+   * this is optional rather than an empty array meaning "none exist".
+   */
+  comments?: Comment[]
   media: MediaItem[]
   extraction: ExtractionMeta
 }
@@ -264,6 +290,12 @@ export interface Report {
     outputTokens?: number
     /** True when no ANTHROPIC_API_KEY was configured and heuristics were used. */
     heuristicOnly: boolean
+  /**
+   * Set when the run returned measurements but no written analysis — the
+   * request ran out of time. The counts are real; the interpretation is absent
+   * rather than guessed.
+   */
+  incomplete?: string
   }
 }
 

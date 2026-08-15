@@ -20,3 +20,6 @@ Eluru_Social_Listening.xlsx
 *.xlsx
 scripts/sheet-links.json
 
+
+# Throwaway probe scripts written by research agents — never commit these.
+scripts/_*.ts

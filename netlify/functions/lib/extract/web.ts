@@ -1,6 +1,7 @@
-import type { MediaItem, Metric, PostSnapshot } from '../../../../shared/types'
+import type { Comment, MediaItem, Metric, PostSnapshot } from '../../../../shared/types'
 import type { Platform } from '../../../../shared/taxonomy'
 import type { UrlIdentity } from '../platform'
+import { decodeEntities } from './json-scan'
 import { fetchText, fetchJson } from '../fetcher'
 import { parseMetadata, parseCount, detectJunk } from '../metadata'
 import type { ExtractContext, ExtractResult } from './types'
@@ -66,6 +67,28 @@ async function extractLinkedIn(id: UrlIdentity): Promise<ExtractResult> {
   const likes = meta.interactions.like ?? null
   const comments = meta.interactions.comment ?? null
 
+  // The author, from the URL — deliberately not from the page.
+  //
+  // LinkedIn post pages carry no og:author and no JSON-LD `author` node, so the
+  // author column came back empty. The page *does* carry a JSON-LD `creator`,
+  // and reading it looks like the obvious fix — but on a Narendra Modi post it
+  // returns "Dhinesh kumar", who is a commenter. That is the same
+  // grabbed-a-neighbour failure that has produced wrong bylines twice in this
+  // codebase, and it is worse here than an empty cell: it attributes a
+  // minister's post to a private citizen.
+  //
+  // The permalink slug cannot pick up a commenter, because LinkedIn builds it
+  // from the poster's own vanity name: /posts/{author}_{slug}-{id}-{code}.
+  const slug = /linkedin\.com\/posts\/([A-Za-z0-9-]{3,100})_/.exec(id.canonical)?.[1] ?? null
+  // Display name where LinkedIn gave us one, otherwise the vanity handle as-is.
+  const authorName =
+    meta.author ??
+    (slug
+      ? /-[0-9a-f]{6,}$/.test(slug)
+        ? slug // an opaque member id, not a name — show it unchanged
+        : slug.replace(/-/g, ' ').replace(/\p{Ll}/gu, (c) => c.toUpperCase())
+      : null)
+
   // The follower count sits in the author's Person/Organization node.
   const followers = parseCount(
     /"interactionStatistic"[\s\S]{0,400}?"userInteractionCount":\s*(\d+)[\s\S]{0,200}?FollowAction/.exec(res.body)?.[1] ??
@@ -94,9 +117,9 @@ async function extractLinkedIn(id: UrlIdentity): Promise<ExtractResult> {
       postType: 'Original Post',
       publishedAt: meta.publishedAt,
       author: {
-        name: meta.author,
-        handle: null,
-        profileUrl: null,
+        name: authorName,
+        handle: slug,
+        profileUrl: slug ? `https://www.linkedin.com/in/${slug}` : null,
         avatarUrl: null,
         verified: null,
         followers: metric(followers, 'page-scrape'),
@@ -466,6 +489,74 @@ async function extractTikTok(id: UrlIdentity): Promise<ExtractResult> {
   }
 }
 
+/**
+ * Reddit comment bodies, via the Atom feed — OFF by default, and deliberately.
+ *
+ * The route works: /r/{sub}/comments/{id}/.rss answers 200 with the full
+ * comment tree (187 comments on one test thread, 47 on another) while every
+ * form of .json answers 403. The bodies are exactly the signal the public
+ * narrative reading needs.
+ *
+ * It is off because of what happens when it fails. Reddit's limit here is about
+ * ONE request per minute per IP: a short burst returned 429, then escalated to
+ * a domain-wide 403 that served a block page and ALSO killed embed.reddit.com —
+ * the endpoint the existing, working count path depends on — for eighteen
+ * minutes. Every user of a deployed site shares one egress IP, so turning this
+ * on by default would let one Reddit link take Reddit extraction down for
+ * everybody, trading a feature for the thing that already works.
+ *
+ * Set ALLOW_REDDIT_COMMENTS=true to enable it on a deployment where that
+ * trade-off is acceptable. Strictly one request, never retried.
+ *
+ * The feed carries no score, so these cannot be weighted — but its order is
+ * Reddit's own "best" sort rather than chronological, so the first entries are
+ * the top comments.
+ */
+const ALLOW_REDDIT_COMMENTS = process.env['ALLOW_REDDIT_COMMENTS'] === 'true'
+
+async function fetchRedditComments(permalink: string, limit = 100): Promise<Comment[]> {
+  if (!ALLOW_REDDIT_COMMENTS) return []
+
+  const url = `${permalink.replace(/\/+$/, '')}/.rss?limit=${limit}`
+  let body: string
+  try {
+    const res = await fetchText(url, { agent: 'browser', timeout: 6000 })
+    if (!res.ok || !res.body) return []
+    body = res.body
+  } catch {
+    return []
+  }
+
+  const out: Comment[] = []
+  for (const entry of body.split('<entry>').slice(1)) {
+    // t3_ is the post itself; only t1_ entries are comments.
+    if (!/<id>t1_/.test(entry)) continue
+
+    const raw = /<content type="html">([\s\S]*?)<\/content>/.exec(entry)?.[1]
+    if (!raw) continue
+
+    // Atom escapes the HTML, so it needs decoding twice: once to markup, then
+    // the entities inside that markup.
+    const text = (decodeEntities(decodeEntities(raw)) ?? '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!text) continue
+
+    out.push({
+      text,
+      author: /<name>([^<]{1,60})<\/name>/.exec(entry)?.[1] ?? null,
+      // The feed publishes no score at all, so this is genuinely unknown
+      // rather than zero.
+      likes: null,
+      publishedAt: /<updated>([^<]+)<\/updated>/.exec(entry)?.[1] ?? null,
+      isReply: false,
+    })
+    if (out.length >= limit) break
+  }
+  return out
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Reddit
 // ─────────────────────────────────────────────────────────────────────────────
@@ -533,6 +624,11 @@ async function extractReddit(id: UrlIdentity): Promise<ExtractResult> {
   )?.[1]
   const title = (meta?.title ?? embeddedTitle ?? '').trim() || null
   sub = /reddit\.com\/r\/([^/]+)\//.exec(permalink ?? '')?.[1] ?? sub
+
+  // Off unless explicitly enabled — see fetchRedditComments for why.
+  const redditComments = await fetchRedditComments(
+    permalink ?? `https://www.reddit.com/r/${sub ?? ''}/comments/${postId}/`,
+  )
 
   attempts.push({
     strategy: 'reddit:oembed',
@@ -607,6 +703,7 @@ async function extractReddit(id: UrlIdentity): Promise<ExtractResult> {
     },
     snapshot: {
       platform: 'Reddit',
+      ...(redditComments.length ? { comments: redditComments } : {}),
       postType: 'Original Post',
       publishedAt,
       author: {

@@ -1,8 +1,8 @@
-import type { PostSnapshot, Metric, MediaItem } from '../../../../shared/types'
+import type { Comment, PostSnapshot, Metric, MediaItem } from '../../../../shared/types'
 import type { UrlIdentity } from '../platform'
 import { fetchText, fetchJson } from '../fetcher'
 import { parseCount } from '../metadata'
-import { parseEmbedded, findKey, findObjectWith, ytText } from './json-scan'
+import { parseEmbedded, findKey, findObjectWith, ytText, collectKey} from './json-scan'
 import type { ExtractContext, ExtractResult } from './types'
 
 /**
@@ -136,9 +136,27 @@ interface InnerTubeNext {
   }>
 }
 
-async function fetchExactComments(videoId: string): Promise<number | null> {
+/**
+ * The comment count AND the top comment bodies, from one request.
+ *
+ * This function used to return only the count, reading one string out of
+ * `onResponseReceivedEndpoints[0]` and discarding the other 244KB of a response
+ * it had already paid for. `onResponseReceivedEndpoints[1]` carries twenty
+ * top-level comment threads, and `frameworkUpdates.entityBatchUpdate.mutations`
+ * carries their text. Reading them costs no extra request and no extra bytes.
+ *
+ * The threads and the mutations must be joined BY KEY, never by index — their
+ * orders genuinely differ, so zipping them pairs each comment with someone
+ * else's text. The key is nested twice
+ * (`commentViewModel.commentViewModel.commentKey`); reading it one level up
+ * returns undefined and yields zero comments rather than an error.
+ */
+async function fetchExactComments(
+  videoId: string,
+): Promise<{ count: number | null; comments: Comment[] }> {
+  const empty = { count: null, comments: [] as Comment[] }
   const continuation = commentsContinuation(videoId)
-  if (!continuation) return null
+  if (!continuation) return empty
 
   const res = await fetchJson<InnerTubeNext>(
     'https://www.youtube.com/youtubei/v1/next?prettyPrint=false',
@@ -156,10 +174,81 @@ async function fetchExactComments(videoId: string): Promise<number | null> {
   const text =
     res.data?.onResponseReceivedEndpoints?.[0]?.reloadContinuationItemsCommand
       ?.continuationItems?.[0]?.commentsHeaderRenderer?.countText?.runs?.[0]?.text
-  if (!text) return null
-  const digits = text.replace(/\D/g, '')
+
+  const digits = (text ?? '').replace(/\D/g, '')
   const n = digits ? Number(digits) : NaN
-  return Number.isSafeInteger(n) ? n : null
+  const count = Number.isSafeInteger(n) ? n : null
+
+  return { count, comments: readComments(res.data) }
+}
+
+/**
+ * Pull the comment bodies out of an InnerTube /next response.
+ *
+ * Failure here is silent by design at the HTTP layer: a video with comments
+ * disabled, and a video id that does not exist, both answer 200 with a ~1KB
+ * body carrying only `responseContext`. There is nothing to detect but the
+ * absence of content, so absence is what this returns — an empty list, never a
+ * throw, because a post with no readable comments is a normal result.
+ */
+function readComments(data: unknown): Comment[] {
+  if (!data || typeof data !== 'object') return []
+
+  // Text, author and like count live in a flat mutation list, keyed.
+  const byKey = new Map<string, Record<string, unknown>>()
+  for (const mutation of collectKey(data, 'mutations', 4).flat()) {
+    const payload = (mutation as Record<string, unknown>)?.['payload'] as
+      | Record<string, unknown>
+      | undefined
+    const entity = payload?.['commentEntityPayload'] as Record<string, unknown> | undefined
+    const key = entity?.['key']
+    if (typeof key === 'string' && entity) byKey.set(key, entity)
+  }
+  if (!byKey.size) return []
+
+  // Walk the threads for ordering, and to know which are replies. Where the
+  // thread list is unreadable, fall back to mutation order rather than
+  // returning nothing — the text is the part that matters.
+  const ordered: Record<string, unknown>[] = []
+  const seen = new Set<string>()
+  for (const vm of collectKey(data, 'commentViewModel', 400)) {
+    const key = ((vm as Record<string, unknown>)?.['commentViewModel'] as
+      | Record<string, unknown>
+      | undefined)?.['commentKey']
+    if (typeof key !== 'string' || seen.has(key)) continue
+    const entity = byKey.get(key)
+    if (!entity) continue
+    seen.add(key)
+    ordered.push(entity)
+  }
+  const entities = ordered.length ? ordered : [...byKey.values()]
+
+  return entities
+    .map((entity): Comment | null => {
+      const content = entity['properties'] as Record<string, unknown> | undefined
+      const body = (content?.['content'] as Record<string, unknown> | undefined)?.['content']
+      if (typeof body !== 'string' || !body.trim()) return null
+
+      const author = entity['author'] as Record<string, unknown> | undefined
+      const toolbar = entity['toolbar'] as Record<string, unknown> | undefined
+
+      // YouTube abbreviates comment likes ("300K") with no exact value anywhere
+      // in the payload, so a large count is genuinely approximate. A comment
+      // with no likes carries a single space rather than an empty string.
+      const rawLikes = toolbar?.['likeCountNotliked']
+      const likes = typeof rawLikes === 'string' ? parseCount(rawLikes.trim()) : null
+
+      return {
+        text: body,
+        author: typeof author?.['displayName'] === 'string' ? (author['displayName'] as string) : null,
+        likes,
+        // Comments carry only a relative string ("8 months ago"); inventing an
+        // absolute date from it would be fabrication.
+        publishedAt: null,
+        isReply: Number(content?.['replyLevel'] ?? 0) > 0,
+      }
+    })
+    .filter((c): c is Comment => c !== null)
 }
 
 /**
@@ -274,7 +363,7 @@ async function extractViaInnerTube(
   const attributed = secondary?.['attributedDescription'] as { content?: string } | undefined
   const description = attributed?.content ?? ytText(secondary?.['description'])
 
-  const comments = await fetchExactComments(videoId)
+  const { count: comments, comments: commentBodies } = await fetchExactComments(videoId)
 
   const attempts: ExtractResult['attempts'] = [
     {
@@ -293,6 +382,7 @@ async function extractViaInnerTube(
 
   const snapshot: Partial<PostSnapshot> = {
     platform: 'YouTube',
+    ...(commentBodies.length ? { comments: commentBodies } : {}),
     postType: id.postType,
     publishedAt,
     author: {
@@ -480,6 +570,7 @@ export async function extractYouTube(
     // the product is meant to work with no keys at all.
     let exactLikes = exactLikesFrom(page.body)
     let exactComments: number | null = null
+    let commentBodies: Comment[] = []
     // Which figures the paid API supplied, so provenance stays truthful: a
     // number read from the page is `public-endpoint`, not `platform-api`.
     const apiFilled = new Set<string>()
@@ -492,18 +583,25 @@ export async function extractYouTube(
       })
     }
 
-    // Fire the extra request only when the cheap read was rounded — most
-    // regional videos are small enough that the panel already says "41".
+    // This used to fire only when the displayed count was rounded, because a
+    // sharper number was the only thing it bought. It now also carries the
+    // comment bodies, which are the evidence behind the public-narrative
+    // reading — worth a measured ~400ms on every video rather than only on the
+    // big ones.
     const scrapedComments = displayMetric(commentText, null, 'page-scrape')
-    if (scrapedComments.display || scrapedComments.value == null) {
-      exactComments = await fetchExactComments(videoId)
+    const got = await fetchExactComments(videoId)
+    exactComments = got.count
+    commentBodies = got.comments
+    if (exactComments != null || commentBodies.length) {
       attempts.push({
         strategy: 'youtube:innertube-comments',
-        ok: exactComments != null,
-        note:
-          exactComments != null
-            ? `exact comments (${exactComments.toLocaleString('en-IN')})`
-            : 'continuation returned no count',
+        ok: true,
+        note: [
+          exactComments != null ? `exact comments (${exactComments.toLocaleString('en-IN')})` : null,
+          commentBodies.length ? `${commentBodies.length} comment bodies` : null,
+        ]
+          .filter(Boolean)
+          .join(', '),
       })
     }
 
@@ -553,6 +651,7 @@ export async function extractYouTube(
 
     const snapshot: Partial<PostSnapshot> = {
       platform: 'YouTube',
+      ...(commentBodies.length ? { comments: commentBodies } : {}),
       postType: details.isLiveContent ? 'Live' : id.postType,
       publishedAt: micro?.publishDate ?? micro?.uploadDate ?? null,
       author: {

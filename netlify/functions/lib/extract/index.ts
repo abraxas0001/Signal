@@ -228,6 +228,10 @@ function assemble(
     if (s.content) snapshot.content = { ...snapshot.content, ...s.content }
     if (s.engagement) snapshot.engagement = { ...snapshot.engagement, ...s.engagement }
     if (s.media?.length) snapshot.media = s.media
+    // Whitelisted like everything above it, which is why this line has to exist
+    // at all: a field an adapter sets but assemble does not copy is dropped
+    // silently, with the adapter's own tests still passing.
+    if (s.comments?.length) snapshot.comments = s.comments
   }
 
   // ── Nothing that is obviously not a post may reach the user ───────────────

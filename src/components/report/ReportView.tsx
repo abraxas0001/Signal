@@ -8,6 +8,7 @@ import {
   MessageCircle,
   Quote,
   Repeat2,
+  Download,
   RotateCcw,
   ShieldQuestion,
   Sparkles,
@@ -21,6 +22,7 @@ import { DataReport } from './DataReport'
 import { CivicPanel } from './CivicPanel'
 import { ExtractionNotice } from './ExtractionNotice'
 import { compact, cn } from '@/lib/utils'
+import { downloadWorkbook } from '@/lib/export'
 import { fadeUp, listItem, listStagger, spring, haptic } from '@/lib/motion'
 
 /**
@@ -400,6 +402,52 @@ export function ReportView({
         </m.div>
       )}
 
+      {/* ── What people said ───────────────────────────────────────────── */}
+      {(snapshot.comments?.length ?? 0) > 0 && (
+        <m.section variants={fadeUp} className="defer-paint">
+          <SectionTitle>What people said</SectionTitle>
+          <Card>
+            {/* The gap between what we read and what exists is the whole
+                honesty of this panel. Facebook serves two comments on a reel
+                with 361 — showing those two without saying so would present a
+                sample as the public reaction. */}
+            <p className="text-xs text-ink-3">
+              {(() => {
+                const read = snapshot.comments?.length ?? 0
+                const total = snapshot.engagement.comments.value
+                if (total != null && total > read) {
+                  return `The ${read} comments below are the ones ${snapshot.platform} publishes without a login, out of ${total.toLocaleString('en-IN')}. They are a sample, not the whole reaction.`
+                }
+                return `All ${read} comment${read === 1 ? '' : 's'} on this post.`
+              })()}
+            </p>
+            <ul className="mt-3 space-y-3">
+              {(snapshot.comments ?? []).slice(0, 12).map((c, i) => (
+                <li key={i} className="border-l-2 border-[var(--border)] pl-3">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-xs font-medium text-ink-2">{c.author ?? 'Someone'}</span>
+                    {c.likes != null && c.likes > 0 && (
+                      <span className="text-xs text-ink-3">{c.likes.toLocaleString('en-IN')} likes</span>
+                    )}
+                  </div>
+                  <p
+                    className="mt-0.5 whitespace-pre-wrap text-sm text-ink-1"
+                    lang={snapshot.content.languageCode ?? undefined}
+                  >
+                    {c.text}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            {(snapshot.comments?.length ?? 0) > 12 && (
+              <p className="mt-3 text-xs text-ink-3">
+                {(snapshot.comments?.length ?? 0) - 12} more in the exported spreadsheet.
+              </p>
+            )}
+          </Card>
+        </m.section>
+      )}
+
       {/* ── Observations ────────────────────────────────────────────────── */}
       {analysis.observations.length > 0 && (
         <m.section variants={fadeUp} className="defer-paint">
@@ -431,6 +479,17 @@ export function ReportView({
           <Button variant="primary" onClick={onReset} className="flex-1">
             <RotateCcw size={16} />
             Analyse another post
+          </Button>
+          {/* The product replaces a spreadsheet, so getting a row back out of
+              it is not a nice-to-have — it is how this fits their process. */}
+          <Button
+            variant="outline"
+            onClick={() => void downloadWorkbook([report])}
+            aria-label="Download this report as a spreadsheet"
+            className="shrink-0 px-4"
+          >
+            <Download size={16} />
+            CSV
           </Button>
         </div>
       </div>
