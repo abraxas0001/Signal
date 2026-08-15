@@ -431,9 +431,22 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
   // nothing and the rebuilt permalink returned 2,021 reactions, 132 comments
   // and 10 comment bodies.
   if (!best?.rich) {
-    const from = best?.url ?? id.canonical
-    const story = /[?&]story_fbid=(\d+)/.exec(from)?.[1]
-    const page = /[?&]id=(\d+)/.exec(from)?.[1]
+    // The ids can come from the redirect URL or from the shell itself — on a
+    // datacentre IP the share link is not always redirected before being
+    // stripped, so the URL alone is not enough.
+    const from = `${best?.url ?? ''} ${id.canonical}`
+    const body = best?.body ?? ''
+    const story =
+      /[?&]story_fbid=(\d+)/.exec(from)?.[1] ??
+      /"story_fbid":"?(\d+)/.exec(body)?.[1] ??
+      /"subscription_target_id":"(\d+)"/.exec(body)?.[1] ??
+      /facebook\.com\/[^/"]+\/posts\/[^/"]*?(\d{8,})/.exec(body)?.[1] ??
+      null
+    const page =
+      /[?&]id=(\d+)/.exec(from)?.[1] ??
+      /"page_id":"?(\d+)/.exec(body)?.[1] ??
+      /"owning_profile":\{[^}]*"id":"(\d+)"/.exec(body)?.[1] ??
+      null
 
     if (story && page) {
       const canonical = `https://www.facebook.com/${page}/posts/${story}`
