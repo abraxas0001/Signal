@@ -15,7 +15,11 @@ import { resolveProviders } from './lib/provider'
  * never fired: the platform always got there first. Extraction takes 2-5s of
  * that, which leaves the model 8-11s.
  *
- * The default is 24s, not the 13s it started at. 13s was chosen when the
+ * The default is 40s. Time is not the scarce resource here — a correct reading
+ * of a grievance is worth waiting for, and the person waiting is comparing it
+ * against filling in a spreadsheet by hand.
+ *
+ * It started at 13s, 13s was chosen when the
  * platform appeared to kill the request at ~16s, and it then became the thing
  * doing the killing: Gemini finishes this schema in 15-20s, so every run that
  * fell through to it was cut off a few seconds short and returned figures only.
@@ -35,12 +39,10 @@ const RESPONSE_DEADLINE_MS = (() => {
   const raw = Number(process.env['ANALYSIS_DEADLINE_MS'])
   // Clamped: below ~8s the model never finishes and every run is figures-only;
   // above 25s Netlify's own ceiling arrives first and the deadline is moot.
-  // Upper bound 60s rather than 25s: the ceiling here should be the function
-  // timeout configured on the site, not a number picked in this file. Capping
-  // at 25s silently discarded a longer timeout the operator had already paid
-  // for — and the slowest measured provider needs ~28s on a 5,600-character
-  // post, which 25s cuts off a few seconds short of an answer.
-  return Number.isFinite(raw) && raw >= 8_000 && raw <= 60_000 ? raw : 24_000
+  // The ceiling belongs to the function timeout configured on the site, not to
+  // a number picked in this file. The floor stays at 8s because below that
+  // nothing ever finishes; the 60s bound is only a guard against a typo.
+  return Number.isFinite(raw) && raw >= 8_000 && raw <= 60_000 ? raw : 40_000
 })()
 
 
