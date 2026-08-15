@@ -241,18 +241,27 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
         // measured data instead of gambling on finishing in time.
         send({ type: 'stage', stage: 'analyse', status: 'start' })
 
-        const remaining = RESPONSE_DEADLINE_MS - (Date.now() - started)
+        const remaining = Math.max(1_000, RESPONSE_DEADLINE_MS - (Date.now() - started))
         const abort = new AbortController()
-        let timedOut = false
-        const deadline = setTimeout(() => {
-          timedOut = true
-          abort.abort()
-        }, Math.max(1_000, remaining))
 
         let assessStarted = false
-        let outcome: Awaited<ReturnType<typeof analysePost>> | null = null
-        try {
-          outcome = await analysePost(snapshot, extra, {
+
+        // Raced, not merely aborted.
+        //
+        // Aborting the model and awaiting its unwind looked equivalent and is
+        // not. On the deployed site the abort landed promptly for small
+        // prompts and did not for large ones — a 5,600-character LinkedIn post
+        // and a video carrying twenty comments both hung past the abort and
+        // were killed by the platform with no report, while a 440-character
+        // Instagram caption degraded cleanly every time.
+        //
+        // Whatever holds the connection open in that case, the fix is not to
+        // find it: it is to stop making the user's result depend on it. The
+        // timer resolves on its own schedule, so the report goes out at the
+        // deadline whether or not the model call has finished unwinding. The
+        // abort still fires, to stop paying for output nobody will read.
+        const outcome = await Promise.race([
+          analysePost(snapshot, extra, {
           providers,
           signal: abort.signal,
           screenshot: body.screenshot,
@@ -274,12 +283,16 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
             }
             send({ type: 'partial', text: section })
           },
-          })
-        } catch (err) {
-          if (!timedOut) throw err
-        } finally {
-          clearTimeout(deadline)
-        }
+          }).catch((err: unknown) => {
+            // A real provider failure still deserves to surface, but not at the
+            // cost of the report — it is recorded and the run degrades.
+            console.log(`[signal] analysis failed: ${err instanceof Error ? err.message : String(err)}`)
+            return null
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), remaining)),
+        ])
+
+        if (!outcome) abort.abort()
 
         // The deadline fired, or the model returned nothing usable. Either way
         // the measurements are real and worth handing back.
