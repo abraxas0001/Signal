@@ -12,6 +12,10 @@
   # still need to be traced into the bundle.
   external_node_modules = []
 
+[functions."diag"]
+  # Five live extractions in sequence; the default 10s is nowhere near enough.
+  timeout = 60
+
 [functions."analyse"]
   # The pipeline is one fetch plus one LLM call; the default 10s is not enough.
   # Netlify allows up to 60s for synchronous functions.
