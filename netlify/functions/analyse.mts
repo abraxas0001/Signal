@@ -29,7 +29,12 @@ const RESPONSE_DEADLINE_MS = (() => {
   const raw = Number(process.env['ANALYSIS_DEADLINE_MS'])
   // Clamped: below ~8s the model never finishes and every run is figures-only;
   // above 25s Netlify's own ceiling arrives first and the deadline is moot.
-  return Number.isFinite(raw) && raw >= 8_000 && raw <= 25_000 ? raw : 13_000
+  // Upper bound 60s rather than 25s: the ceiling here should be the function
+  // timeout configured on the site, not a number picked in this file. Capping
+  // at 25s silently discarded a longer timeout the operator had already paid
+  // for — and the slowest measured provider needs ~28s on a 5,600-character
+  // post, which 25s cuts off a few seconds short of an answer.
+  return Number.isFinite(raw) && raw >= 8_000 && raw <= 60_000 ? raw : 13_000
 })()
 
 
