@@ -15,12 +15,22 @@ import { resolveProviders } from './lib/provider'
  * never fired: the platform always got there first. Extraction takes 2-5s of
  * that, which leaves the model 8-11s.
  *
- * If that proves too tight for a full analysis, the fix is to raise the
- * function timeout in the Netlify site settings — `timeout` in netlify.toml is
- * not a supported key and does nothing. Lowering this number further would
- * only trade a truncated stream for an emptier report.
+ * 13s is the safe default for a site on Netlify's stock function timeout. It is
+ * also, measured, too tight for a full analysis: this schema costs ~2,000
+ * output tokens, which took Groq 19.4s and Gemini 25.7s on the same post. So
+ * most runs return figures only.
+ *
+ * The fix is not in this file. Raise the function timeout in the Netlify site
+ * settings (`timeout` in netlify.toml is not a supported key and does nothing),
+ * then set ANALYSIS_DEADLINE_MS to a second or two below it. Lowering this
+ * number instead would only trade a truncated stream for an emptier report.
  */
-const RESPONSE_DEADLINE_MS = 13_000
+const RESPONSE_DEADLINE_MS = (() => {
+  const raw = Number(process.env['ANALYSIS_DEADLINE_MS'])
+  // Clamped: below ~8s the model never finishes and every run is figures-only;
+  // above 25s Netlify's own ceiling arrives first and the deadline is moot.
+  return Number.isFinite(raw) && raw >= 8_000 && raw <= 25_000 ? raw : 13_000
+})()
 
 
 /**
