@@ -87,6 +87,15 @@ export default async (_req: Request, _ctx: Context): Promise<Response> => {
         pinned: process.env['LLM_PROVIDER'] ?? null,
       },
       crawlerUaAllowed: process.env['ALLOW_CRAWLER_UA'] !== 'false',
+      // The deadline the running function is actually using. Netlify injects
+      // environment variables at deploy time, so a dashboard change that has
+      // not been redeployed reads correctly in the UI and does nothing here —
+      // which cost a round of "I changed it" versus "it fired at the old
+      // value". Reporting the effective number ends that argument.
+      analysisDeadlineMs: (() => {
+        const raw = Number(process.env['ANALYSIS_DEADLINE_MS'])
+        return Number.isFinite(raw) && raw >= 8_000 && raw <= 60_000 ? raw : 40_000
+      })(),
       totalMs: Date.now() - started,
       results,
     },
