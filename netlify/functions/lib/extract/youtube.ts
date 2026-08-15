@@ -737,7 +737,11 @@ export async function extractYouTube(
       publishedAt: micro?.publishDate ?? micro?.uploadDate ?? null,
       author: {
         name: details.author ?? micro?.ownerChannelName ?? null,
-        handle: micro?.ownerProfileUrl?.split('/').pop() ?? null,
+        // Strip the leading @: ownerProfileUrl ends in "/@kyleslyf", and
+        // keeping it produced "@@kyleslyf" everywhere the UI and the
+        // spreadsheet prefix a handle with one. Every other platform stores
+        // the bare handle, and the export column has to match.
+        handle: micro?.ownerProfileUrl?.split('/').pop()?.replace(/^@/, '') || null,
         profileUrl:
           micro?.ownerProfileUrl ??
           (details.channelId ? `https://www.youtube.com/channel/${details.channelId}` : null),
