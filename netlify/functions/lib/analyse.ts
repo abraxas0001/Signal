@@ -384,6 +384,7 @@ export async function analysePost(
   if (!chain.length) throw new Error('No model is configured.')
 
   let firstFailure: { provider: Provider; reason: string } | null = null
+  const failures: { provider: Provider; reason: string }[] = []
 
   for (let i = 0; i < chain.length; i++) {
     const provider = chain[i]!
@@ -399,11 +400,20 @@ export async function analysePost(
       const reason = err instanceof Error ? err.message : String(err)
       const next = chain[i + 1]
       if (!next) {
-        // Nothing left to try. Report the ORIGINAL failure, not the last one:
-        // "Gemini hit its daily cap" is the actionable fact, while the tail of
-        // the chain failing too is a consequence of it.
-        throw new Error(firstFailure ? firstFailure.reason : reason)
+        // Nothing left to try. Report EVERY provider's own failure.
+        //
+        // This used to report only the first, on the theory that the rest were
+        // consequences of it. They are not: the providers are independent, and
+        // the first failing on a per-minute cap while the last failed halfway
+        // through streaming are different problems with different fixes. A
+        // report that named the first one had an operator chasing a rate limit
+        // on a provider that was not even the one that broke.
+        failures.push({ provider, reason })
+        throw new Error(
+          failures.map((f) => `${f.provider.label}: ${f.reason}`).join(' · '),
+        )
       }
+      failures.push({ provider, reason })
       if (!firstFailure) firstFailure = { provider, reason }
       opts.onProviderSwitch?.(provider, next, reason)
     }
