@@ -493,6 +493,35 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
     }
   }
 
+  // A share link that Meta stripped: say so, rather than analysing the shell.
+  //
+  // Some /share/p/<code>/ links resolve through story.php, and from a
+  // datacentre IP Meta answers that form with a ~416KB shell whose only text is
+  // the word "Facebook" — no author, no counts, no post. Passing that on gave a
+  // confident, worthless report headlined "Post contains only the word
+  // Facebook", which is worse than a failure because it looks like an answer.
+  //
+  // The same post served from its canonical permalink returns everything, so
+  // the suggestion is specific and known to work rather than a shrug.
+  const shellOnly =
+    !best.rich &&
+    /^\s*(facebook|log in or sign up to view|content not available)\s*$/i.test(
+      parseMetadata(best.body, best.url).title ?? '',
+    )
+
+  if (shellOnly) {
+    return {
+      ok: false,
+      attempts,
+      blocked: {
+        reason:
+          'Facebook served our server a placeholder page for this share link, with no post on it.',
+        suggestion:
+          'Open the post on Facebook, copy the address from the browser bar — it looks like facebook.com/<page>/posts/<number> — and paste that instead. That form works. Or paste the post text below.',
+      },
+    }
+  }
+
   const meta = parseMetadata(best.body, best.url)
 
   // Read og:url straight from the markup rather than using meta.canonical:
