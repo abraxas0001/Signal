@@ -158,7 +158,7 @@ export function DataReport({
         <PostCard snapshot={snapshot} />
       </m.div>
 
-      <CommentsPanel snapshot={snapshot} />
+      <CommentsPanel report={report} />
 
       {/* ── The account ─────────────────────────────────────────────────── */}
       {(snapshot.author.name || snapshot.author.followers.value != null) && (

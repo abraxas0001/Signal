@@ -73,7 +73,16 @@ const CANDIDATES: Candidate[] = [
     build: (apiKey) => ({
       kind: 'openai-compat',
       label: 'Groq',
-      model: process.env['LLM_MODEL'] ?? 'llama-3.3-70b-versatile',
+      // gpt-oss-120b rather than llama-3.3-70b-versatile, and the reason is
+      // structured output. Groq does not support `json_schema` on the llama
+      // model at all: every request burned two rejected round-trips and then
+      // fell back to json_object with the whole 12KB schema pasted into the
+      // prompt as text. Measured on the same post: llama ~19.4s at roughly
+      // 100 tok/s (and 429s under light load), gpt-oss-120b 5.0s at 430 tok/s
+      // with the schema enforced natively. That is the difference between the
+      // written analysis arriving inside the platform's window and the user
+      // getting figures only.
+      model: process.env['LLM_MODEL'] ?? 'openai/gpt-oss-120b',
       apiKey,
       baseUrl: 'https://api.groq.com/openai/v1',
       // Groq's services agreement bars training on inputs or outputs without
@@ -82,7 +91,13 @@ const CANDIDATES: Candidate[] = [
       // The free tier allows 12,000 tokens per minute and counts max_tokens
       // against it up front. The prompt and inlined schema are ~5,000, so this
       // leaves room for the request to be accepted at all.
-      maxTokens: 4096,
+      // Groq counts max_tokens against its tokens-per-minute allowance BEFORE
+      // generating, so an inflated ceiling is spent whether or not it is used.
+      // Reserving 4096 against a 12,000/min budget made the request fail
+      // outright ("too large for its tokens-per-minute allowance") while the
+      // real output measured 2,129 tokens. 3072 keeps ~40% headroom over that
+      // and leaves room for a second request inside the same minute.
+      maxTokens: Number(process.env['LLM_MAX_TOKENS']) || 3072,
     }),
   },
   {

@@ -418,6 +418,43 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
     }
   }
 
+  // A share link that came back stripped: retry it as a canonical permalink.
+  //
+  // /share/p/<code>/ redirects to story.php?story_fbid=<post>&id=<page>, and
+  // from a datacentre IP Meta answers BOTH of those forms with a ~417KB shell
+  // carrying no engagement payload at all — while answering the canonical
+  // /<page>/posts/<post> form with the full ~967KB page. Same post, same
+  // second, same crawler identity; only the URL shape differs.
+  //
+  // The redirect hands us both ids, so the canonical form can be rebuilt
+  // without another lookup. Verified on production: the share form returned
+  // nothing and the rebuilt permalink returned 2,021 reactions, 132 comments
+  // and 10 comment bodies.
+  if (!best?.rich) {
+    const from = best?.url ?? id.canonical
+    const story = /[?&]story_fbid=(\d+)/.exec(from)?.[1]
+    const page = /[?&]id=(\d+)/.exec(from)?.[1]
+
+    if (story && page) {
+      const canonical = `https://www.facebook.com/${page}/posts/${story}`
+      const res = await fetchText(canonical, { agent: 'google', timeout: 10_000 })
+      const rich =
+        res.ok &&
+        Boolean(res.body) &&
+        /"reaction_count"|"i18n_reaction_count"|"subscription_target_id"/.test(res.body)
+
+      attempts.push({
+        strategy: 'facebook:canonical-permalink',
+        ok: rich,
+        note: rich
+          ? `share link was stripped; ${Math.round((res.body?.length ?? 0) / 1024)}KB via /${page}/posts/${story}`
+          : 'canonical permalink also carried no payload',
+      })
+
+      if (rich && res.body) best = { body: res.body, url: res.url, rich: true }
+    }
+  }
+
   if (deleted) {
     return {
       ok: false,

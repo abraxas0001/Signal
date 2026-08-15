@@ -403,7 +403,7 @@ export function ReportView({
         </m.div>
       )}
 
-      <CommentsPanel snapshot={snapshot} />
+      <CommentsPanel report={report} />
 
       {/* ── Observations ────────────────────────────────────────────────── */}
       {analysis.observations.length > 0 && (
