@@ -559,6 +559,42 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
   }
 }
 
+/**
+ * An Instagram handle is `[A-Za-z0-9._]`, at most 30 characters. Nothing else
+ * is a username, so anything else is a parse failure — not a name to display.
+ */
+const IG_HANDLE = /^[A-Za-z0-9._]{1,30}$/
+
+/**
+ * The poster's handle, from the embed page.
+ *
+ * The previous pattern was `class="CaptionUsername"[^>]*>(?:[^<]*<[^>]*>)*([^<]+)<`.
+ * That middle group repeats "some text, then a tag" without a bound, so from
+ * the anchor it walks tag by tag across the whole document and the capture
+ * lands wherever it happens to stop. On a real reel that was several hundred
+ * kilobytes later, inside a <script>, and the author's name rendered as
+ * Facebook's bootstrap JavaScript — `requireLazy([...])`.
+ *
+ * Two defences, because a regex over markup will always be approximate:
+ * search only a short window after the anchor, and then require the result to
+ * actually look like a handle. The second is what makes it safe — a 200KB
+ * script blob can never satisfy IG_HANDLE.
+ */
+function readEmbedUsername(html: string): string | null {
+  const at = html.indexOf('CaptionUsername')
+  if (at === -1) return null
+
+  // The handle sits within a few tags of the anchor. 600 characters is far
+  // more than that and far less than a script block.
+  const window = html.slice(at, at + 600)
+
+  for (const raw of [...window.matchAll(/>([^<>]{1,40})</g)].map((m) => m[1])) {
+    const candidate = (raw ?? '').trim()
+    if (IG_HANDLE.test(candidate)) return candidate
+  }
+  return null
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Instagram
 // ─────────────────────────────────────────────────────────────────────────────
@@ -606,13 +642,18 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
   if (embed.ok && embed.body) {
     likes = parseCount(/([\d,]+)\s+likes/i.exec(embed.body)?.[1] ?? null)
     comments = parseCount(/View all ([\d,]+) comments/i.exec(embed.body)?.[1] ?? null)
-    username = /class="CaptionUsername"[^>]*>(?:[^<]*<[^>]*>)*([^<]+)</.exec(embed.body)?.[1]?.trim() ?? null
+    username = readEmbedUsername(embed.body)
     const capMatch = /<div class="Caption">([\s\S]*?)<\/div>/.exec(embed.body)?.[1]
     if (capMatch) {
       caption = capMatch
         .replace(/<[^>]+>/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
+      // The embed prints the username as the first token of the caption block.
+      // Strip it so the post text is the post text.
+      if (username && caption.startsWith(username)) {
+        caption = caption.slice(username.length).trim()
+      }
     }
   }
 

@@ -186,6 +186,31 @@ async function runAdapter(
   return result
 }
 
+/**
+ * Does this string look like source code rather than something a person wrote?
+ *
+ * Several adapters read values out of markup with regex, because parsing a
+ * megabyte of embedded JSON to get one field is wasteful. The failure mode is
+ * always the same: a pattern over-reaches, the capture lands inside a <script>,
+ * and the user is shown `requireLazy(["TimeSliceImpl","ServerJS"],function…`
+ * as the author of a post. That shipped.
+ *
+ * This is the backstop. It cannot repair a bad capture — the adapter has to be
+ * fixed — but it stops the result being presented as fact, and a missing author
+ * is a far better outcome than a page of minified JavaScript.
+ */
+function looksLikeCode(value: string | null | undefined): boolean {
+  if (!value) return false
+  const s = value.trim()
+  if (s.length > 400) return true
+  return (
+    /requireLazy|function\s*\(|=>\s*\{|__d\(|ServerJS/.test(s) ||
+    /<\/?script|<div|<span[\s>]/i.test(s) ||
+    // A dense run of braces and quotes is a serialised object, not a name.
+    (s.length > 60 && (s.match(/[{}[\]"]/g)?.length ?? 0) / s.length > 0.08)
+  )
+}
+
 /** Fold the adapter's result into a complete, well-formed snapshot. */
 function assemble(
   snapshot: PostSnapshot,
@@ -226,6 +251,14 @@ function assemble(
       },
     }
   }
+
+  // ── Nothing that looks like source code reaches the user ──────────────────
+  // A regex over markup can always over-reach; this makes the consequence a
+  // missing field rather than a page of minified JavaScript presented as a
+  // person's name.
+  if (looksLikeCode(snapshot.author.name)) snapshot.author.name = null
+  if (looksLikeCode(snapshot.author.handle)) snapshot.author.handle = null
+  if (looksLikeCode(snapshot.content.title)) snapshot.content.title = null
 
   // ── User-supplied rescue data always wins over anything we scraped ─────────
   if (ctx.manualText?.trim()) {
