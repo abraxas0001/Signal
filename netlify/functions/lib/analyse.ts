@@ -78,6 +78,15 @@ export function renderComments(comments: Comment[] | undefined): string[] {
   // Trimmed from 12,000: the comment block is prompt input, and prompt input
   // is latency, against a window the platform closes at ~16s.
   const TOTAL = 5_000
+  // How many reach the model — not how many we keep.
+  //
+  // Measured on the deployed site: 4 comments finished the full analysis in
+  // 5.9s, 30 in 12.9s, and 100 did not finish at all. Twenty-five is enough to
+  // read which way a comment section leans; reading a hundred does not change
+  // "Resentment" into something else, it costs the user the written analysis
+  // entirely. The full set still reaches the report and the spreadsheet — this
+  // caps only what is spent on judgement.
+  const TO_MODEL = 25
 
   const ranked = [...comments].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
 
@@ -98,7 +107,7 @@ export function renderComments(comments: Comment[] | undefined): string[] {
       .join(', ')
     const line = `${rendered.length + 1}. ${body}${meta ? ` [${meta}]` : ''}`
 
-    if (used + line.length > TOTAL) break
+    if (used + line.length > TOTAL || rendered.length >= TO_MODEL) break
     used += line.length
     rendered.push(line)
   }
