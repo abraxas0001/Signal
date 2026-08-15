@@ -19,6 +19,7 @@ import { Button, Card, Chip, SectionTitle, type ChipTone } from '../ui'
 import { EmotionBars, SentimentMeter, StatTile } from '../charts'
 import { PostCard } from './PostCard'
 import { DataReport } from './DataReport'
+import { CommentsPanel } from './CommentsPanel'
 import { CivicPanel } from './CivicPanel'
 import { ExtractionNotice } from './ExtractionNotice'
 import { compact, cn } from '@/lib/utils'
@@ -402,51 +403,7 @@ export function ReportView({
         </m.div>
       )}
 
-      {/* ── What people said ───────────────────────────────────────────── */}
-      {(snapshot.comments?.length ?? 0) > 0 && (
-        <m.section variants={fadeUp} className="defer-paint">
-          <SectionTitle>What people said</SectionTitle>
-          <Card>
-            {/* The gap between what we read and what exists is the whole
-                honesty of this panel. Facebook serves two comments on a reel
-                with 361 — showing those two without saying so would present a
-                sample as the public reaction. */}
-            <p className="text-xs text-ink-3">
-              {(() => {
-                const read = snapshot.comments?.length ?? 0
-                const total = snapshot.engagement.comments.value
-                if (total != null && total > read) {
-                  return `The ${read} comments below are the ones ${snapshot.platform} publishes without a login, out of ${total.toLocaleString('en-IN')}. They are a sample, not the whole reaction.`
-                }
-                return `All ${read} comment${read === 1 ? '' : 's'} on this post.`
-              })()}
-            </p>
-            <ul className="mt-3 space-y-3">
-              {(snapshot.comments ?? []).slice(0, 12).map((c, i) => (
-                <li key={i} className="border-l-2 border-[var(--border)] pl-3">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-xs font-medium text-ink-2">{c.author ?? 'Someone'}</span>
-                    {c.likes != null && c.likes > 0 && (
-                      <span className="text-xs text-ink-3">{c.likes.toLocaleString('en-IN')} likes</span>
-                    )}
-                  </div>
-                  <p
-                    className="mt-0.5 whitespace-pre-wrap text-sm text-ink-1"
-                    lang={snapshot.content.languageCode ?? undefined}
-                  >
-                    {c.text}
-                  </p>
-                </li>
-              ))}
-            </ul>
-            {(snapshot.comments?.length ?? 0) > 12 && (
-              <p className="mt-3 text-xs text-ink-3">
-                {(snapshot.comments?.length ?? 0) - 12} more in the exported spreadsheet.
-              </p>
-            )}
-          </Card>
-        </m.section>
-      )}
+      <CommentsPanel snapshot={snapshot} />
 
       {/* ── Observations ────────────────────────────────────────────────── */}
       {analysis.observations.length > 0 && (

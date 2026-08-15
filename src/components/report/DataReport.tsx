@@ -1,4 +1,5 @@
 import * as m from 'motion/react-m'
+import { CommentsPanel } from './CommentsPanel'
 import {
   BadgeCheck,
   Clock,
@@ -156,6 +157,8 @@ export function DataReport({
       <m.div variants={fadeUp}>
         <PostCard snapshot={snapshot} />
       </m.div>
+
+      <CommentsPanel snapshot={snapshot} />
 
       {/* ── The account ─────────────────────────────────────────────────── */}
       {(snapshot.author.name || snapshot.author.followers.value != null) && (
