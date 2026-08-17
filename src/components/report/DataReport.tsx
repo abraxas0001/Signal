@@ -56,7 +56,7 @@ export function DataReport({
 
   return (
     <m.div
-      className="mx-auto w-full max-w-2xl space-y-6 px-4 pb-28"
+      className="mx-auto w-full max-w-2xl space-y-6 px-4 pb-[calc(10rem+var(--sab))]"
       variants={listStagger}
       initial="hidden"
       animate="show"
@@ -189,7 +189,8 @@ export function DataReport({
       </m.p>
 
       {/* ── Sticky action ───────────────────────────────────────────────── */}
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--border)] bg-[var(--surface-1)]/92 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl">
+      <div className="fixed inset-x-0 z-20 border-t border-[var(--border)] bg-[var(--surface-1)]/92 px-4 pb-3 pt-3 backdrop-blur-xl"
+        style={{ bottom: 'var(--tabbar-h)' }}>
         <div className="mx-auto flex max-w-2xl gap-2">
           <Button onClick={onReset} className="flex-1">
             Read another post

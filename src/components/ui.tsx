@@ -247,3 +247,21 @@ export function SkeletonLines({ lines = 4, className }: { lines?: number; classN
     </div>
   )
 }
+
+/**
+ * The Signal mark: four bars, one peak.
+ *
+ * It lived as a private function inside App.tsx, which is why the dashboard had
+ * a text kicker where the header has a logo. Same mark in both places now, so
+ * the two screens read as one product.
+ */
+export function SignalGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="1.6" y="9.6" width="2.2" height="4.8" rx="1.1" fill="currentColor" opacity="0.55" />
+      <rect x="5.2" y="6.8" width="2.2" height="7.6" rx="1.1" fill="currentColor" opacity="0.75" />
+      <rect x="8.8" y="1.6" width="2.2" height="12.8" rx="1.1" fill="currentColor" />
+      <rect x="12.4" y="8.2" width="2.2" height="6.2" rx="1.1" fill="currentColor" opacity="0.75" />
+    </svg>
+  )
+}

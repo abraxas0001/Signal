@@ -26,6 +26,8 @@ export interface TrackedPost {
   views: number | null
   likes: number | null
   comments: number | null
+  /** Only ever present when read through an owned-page API token. */
+  shares?: number | null
 }
 
 export interface HandleSnapshot {
@@ -131,6 +133,20 @@ export interface HandleStats {
    */
   engagementRate: number | null
   postsPerWeek: number | null
+  /** Views per post, where the platform publishes them. */
+  avgViews: number | null
+  /**
+   * Comments as a share of all interactions.
+   *
+   * A like is a tap; a comment is a sentence someone chose to write. Two
+   * accounts with the same engagement rate are doing different things if one
+   * is 2% comments and the other 30% — the first is being applauded, the
+   * second argued with. For a political office the second is the signal.
+   */
+  talkRatio: number | null
+  /** How evenly posts perform: 0 is erratic, 1 is metronomic. */
+  consistency: number | null
+  best: { title: string | null; url: string; interactions: number } | null
 }
 
 export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
@@ -143,6 +159,10 @@ export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
     avgEngagement: null,
     engagementRate: null,
     postsPerWeek: null,
+    avgViews: null,
+    talkRatio: null,
+    consistency: null,
+    best: null,
   }
   if (!snapshot?.posts.length) return empty
 
@@ -170,10 +190,30 @@ export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
   }
 
   const followers = snapshot.followers ?? null
+  const views = sum((p) => p.views)
+
+  // Per-post interaction totals, used for the best post and for spread.
+  const perPost = posts.map((p) => (p.likes ?? 0) + (p.comments ?? 0))
+  const mean = perPost.length ? perPost.reduce((a, b) => a + b, 0) / perPost.length : 0
+  // Coefficient of variation, inverted and clamped: a channel whose posts all
+  // land within a narrow band scores near 1, one with a single viral outlier
+  // among flops scores near 0. Meaningless below three posts, so it is null.
+  let consistency: number | null = null
+  if (perPost.length >= 3 && mean > 0) {
+    const sd = Math.sqrt(perPost.reduce((a, v) => a + (v - mean) ** 2, 0) / perPost.length)
+    consistency = Number(Math.max(0, Math.min(1, 1 - sd / mean)).toFixed(2))
+  }
+
+  let best: HandleStats['best'] = null
+  posts.forEach((p, i) => {
+    const n = perPost[i] ?? 0
+    if (!best || n > best.interactions) best = { title: p.title, url: p.url, interactions: n }
+  })
+
   return {
     followers,
     posts: posts.length,
-    totalViews: sum((p) => p.views),
+    totalViews: views,
     totalLikes: likes,
     totalComments: comments,
     avgEngagement: measurable ? Math.round(interactions / posts.length) : null,
@@ -182,6 +222,13 @@ export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
         ? Number(((interactions / posts.length / followers) * 100).toFixed(3))
         : null,
     postsPerWeek,
+    avgViews: views != null ? Math.round(views / posts.length) : null,
+    talkRatio:
+      comments != null && interactions > 0
+        ? Number(((comments / interactions) * 100).toFixed(1))
+        : null,
+    consistency,
+    best,
   }
 }
 
@@ -203,5 +250,100 @@ export function deltaFor(h: TrackedHandle): Delta {
     followers: diff(now.followers, before.followers),
     avgEngagement: diff(now.avgEngagement, before.avgEngagement),
     since: h.snapshots[n - 2]?.takenAt ?? null,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Discovered rivals
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface DiscoveredRival {
+  name: string
+  why: string
+  cohort: string
+  followers: number | null
+  platforms: string[]
+  profileUrl: string
+}
+
+export interface RivalCache {
+  subject: string
+  role: string
+  rivals: DiscoveredRival[]
+  checked: number
+  discarded: number
+  foundAt: string
+}
+
+const RIVALS_KEY = 'signal.rivals.v1'
+
+/**
+ * Discovery is cached because it is the expensive half.
+ *
+ * Working out who someone should be compared against costs a model call plus a
+ * dozen live profile checks. Who a sitting MLA's rivals are does not change
+ * between two taps of a tab, so re-deriving it on every visit would spend real
+ * money to reprint the same list.
+ */
+export function readRivals(handleId: string): RivalCache | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(RIVALS_KEY) ?? '{}') as Record<string, RivalCache>
+    return all[handleId] ?? null
+  } catch {
+    return null
+  }
+}
+
+export function saveRivals(handleId: string, cache: RivalCache): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(RIVALS_KEY) ?? '{}') as Record<string, RivalCache>
+    all[handleId] = cache
+    localStorage.setItem(RIVALS_KEY, JSON.stringify(all))
+  } catch {
+    /* a cache that cannot be written is a slower app, not a broken one */
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public standing
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface Standing {
+  score: number
+  label: string
+  positive: number
+  negative: number
+  neutral: number
+  praise: string[]
+  criticism: string[]
+  summary: string
+  commentsRead: number
+  postsRead: number
+  readAt: string
+}
+
+const STANDING_KEY = 'signal.standing.v1'
+
+/**
+ * Cached because it is the most expensive thing this product does: several live
+ * post fetches plus a model call, per account. What the public thinks of a
+ * politician does not move between two taps of a tab.
+ */
+export function readStandingCache(handleId: string): Standing | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(STANDING_KEY) ?? '{}') as Record<string, Standing>
+    return all[handleId] ?? null
+  } catch {
+    return null
+  }
+}
+
+export function saveStandingCache(handleId: string, standing: Standing): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(STANDING_KEY) ?? '{}') as Record<string, Standing>
+    all[handleId] = standing
+    localStorage.setItem(STANDING_KEY, JSON.stringify(all))
+  } catch {
+    /* a cache that will not write is a slower app, not a broken one */
   }
 }

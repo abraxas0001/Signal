@@ -73,5 +73,44 @@ chk('one reading yields no trend', deltaFor(h([snap(100, [[1, 1]])])).followers 
 const d = deltaFor(h([snap(100, [[1, 1]]), snap(150, [[1, 1]])]))
 chk('two readings yield the difference', d.followers === 50, `got ${d.followers}`)
 
+// ── Live: the follower count must belong to the channel asked for ──────────
+//
+// A YouTube channel page carries the subscriber count of every recommended
+// channel in its sidebar — six of them on Narendra Modi's page. An unanchored
+// read returned 2.2M, which is someone else's, and two different channels then
+// reported the identical figure. Every engagement rate is a ratio against this
+// number, so a borrowed one corrupts the comparison silently while looking
+// perfectly reasonable.
+//
+// This is the third neighbour-capture bug in this codebase. It gets a test.
+if (process.env['SKIP_LIVE'] === '1') {
+  console.log('(live follower checks skipped)')
+} else {
+  const { parseHandle, readHandle } = await import('../netlify/functions/lib/handles')
+  console.log('\x1b[1mLive follower attribution\x1b[0m\n')
+  const seen = new Map<string, number>()
+  for (const url of [
+    'https://www.youtube.com/@narendramodi',
+    'https://www.youtube.com/@PMOIndia',
+  ]) {
+    const ref = parseHandle(url)
+    if (!ref) { chk(`${url} parses`, false); continue }
+    try {
+      const s = await readHandle(ref)
+      chk(`${ref.handle}: has a follower count`, s.followers != null,
+        String(s.followers?.toLocaleString('en-IN') ?? ''))
+      if (s.followers != null) seen.set(ref.handle, s.followers)
+    } catch (e) {
+      chk(`${ref.handle}: readable`, false, (e as Error).message.slice(0, 50))
+    }
+  }
+  const vals = [...seen.values()]
+  chk('two different channels report DIFFERENT follower counts',
+    vals.length < 2 || new Set(vals).size === vals.length,
+    vals.map((v) => v.toLocaleString('en-IN')).join(' vs '))
+  console.log('')
+}
+
+
 console.log(`\n${pass} passed, ${fail} failed\n`)
 process.exit(fail > 0 ? 1 : 0)

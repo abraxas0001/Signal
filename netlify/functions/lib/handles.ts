@@ -1,6 +1,8 @@
 import type { Platform } from '../../../shared/taxonomy'
 import { fetchText, fetchJson } from './fetcher'
 import { decodeEntities } from './extract/json-scan'
+import { parseHandleUrl } from '../../../shared/handle-url'
+import { metaCredentials, whoAmI, facebookPagePosts, instagramMedia } from './meta-graph'
 
 /**
  * Reading an ACCOUNT rather than a post.
@@ -36,6 +38,11 @@ export interface HandlePost {
   views: number | null
   likes: number | null
   comments: number | null
+  /**
+   * Shares. Only the Graph API supplies this — the public Facebook page
+   * carries no share count on a reel at all, and no post list to hang one on.
+   */
+  shares?: number | null
 }
 
 export interface HandleSummary {
@@ -60,61 +67,18 @@ export interface HandleSummary {
 // Handle parsing
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface HandleRef {
-  platform: Platform
-  handle: string
-}
+import type { HandleRef } from '../../../shared/handle-url'
+export type { HandleRef }
 
 /**
- * Work out which account a user means, from a profile URL or a bare handle.
+ * Which account a user means, from a profile URL or a bare handle.
  *
- * Accepts what people actually paste: a full profile URL, a @handle, or a
- * handle with the platform chosen separately.
+ * The parsing lives in `shared/handle-url.ts` so the browser reaches the same
+ * verdict. It used to exist only here, and the client guessed from a dropdown
+ * instead — which meant a Facebook link added while the picker said YouTube was
+ * filed as YouTube and collided with the YouTube entry for the same person.
  */
-export function parseHandle(input: string, hint?: Platform): HandleRef | null {
-  const raw = input.trim()
-  if (!raw) return null
-
-  if (/^https?:\/\//i.test(raw)) {
-    let u: URL
-    try {
-      u = new URL(raw)
-    } catch {
-      return null
-    }
-    const host = u.hostname.replace(/^www\./, '').toLowerCase()
-    const seg = u.pathname.split('/').filter(Boolean)
-
-    if (host.endsWith('youtube.com')) {
-      const at = seg.find((s) => s.startsWith('@'))
-      if (at) return { platform: 'YouTube', handle: at }
-      const ci = seg.indexOf('channel')
-      if (ci !== -1 && seg[ci + 1]) return { platform: 'YouTube', handle: seg[ci + 1]! }
-      if (seg[0] === 'c' && seg[1]) return { platform: 'YouTube', handle: seg[1]! }
-    }
-    if (host === 'bsky.app' && seg[0] === 'profile' && seg[1]) {
-      return { platform: 'Bluesky', handle: seg[1]! }
-    }
-    if (host.endsWith('instagram.com') && seg[0]) return { platform: 'Instagram', handle: seg[0]! }
-    if (host.endsWith('facebook.com') && seg[0]) return { platform: 'Facebook', handle: seg[0]! }
-    if (host.endsWith('linkedin.com')) {
-      const i = seg.findIndex((s) => s === 'in' || s === 'company')
-      if (i !== -1 && seg[i + 1]) return { platform: 'LinkedIn', handle: seg[i + 1]! }
-    }
-    if (host.endsWith('reddit.com')) {
-      const i = seg.findIndex((s) => s === 'r' || s === 'user' || s === 'u')
-      if (i !== -1 && seg[i + 1]) return { platform: 'Reddit', handle: seg[i + 1]! }
-    }
-    // Anything else with a /@user path is treated as a Mastodon instance; the
-    // fediverse has no host list, so shape is the only signal available.
-    const masto = seg.find((s) => s.startsWith('@'))
-    if (masto) return { platform: 'Mastodon', handle: `${masto}@${host}` }
-    return null
-  }
-
-  if (!hint) return null
-  return { platform: hint, handle: raw.replace(/^@/, '') }
-}
+export const parseHandle = parseHandleUrl
 
 // ─────────────────────────────────────────────────────────────────────────────
 // YouTube
@@ -150,11 +114,23 @@ async function readYouTube(handle: string): Promise<HandleSummary> {
       /<meta[^>]+property="og:title"[^>]+content="([^"]+)"/.exec(page.body)?.[1] ?? null,
     )
     avatarUrl = /<meta[^>]+property="og:image"[^>]+content="([^"]+)"/.exec(page.body)?.[1] ?? null
-    // YouTube has moved this key repeatedly. The word-anchored form is the one
-    // that still matches — the structured `subscriberCountText` shapes return
-    // nothing on a current channel page, measured on a 2.1MB response.
+    // Anchored to the channel's OWN header, never to the first "N subscribers"
+    // on the page.
+    //
+    // A channel page carries the subscriber counts of every recommended
+    // channel in its sidebar. Narendra Modi's page contains six of them — 2.2M,
+    // 6.4M, 79.8K, 40.5K, 3.31K and 31.3M — and an unanchored first match
+    // returned 2.2M, which belongs to someone else. Two different channels then
+    // reported the identical follower count, and every engagement rate computed
+    // from it was wrong: the whole comparison is a ratio against this number.
+    //
+    // pageHeaderRenderer and contentMetadataViewModel are the channel's own
+    // header. There is deliberately no unanchored fallback — a missing follower
+    // count shows as "—" and suppresses the rate, which is recoverable. A
+    // confident wrong one is not.
     const subs =
-      /([\d.,]+\s*[KMB]?)\s+subscribers/i.exec(page.body)?.[1] ??
+      /"pageHeaderRenderer":[\s\S]{0,4000}?([\d.,]+\s*[KMB]?)\s+subscribers/i.exec(page.body)?.[1] ??
+      /"contentMetadataViewModel"[\s\S]{0,1500}?([\d.,]+\s*[KMB]?)\s+subscribers/i.exec(page.body)?.[1] ??
       /"subscriberCountText":\{"simpleText":"([^"]+)"/.exec(page.body)?.[1] ??
       null
     followers = parseAbbrev(subs)
@@ -335,6 +311,39 @@ async function readFacebook(handle: string): Promise<HandleSummary> {
   let followers: number | null = null
   let displayName: string | null = null
 
+  // A page token authorises exactly one page, so this only fires for the page
+  // it belongs to — a rival's handle falls straight through to the public read.
+  // That is the boundary, and it is Meta's, not a policy choice here.
+  const creds = metaCredentials()
+  if (creds) {
+    try {
+      const me = await whoAmI(creds)
+      const mine =
+        me.id === handle ||
+        me.name.toLowerCase() === handle.toLowerCase() ||
+        handle.toLowerCase() === me.name.replace(/\s+/g, '').toLowerCase()
+      if (mine) {
+        const posts = await facebookPagePosts(creds)
+        return {
+          platform: 'Facebook',
+          handle,
+          displayName: me.name || null,
+          profileUrl,
+          avatarUrl: null,
+          followers: me.followers,
+          posts,
+          listing: {
+            available: posts.length > 0,
+            note: `${posts.length} posts through the Graph API, with shares and reel plays the public page does not publish.`,
+          },
+        }
+      }
+    } catch {
+      // A refused or expired token must not take the account down with it —
+      // the public read still works and is what everyone else gets.
+    }
+  }
+
   try {
     const res = await fetchText(
       `https://www.facebook.com/plugins/page.php?show_facepile=false&href=${encodeURIComponent(profileUrl)}`,
@@ -363,6 +372,85 @@ async function readFacebook(handle: string): Promise<HandleSummary> {
     listing: {
       available: false,
       note: 'Facebook does not publish a page’s post list to anyone without a login, so posts cannot be pulled automatically. Analyse individual posts and they will appear here.',
+    },
+  }
+}
+
+/**
+ * Instagram: the follower count, which is the one thing it will part with.
+ *
+ * The profile page answers a browser with a 593KB shell containing nothing, and
+ * the private API answers a server with 429 — measured on two accounts after a
+ * 90-second wait. Googlebot gets a 703KB page that states the follower count in
+ * plain text. No post list at any of them: zero shortcodes under every identity
+ * tried, so the timeline genuinely is not available.
+ *
+ * The count appears twice on the page and both copies must agree before it is
+ * used. That guard is not theoretical — the equivalent YouTube read took the
+ * first of six "N subscribers" on a channel page and returned a sidebar
+ * channel's figure, which then became the denominator of every engagement rate.
+ */
+async function readInstagram(handle: string): Promise<HandleSummary> {
+  const user = handle.replace(/^@/, '')
+  const profileUrl = `https://www.instagram.com/${user}/`
+  let followers: number | null = null
+
+  // The largest difference a token makes anywhere in this product: the public
+  // path yields a follower count and literally nothing else for Instagram.
+  const creds = metaCredentials()
+  if (creds?.igUserId) {
+    try {
+      const posts = await instagramMedia(creds)
+      if (posts.length) {
+        return {
+          platform: 'Instagram',
+          handle: user,
+          displayName: null,
+          profileUrl,
+          avatarUrl: null,
+          followers: null,
+          posts,
+          listing: {
+            available: true,
+            note: `${posts.length} posts through the Graph API, including reel plays. The public path gives none of this.`,
+          },
+        }
+      }
+    } catch {
+      /* fall through to the public follower count */
+    }
+  }
+
+  try {
+    const res = await fetchText(profileUrl, {
+      agent: 'google',
+      timeout: 9000,
+      headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+    })
+    const found = [...res.body.matchAll(/([\d.,]+\s*[KMB]?)\s+followers/gi)].map((m) =>
+      parseAbbrev(m[1] ?? null),
+    )
+    const distinct = [...new Set(found.filter((n): n is number => n != null))]
+    // One agreed value, or nothing. Two different numbers on the page means we
+    // cannot tell which is the profile's, and a guess here is a wrong ratio.
+    if (distinct.length === 1) followers = distinct[0] ?? null
+  } catch {
+    /* the count is a bonus; its absence is reported below, not thrown */
+  }
+
+  return {
+    platform: 'Instagram',
+    handle: user,
+    displayName: null,
+    profileUrl,
+    avatarUrl: null,
+    followers,
+    posts: [],
+    listing: {
+      available: false,
+      note: followers
+        ? 'Instagram publishes this account’s follower count but not its posts — the timeline needs a login. Analyse individual reels and posts and they will appear here.'
+        : 'Instagram refused this profile. Analyse individual reels and posts and they will appear here.',
     },
   }
 }
@@ -421,12 +509,7 @@ export async function readHandle(ref: HandleRef): Promise<HandleSummary> {
     case 'Facebook':
       return readFacebook(ref.handle)
     case 'Instagram':
-      return blank(
-        'Instagram',
-        ref.handle,
-        `https://www.instagram.com/${ref.handle}/`,
-        'Instagram refuses profile reads from servers — measured as HTTP 429 on two accounts after a 90-second wait. Analyse individual posts and they will appear here.',
-      )
+      return readInstagram(ref.handle)
     case 'LinkedIn':
       return blank(
         'LinkedIn',

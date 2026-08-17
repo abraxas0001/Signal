@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LazyMotion, domAnimation, AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
-import { Clock, LayoutGrid, Moon, RefreshCw, Sun, TriangleAlert } from 'lucide-react'
+import { Clock, Moon, RefreshCw, Sun, TriangleAlert } from 'lucide-react'
 // `Report` must be imported explicitly: the DOM lib declares a global `Report`
 // (the Reporting API), which otherwise shadows ours and produces a baffling
 // "Type 'Report' is not assignable to type 'Report'".
@@ -14,7 +14,9 @@ import { ReportView } from '@/components/report/ReportView'
 import { RescueSheet } from '@/components/RescueSheet'
 import { HistoryPanel } from '@/components/HistoryPanel'
 import { Dashboard } from '@/components/Dashboard'
-import { Button, Card } from '@/components/ui'
+import { Overview } from '@/components/Overview'
+import { TabBar, type Tab } from '@/components/TabBar'
+import { Button, Card, SignalGlyph} from '@/components/ui'
 import { applyDeviceClass, ease, haptic, pageIn } from '@/lib/motion'
 
 /**
@@ -34,7 +36,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>('light')
   const [rescueOpen, setRescueOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [dashboardOpen, setDashboardOpen] = useState(false)
+  const [tab, setTab] = useState<Tab>('dashboard')
   const [lastRequest, setLastRequest] = useState<AnalyseRequest | null>(null)
 
   const [demo, setDemo] = useState<Report | null>(null)
@@ -147,13 +149,6 @@ export default function App() {
           </button>
 
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => setDashboardOpen(true)}
-              aria-label="Accounts dashboard"
-              className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)]"
-            >
-              <LayoutGrid size={18} />
-            </button>
             {history.entries.length > 0 && (
               <button
                 onClick={() => setHistoryOpen(true)}
@@ -272,11 +267,64 @@ export default function App() {
           onSubmit={retryWith}
         />
 
-        {dashboardOpen && (
-          <div className="fixed inset-0 z-40 overflow-y-auto bg-[var(--bg)] pt-16">
-            <Dashboard onClose={() => setDashboardOpen(false)} />
+        {tab === 'dashboard' && !state.report && !demo && (
+          <div className="fixed inset-0 z-20 overflow-y-auto bg-[var(--bg)] pt-[max(0.75rem,var(--sat))]">
+            <Overview
+              historyCount={history.entries.length}
+              onAnalyse={() => {
+                setTab('analyse')
+                startOver()
+              }}
+              onAccounts={() => setTab('accounts')}
+              onCompare={() => setTab('compare')}
+            />
           </div>
         )}
+
+        {(tab === 'accounts' || tab === 'compare') && (
+          <div className="fixed inset-0 z-20 overflow-y-auto bg-[var(--bg)] pt-[max(0.75rem,var(--sat))]">
+            <Dashboard
+              mode={tab === 'compare' ? 'compare' : 'accounts'}
+              onClose={() => setTab('dashboard')}
+            />
+          </div>
+        )}
+
+        <TabBar
+          active={tab}
+          historyCount={history.entries.length}
+          onSelect={(next) => {
+            if (next === 'history') {
+              setHistoryOpen(true)
+              return
+            }
+            if (next === 'analyse') {
+              // The centre control now owns the paste-a-link screen outright.
+              // It used to share it with the left tab, which is why the two
+              // felt identical: both went to the same place and neither did
+              // anything visible if you were already there.
+              setTab('analyse')
+              startOver()
+              requestAnimationFrame(() => {
+                const box = document.querySelector<HTMLInputElement>(
+                  'input[type="url"], #post-url, input[inputmode="url"]',
+                )
+                box?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                box?.focus()
+              })
+              return
+            }
+            if (next === 'dashboard') {
+              // The dashboard is a destination, not an action: it takes the
+              // panels off and shows where things stand.
+              setTab('dashboard')
+              setHistoryOpen(false)
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+              return
+            }
+            setTab(next)
+          }}
+        />
 
         <HistoryPanel
           open={historyOpen}
@@ -304,13 +352,3 @@ export default function App() {
  * uneven height read as a signal being measured, and the single tall one is
  * the finding. It survives 15px because it is four rectangles.
  */
-function SignalGlyph() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <rect x="1.6" y="9.6" width="2.2" height="4.8" rx="1.1" fill="currentColor" opacity="0.55" />
-      <rect x="5.2" y="6.8" width="2.2" height="7.6" rx="1.1" fill="currentColor" opacity="0.75" />
-      <rect x="8.8" y="1.6" width="2.2" height="12.8" rx="1.1" fill="currentColor" />
-      <rect x="12.4" y="8.2" width="2.2" height="6.2" rx="1.1" fill="currentColor" opacity="0.75" />
-    </svg>
-  )
-}

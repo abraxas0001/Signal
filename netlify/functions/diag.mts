@@ -1,6 +1,7 @@
 import type { Config, Context } from '@netlify/functions'
 import { extractPost } from './lib/extract/index'
 import { resolveProviders } from './lib/provider'
+import { metaCredentials, whoAmI, facebookPagePosts, instagramMedia } from './lib/meta-graph'
 
 /**
  * GET /api/diag — what actually happens from the deployed server.
@@ -75,6 +76,36 @@ export default async (_req: Request, _ctx: Context): Promise<Response> => {
     }
   }
 
+  // Whether the Meta page token works, and what it can actually see. An
+  // operator pasting a token needs to know it took effect before they trust a
+  // number that came through it — and a token that has silently expired looks
+  // identical to no token at all from the outside.
+  let meta: Record<string, unknown> = { configured: false }
+  const creds = metaCredentials()
+  if (creds) {
+    meta = { configured: true, instagramLinked: Boolean(creds.igUserId) }
+    try {
+      const me = await whoAmI(creds)
+      const [posts, media] = await Promise.all([
+        facebookPagePosts(creds).catch(() => []),
+        instagramMedia(creds).catch(() => []),
+      ])
+      meta = {
+        ...meta,
+        page: me.name,
+        pageId: me.id,
+        followers: me.followers,
+        facebookPosts: posts.length,
+        instagramPosts: media.length,
+        // Proof the API gives what scraping cannot.
+        sharesAvailable: posts.some((p) => p.shares != null),
+        reelPlaysAvailable: [...posts, ...media].some((p) => p.views != null),
+      }
+    } catch (err) {
+      meta = { ...meta, working: false, why: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
   const providers = resolveProviders()
 
   return Response.json(
@@ -87,6 +118,7 @@ export default async (_req: Request, _ctx: Context): Promise<Response> => {
         pinned: process.env['LLM_PROVIDER'] ?? null,
       },
       crawlerUaAllowed: process.env['ALLOW_CRAWLER_UA'] !== 'false',
+      meta,
       // The deadline the running function is actually using. Netlify injects
       // environment variables at deploy time, so a dashboard change that has
       // not been redeployed reads correctly in the UI and does nothing here —

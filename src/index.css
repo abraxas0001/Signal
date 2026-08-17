@@ -144,6 +144,9 @@
 
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
+  /* The bottom navigation's height, so anything else anchored to the bottom of
+     the viewport can clear it rather than be hidden behind it. */
+  --tabbar-h: calc(64px + var(--sab));
 
   color-scheme: light;
 }

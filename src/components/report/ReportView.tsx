@@ -98,7 +98,7 @@ export function ReportView({
 
   return (
     <m.div
-      className="mx-auto w-full max-w-2xl space-y-6 px-4 pb-28"
+      className="mx-auto w-full max-w-2xl space-y-6 px-4 pb-[calc(10rem+var(--sab))]"
       variants={listStagger}
       initial="hidden"
       animate="show"
@@ -431,7 +431,8 @@ export function ReportView({
       </m.div>
 
       {/* Bottom-anchored primary action, inside the thumb zone. */}
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--border)] bg-[var(--bg)]/90 px-4 py-3 backdrop-blur-md safe-b no-print">
+      <div className="fixed inset-x-0 z-20 border-t border-[var(--border)] bg-[var(--bg)]/90 px-4 py-3 backdrop-blur-md no-print"
+        style={{ bottom: 'var(--tabbar-h)' }}>
         <div className="mx-auto flex max-w-2xl gap-2">
           <Button variant="primary" onClick={onReset} className="flex-1">
             <RotateCcw size={16} />
