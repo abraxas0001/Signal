@@ -17,11 +17,12 @@
     "test:endpoint": "tsx scripts/test-endpoint.ts",
     "test:schema": "tsx scripts/test-schema.ts",
     "test:contrast": "tsx scripts/test-contrast.ts",
+    "test:handles": "tsx scripts/test-handles.ts",
     "test:comments": "tsx scripts/test-comments.ts",
     "test:export": "tsx scripts/test-export.ts",
     "test:typography": "tsx scripts/test-typography.ts",
     "test:ssrf": "tsx scripts/test-ssrf.ts",
-    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:contrast && npm run test:typography && npm run test:comments && npm run test:export && npm run test:extract"
+    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:comments && npm run test:export && npm run test:extract"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

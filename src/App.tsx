@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LazyMotion, domAnimation, AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
-import { Clock, Moon, RefreshCw, Sun, TriangleAlert } from 'lucide-react'
+import { Clock, LayoutGrid, Moon, RefreshCw, Sun, TriangleAlert } from 'lucide-react'
 // `Report` must be imported explicitly: the DOM lib declares a global `Report`
 // (the Reporting API), which otherwise shadows ours and produces a baffling
 // "Type 'Report' is not assignable to type 'Report'".
@@ -13,6 +13,7 @@ import { Pipeline } from '@/components/Pipeline'
 import { ReportView } from '@/components/report/ReportView'
 import { RescueSheet } from '@/components/RescueSheet'
 import { HistoryPanel } from '@/components/HistoryPanel'
+import { Dashboard } from '@/components/Dashboard'
 import { Button, Card } from '@/components/ui'
 import { applyDeviceClass, ease, haptic, pageIn } from '@/lib/motion'
 
@@ -33,6 +34,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>('light')
   const [rescueOpen, setRescueOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [dashboardOpen, setDashboardOpen] = useState(false)
   const [lastRequest, setLastRequest] = useState<AnalyseRequest | null>(null)
 
   const [demo, setDemo] = useState<Report | null>(null)
@@ -145,6 +147,13 @@ export default function App() {
           </button>
 
           <div className="flex items-center gap-1">
+            <button
+              onClick={() => setDashboardOpen(true)}
+              aria-label="Accounts dashboard"
+              className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)]"
+            >
+              <LayoutGrid size={18} />
+            </button>
             {history.entries.length > 0 && (
               <button
                 onClick={() => setHistoryOpen(true)}
@@ -262,6 +271,12 @@ export default function App() {
           onClose={() => setRescueOpen(false)}
           onSubmit={retryWith}
         />
+
+        {dashboardOpen && (
+          <div className="fixed inset-0 z-40 overflow-y-auto bg-[var(--bg)] pt-16">
+            <Dashboard onClose={() => setDashboardOpen(false)} />
+          </div>
+        )}
 
         <HistoryPanel
           open={historyOpen}
