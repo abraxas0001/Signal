@@ -103,6 +103,23 @@ if (process.env['SKIP_LIVE'] === '1') {
     }
     const cs = snap.comments ?? []
 
+    // Distinguish "our parsing broke" from "the platform is down".
+    //
+    // A suite that goes red when a third party has an outage is a suite people
+    // learn to ignore, and then it stops catching the real thing. Bluesky's
+    // getPostThread returned 502 on every post for a stretch — including one
+    // with 493 replies — while its profile and feed endpoints answered 200.
+    // That is not a regression here and must not be reported as one. It is
+    // also not a pass: it is untested, and it says so.
+    const upstreamDown = snap.extraction.attempts.some((a) =>
+      !a.ok && /HTTP 5\d\d/.test(a.note ?? ''),
+    )
+    if (upstreamDown) {
+      const why = snap.extraction.attempts.find((a) => !a.ok && /HTTP 5\d\d/.test(a.note ?? ''))
+      console.log(`  [33m—[0m ${t.platform}: SKIPPED, the platform is returning an error (${why?.note ?? ''}) — not a code failure`)
+      continue
+    }
+
     // The post must actually be live, or nothing below proves anything — which
     // is precisely how bug #1 shipped.
     chk(`${t.platform}: post is live (has a comment count)`,
