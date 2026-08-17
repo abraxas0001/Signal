@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
 import { parseHandleUrl } from '@shared/handle-url'
 import {
+  analysedPostsFor,
   readStandingCache,
   saveStandingCache,
   readRivals,
@@ -449,9 +450,27 @@ export function Dashboard({
     setReading(h.id)
     setError(null)
     try {
-      const res = await fetch(
-        `/api/standing?q=${encodeURIComponent(h.profileUrl || h.handle)}`,
-      )
+      // Platforms that publish a post list get crawled. The rest are scored on
+      // the posts this user has already analysed, which is the only honest way
+      // to reach a Facebook or LinkedIn account at all.
+      const crawlable = AUTO.has(h.platform)
+      const own = crawlable ? [] : analysedPostsFor(h)
+
+      if (!crawlable && !own.length) {
+        setError(
+          `${h.platform} does not publish this account's posts. Analyse a few of them with the link button and they will be read from here.`,
+        )
+        return
+      }
+
+      const res = crawlable
+        ? await fetch(`/api/standing?q=${encodeURIComponent(h.profileUrl || h.handle)}`)
+        : await fetch('/api/standing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls: own, platform: h.platform, handle: h.handle }),
+          })
+
       const j = (await res.json()) as Record<string, unknown>
       if (!res.ok) {
         setError(String(j['error'] ?? 'Could not read public opinion.'))

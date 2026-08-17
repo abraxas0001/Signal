@@ -347,3 +347,40 @@ export function saveStandingCache(handleId: string, standing: Standing): void {
     /* a cache that will not write is a slower app, not a broken one */
   }
 }
+
+/**
+ * Posts the user has already analysed that belong to a tracked account.
+ *
+ * The bridge for the gated platforms. Facebook, Instagram, LinkedIn and X will
+ * not list an account's posts to a stranger, so those accounts can never be
+ * crawled — but every post read through this product was read in full,
+ * comments included. Matching them back to the account turns a permanently
+ * blank row into a real sample.
+ *
+ * Matched on platform plus author handle, falling back to the display name,
+ * because the same person's handle is spelled differently across platforms
+ * and an unmatched post is better than one attributed to the wrong account.
+ */
+export function analysedPostsFor(handle: TrackedHandle): string[] {
+  let entries: { url?: string; platform?: string; report?: unknown }[] = []
+  try {
+    entries = JSON.parse(localStorage.getItem('signal:history:v1') ?? '[]') as typeof entries
+  } catch {
+    return []
+  }
+
+  const want = handle.handle.replace(/^@/, '').toLowerCase()
+  const wantName = (handle.displayName ?? '').trim().toLowerCase()
+
+  const urls: string[] = []
+  for (const e of entries) {
+    if (!e.url || e.platform !== handle.platform) continue
+    const snap = (e.report as { snapshot?: { author?: { handle?: string; name?: string } } })
+      ?.snapshot
+    const h = (snap?.author?.handle ?? '').replace(/^@/, '').toLowerCase()
+    const n = (snap?.author?.name ?? '').trim().toLowerCase()
+    if (h === want || (wantName && n === wantName)) urls.push(e.url)
+  }
+  // Newest first: recent posts describe the audience the account has now.
+  return [...new Set(urls)]
+}
