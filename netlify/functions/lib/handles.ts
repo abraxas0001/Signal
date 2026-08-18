@@ -1,6 +1,6 @@
 import type { Platform } from '../../../shared/taxonomy'
 import { fetchText, fetchJson } from './fetcher'
-import { decodeEntities } from './extract/json-scan'
+import { decodeEntities, decodeJsonString, collectKey } from './extract/json-scan'
 import { parseHandleUrl } from '../../../shared/handle-url'
 import { metaCredentials, whoAmI, facebookPagePosts, instagramMedia } from './meta-graph'
 
@@ -83,6 +83,90 @@ export const parseHandle = parseHandleUrl
 // ─────────────────────────────────────────────────────────────────────────────
 // YouTube
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A channel's uploads via InnerTube, when the RSS feed comes back empty.
+ *
+ * The feed is the cheap path and it works from a residential connection. From
+ * the deployed server it returns no entries at all, while the channel page
+ * beside it answers fine — measured on two channels, both 15 posts locally and
+ * 0 in production, with correct follower counts in the same response. So the
+ * dashboard showed accounts with a follower count and no posts, and the
+ * opinion reader had nothing to read.
+ *
+ * InnerTube is already proven from that network: it is what fetches comment
+ * counts and bodies today. This asks it for the channel's Videos tab instead.
+ *
+ * It yields the video id, a view count and a relative age, but no like count —
+ * the feed's one advantage. Engagement therefore falls back to views where
+ * likes are absent, which the caller reports honestly rather than hiding.
+ */
+async function youtubeUploadsViaInnerTube(channelId: string): Promise<HandlePost[]> {
+  const res = await fetchJson<Record<string, unknown>>(
+    'https://www.youtube.com/youtubei/v1/browse?prettyPrint=false',
+    {
+      timeout: 9000,
+      json: {
+        context: {
+          client: { clientName: 'WEB', clientVersion: '2.20240726.00.00', hl: 'en', gl: 'US' },
+        },
+        browseId: channelId,
+        // The Videos tab. Without it the response is the channel's home layout.
+        params: 'EgZ2aWRlb3PyBgQKAjoA',
+      },
+    },
+  )
+  if (!res.data) return []
+
+  const posts: HandlePost[] = []
+  for (const node of collectKey(res.data, 'lockupViewModel', 40) as Record<string, unknown>[]) {
+    const id = node['contentId']
+    if (typeof id !== 'string' || !/^[\w-]{11}$/.test(id)) continue
+
+    const blob = JSON.stringify(node)
+    const title = /"title":\{"content":"([^"]{2,120})"/.exec(blob)?.[1] ?? null
+    // The metadata row reads "18K views" then "1 day ago", in that order.
+    const parts = [...blob.matchAll(/"content":"([^"]{1,30})"/g)].map((m) => m[1] ?? '')
+    const views = parseAbbrev(parts.find((t) => /views?$/i.test(t)) ?? null)
+    const age = parts.find((t) => /\bago$/i.test(t)) ?? null
+
+    posts.push({
+      url: `https://www.youtube.com/watch?v=${id}`,
+      title: decodeJsonString(title),
+      publishedAt: relativeToIso(age),
+      views,
+      // InnerTube's channel listing carries no like count; the feed did.
+      likes: null,
+      comments: null,
+    })
+  }
+  return posts
+}
+
+/**
+ * "3 days ago" to a date.
+ *
+ * Approximate by construction, and used only for posting cadence, where the
+ * span between the oldest and newest post is what matters rather than any
+ * single date. Returning null instead would suppress cadence entirely.
+ */
+function relativeToIso(rel: string | null): string | null {
+  if (!rel) return null
+  const m = /(\d+)\s*(minute|hour|day|week|month|year)/i.exec(rel)
+  if (!m?.[1] || !m[2]) return null
+  const n = Number(m[1])
+  const ms: Record<string, number> = {
+    minute: 60_000,
+    hour: 3_600_000,
+    day: 86_400_000,
+    week: 604_800_000,
+    month: 2_592_000_000,
+    year: 31_536_000_000,
+  }
+  const unit = ms[m[2].toLowerCase()]
+  if (!unit || !Number.isFinite(n)) return null
+  return new Date(Date.now() - n * unit).toISOString()
+}
 
 /**
  * A channel's recent uploads, from the RSS feed YouTube still publishes.
@@ -168,6 +252,21 @@ async function readYouTube(handle: string): Promise<HandleSummary> {
     })
   }
 
+  // The feed is empty from a datacentre while the channel page beside it works,
+  // so fall back rather than reporting a busy channel as silent.
+  let viaFallback = false
+  if (!posts.length) {
+    try {
+      const alt = await youtubeUploadsViaInnerTube(channelId)
+      if (alt.length) {
+        posts.push(...alt)
+        viaFallback = true
+      }
+    } catch {
+      /* the follower count still stands on its own */
+    }
+  }
+
   displayName ??= decodeEntities(/<title>([^<]*)<\/title>/.exec(rss.body)?.[1] ?? null)
 
   return {
@@ -180,9 +279,14 @@ async function readYouTube(handle: string): Promise<HandleSummary> {
     posts,
     listing: {
       available: posts.length > 0,
-      note: posts.length
-        ? `${posts.length} recent uploads from the channel feed.`
-        : 'The channel feed returned no recent uploads.',
+      // Say which path produced this, because the two carry different figures
+      // and the engagement column goes blank on one of them. An unexplained
+      // dash reads as a bug; a stated reason reads as a limit.
+      note: !posts.length
+        ? 'The channel feed returned no recent uploads.'
+        : viaFallback
+          ? `${posts.length} recent uploads. YouTube's feed was empty from here, so these came from its browse API — which publishes view counts but no likes, so engagement cannot be worked out for this channel.`
+          : `${posts.length} recent uploads from the channel feed, with views and likes.`,
     },
   }
 }
