@@ -156,7 +156,7 @@ export function Overview({
 
   return (
     <m.div
-      className="mx-auto w-full max-w-2xl space-y-9 px-4 pb-[calc(7rem+var(--sab))] pt-1"
+      className="shell shell-prose stack page-end"
       variants={listStagger}
       initial="hidden"
       animate="show"

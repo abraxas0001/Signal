@@ -84,12 +84,16 @@
 
 :root {
   /* -- LIGHT -------------------------------------------------------------- */
-  --bg: #f7f8fc;
-  --surface: #ffffff;
-  --surface-2: #f4f5f8;
-  --surface-3: #eceef3;
-  --border: #e6e8ee;
-  --border-strong: #d3d7e0;
+  /* Newsprint, not paper-white. The ground is warm and slightly gray because
+     this is read outdoors in daylight, where a pure #fff surface glares and a
+     cream one washes out. Cool blue-gray was the previous value and it is what
+     made every screen read as a generic dashboard regardless of the type. */
+  --bg: #efeee9;
+  --surface: #f7f6f2;
+  --surface-2: #e7e5de;
+  --surface-3: #dedcd3;
+  --border: #d7d4ca;
+  --border-strong: #b9b5a8;
   /* The boundary of a control the user can operate. WCAG 1.4.11 asks for 3:1
      on those, which --border-strong does not meet (1.44:1 on white) — fine for
      a decorative rule, not fine for the outline of the app's main input. Kept
@@ -97,19 +101,23 @@
   --border-interactive: #83868f;
   /* Hairline divider. Purely decorative, so it is exempt from the 3:1 floor —
      it never outlines a control and never carries meaning alone. */
-  --rule: #d8d3c9;
+  --rule: #cfcbbf;
 
-  --text: #0b0d14;
-  --text-2: #454b60;
+  --text: #13140f;
+  --text-2: #4a4b42;
   /* Darkened from #767d93: at the old value, small labels sat at 3.76:1 on
      --surface-2, below the 4.5:1 AA floor. These labels carry the provenance
      marks ("exact" / "estimate"), so they are load-bearing, not decoration. */
-  --text-3: #636a7e;
+  --text-3: #6b6c61;
 
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
+  /* Ink blue, from an official record rather than a product launch. The old
+     value was #4f46e5 — Tailwind's stock indigo — which, over white cards in
+     Inter, is the exact combination that reads as generated rather than
+     designed. Blue also leaves red free to mean only one thing: risk. */
+  --accent: #1d3f66;
+  --accent-hover: #16324f;
   --accent-fg: #ffffff;
-  --accent-soft: #eef0fe;
+  --accent-soft: #dfe6ef;
 
   /* Each status colour is darkened just enough to clear 4.5:1 against its own
      soft background — chip text states severity and priority, so it has to be
@@ -123,9 +131,13 @@
   --info: #0d72b8;
   --info-soft: #e5f3fd;
 
-  --aurora-1: #7c6bff;
-  --aurora-2: #33c4e8;
-  --aurora-3: #ff7ac6;
+  /* Kept as names because a few rules still reference them, but muted to the
+     ground. The drifting pastel blobs they used to paint were the single most
+     dated thing on the screen, and they cost a compositor layer on a phone
+     that has none to spare. */
+  --aurora-1: #cfcbbf;
+  --aurora-2: #b9b5a8;
+  --aurora-3: #d7d4ca;
 
   /* Diverging scale for sentiment. Deliberately NOT the --pos/--neg status
      colours: status is reserved, and a naive green/red pair separates by only
@@ -154,23 +166,23 @@
 /* Dark is the default when the viewer has expressed no preference. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #07080c;
-    --surface: #0e1017;
-    --surface-2: #161923;
-    --surface-3: #1e2230;
-    --border: #232734;
-    --border-strong: #333949;
-    --border-interactive: #616673;
-    --rule: #2a2f3d;
+    --bg: #12120f;
+    --surface: #1a1a16;
+    --surface-2: #22221d;
+    --surface-3: #2b2b25;
+    --border: #2f2f29;
+    --border-strong: #454439;
+    --border-interactive: #6f6e62;
+    --rule: #35342d;
 
-    --text: #f2f4f8;
-    --text-2: #b4bacb;
-    --text-3: #7b8299;
+    --text: #f2f1ea;
+    --text-2: #bdbcb1;
+    --text-3: #8b8a80;
 
-    --accent: #8b87ff;
-    --accent-hover: #a5a2ff;
-    --accent-fg: #0a0b12;
-    --accent-soft: #1b1a3a;
+    --accent: #8fb3dc;
+    --accent-hover: #a9c6e8;
+    --accent-fg: #0b0e12;
+    --accent-soft: #16202d;
 
     --pos: #34d399;
     --pos-soft: #0e2a22;
@@ -181,9 +193,9 @@
     --info: #4cc2ff;
     --info-soft: #0d2233;
 
-    --aurora-1: #5b4fe0;
-    --aurora-2: #1b7a94;
-    --aurora-3: #a63c7c;
+    --aurora-1: #35342d;
+    --aurora-2: #2f2f29;
+    --aurora-3: #454439;
 
     --chart-neg: #f87171;
     --chart-mid: #6b7285;
@@ -202,21 +214,21 @@
 
 /* Explicit toggle wins in both directions. */
 [data-theme='dark'] {
-  --bg: #07080c;
-  --surface: #0e1017;
-  --surface-2: #161923;
-  --surface-3: #1e2230;
-  --border: #232734;
-  --border-strong: #333949;
-  --border-interactive: #616673;
-  --rule: #2a2f3d;
-  --text: #f2f4f8;
-  --text-2: #b4bacb;
-  --text-3: #7b8299;
-  --accent: #8b87ff;
-  --accent-hover: #a5a2ff;
-  --accent-fg: #0a0b12;
-  --accent-soft: #1b1a3a;
+  --bg: #12120f;
+  --surface: #1a1a16;
+  --surface-2: #22221d;
+  --surface-3: #2b2b25;
+  --border: #2f2f29;
+  --border-strong: #454439;
+  --border-interactive: #6f6e62;
+  --rule: #35342d;
+  --text: #f2f1ea;
+  --text-2: #bdbcb1;
+  --text-3: #8b8a80;
+  --accent: #8fb3dc;
+  --accent-hover: #a9c6e8;
+  --accent-fg: #0b0e12;
+  --accent-soft: #16202d;
   --pos: #34d399;
   --pos-soft: #0e2a22;
   --warn: #fbbf24;
@@ -225,9 +237,9 @@
   --neg-soft: #2c1416;
   --info: #4cc2ff;
   --info-soft: #0d2233;
-  --aurora-1: #5b4fe0;
-  --aurora-2: #1b7a94;
-  --aurora-3: #a63c7c;
+  --aurora-1: #35342d;
+  --aurora-2: #2f2f29;
+  --aurora-3: #454439;
   --chart-neg: #f87171;
   --chart-mid: #6b7285;
   --chart-pos: #2dd4bf;
@@ -484,14 +496,33 @@ h4 {
    so a KPI row set in it gets a jumping baseline and a descending 4.
    =========================================================================== */
 
+/**
+ * The headline voice.
+ *
+ * Instrument Serif was already being downloaded and was used on almost
+ * nothing, so every headline in the app was Inter at weight 800 — the same
+ * face as the body text, only heavier. That is what makes a screen read as
+ * untyped: there is no second voice, just one voice shouting.
+ *
+ * Indic runs must not land here. This face has no Telugu coverage, so a
+ * Telugu headline falls through to the serif stack and breaks its conjuncts;
+ * those carry `.te`, which reassigns them to --font-telugu.
+ */
 .hed {
-  font-family: var(--font-display);
-  font-weight: 800;
-  letter-spacing: -0.038em;
-  line-height: 1.02;
-  /* Inter's optical-size and contextual alternates: the difference between a
-     headline that looks set and one that looks typed. */
-  font-feature-settings: 'cv11' 1, 'ss01' 1, 'calt' 1;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  line-height: 1.06;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+}
+
+.hed.te,
+.te .hed,
+.te {
+  font-family: var(--font-telugu);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.45;
 }
 
 /**
@@ -509,22 +540,14 @@ h4 {
 
 /* Colour carried through the type itself, so the largest element on a screen
    is also the most colourful one. */
+/**
+ * Was a gradient fill across the headline. Gradient text is the most reliable
+ * tell of a generated design, and at 4pt of tracking on a 390px screen the
+ * colour shift read as a rendering fault rather than an effect. The headline
+ * is ink; emphasis is carried by the serif and by size.
+ */
 .hed-grad {
-  background: linear-gradient(
-    104deg,
-    var(--text) 0%,
-    var(--text) 24%,
-    var(--accent) 68%,
-    color-mix(in oklab, var(--accent) 62%, var(--aurora-2)) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-@supports not (background-clip: text) {
-  .hed-grad {
-    color: var(--text);
-  }
+  color: var(--text);
 }
 
 /* A marker stroke under a key phrase. Sits behind the baseline so descenders
@@ -681,10 +704,23 @@ body {
   pointer-events: none;
 }
 
+/**
+ * A block, not a floating panel.
+ *
+ * These used to be white rounded rectangles with a drop shadow, stacked one
+ * after another down every screen. That pattern gives each block the same
+ * weight, so a page of eight cards has no hierarchy at all — and a shadow is
+ * a paint cost on a phone that is already spending everything it has on
+ * Telugu text shaping.
+ *
+ * A hairline rule does the same job of separating. Hierarchy then has to come
+ * from type and spacing, which is where it belonged.
+ */
 .card {
   background: var(--surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--e1);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
   contain: layout paint;
 }
 
@@ -793,5 +829,138 @@ body {
     box-shadow: none;
     border: 1px solid #ddd;
     break-inside: avoid;
+  }
+}
+
+/* ===========================================================================
+   Shell — one measure system for every screen.
+
+   Before this, each screen picked its own `max-w-*`: the header was max-w-2xl,
+   the briefing max-w-4xl, the grievance desk max-w-6xl, the report max-w-2xl.
+   Four different measures meant nothing lined up with anything, and on a 1440px
+   laptop the widest of them still left a third of the window empty on each
+   side while the header sat visibly narrower than the content beneath it.
+
+   Three measures now, chosen by what the screen is for rather than by which
+   Tailwind step looked right at the time:
+
+     .shell        working screens — grids, tables, tiles. Wide enough to put
+                   three or four columns of real data side by side.
+     .shell-wide   the densest boards, where a fourth column earns its place.
+     .shell-prose  anything read start to finish. Caps the measure near 70ch,
+                   because a 1400px line of body copy is unreadable no matter
+                   how much room the window has.
+
+   The gutter is a variable rather than a utility so the page edge, the sticky
+   header and any full-bleed rule inside a screen all breathe on the same
+   number, and widening it later is one edit instead of forty.
+   =========================================================================== */
+
+:root {
+  --gutter: 1rem;
+  --shell: 1320px;
+  --shell-wide: 1680px;
+  /* Long-form only — a report read start to finish. Everything that is
+     operated rather than read uses --shell, which is wider. */
+  --shell-prose: 54rem;
+  /* The sticky header's height, so screens can offset their own sticky
+     elements against it instead of guessing. */
+  --topbar-h: 3.5rem;
+  /* The desktop navigation column. Referenced by the header and by any
+     fixed-position child that has to clear it. */
+  --rail-w: 15rem;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --gutter: 1.5rem;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --gutter: 2rem;
+    --topbar-h: 3.75rem;
+    /* TabBar is `lg:hidden`, so from here up nothing should reserve its
+       height. Anything anchored to the bottom of the viewport read this and
+       floated 64px clear of an edge with nothing on it. */
+    --tabbar-h: var(--sab);
+  }
+}
+@media (min-width: 1536px) {
+  :root {
+    --gutter: 2.5rem;
+  }
+}
+
+.shell {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+  max-width: calc(var(--shell) + var(--gutter) * 2);
+}
+
+.shell-wide {
+  max-width: calc(var(--shell-wide) + var(--gutter) * 2);
+}
+
+.shell-prose {
+  max-width: calc(var(--shell-prose) + var(--gutter) * 2);
+}
+
+/* Breaks a child out of the shell's gutter to sit flush with the page edge —
+   for a rule, a scrolling strip, or a table that needs the full width. */
+.bleed {
+  margin-inline: calc(var(--gutter) * -1);
+  padding-inline: var(--gutter);
+}
+
+/* ---------------------------------------------------------------------------
+   Vertical rhythm.
+
+   Sections were spaced with whatever `space-y-*` each screen reached for —
+   5, 6 and 9 all appear — so two screens side by side had visibly different
+   pacing. One scale, applied at the screen level.
+   --------------------------------------------------------------------------- */
+.stack > * + * {
+  margin-top: 1.25rem;
+}
+@media (min-width: 1024px) {
+  .stack > * + * {
+    margin-top: 1.75rem;
+  }
+}
+
+.stack-tight > * + * {
+  margin-top: 0.75rem;
+}
+
+/* The bottom of every scrolling screen has to clear the mobile tab bar, and on
+   desktop simply wants air under the last section. */
+.page-end {
+  padding-bottom: calc(6rem + var(--sab));
+}
+@media (min-width: 1024px) {
+  .page-end {
+    padding-bottom: 4rem;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Anything pinned to the bottom of the viewport.
+
+   `fixed inset-x-0` spans the window, which is wrong the moment there is a
+   fixed navigation rail: on a laptop the report's action bar ran underneath
+   the sidebar and its buttons were half-hidden by it. This clears the rail at
+   the same breakpoint the rail appears at.
+   --------------------------------------------------------------------------- */
+.docked {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--tabbar-h);
+}
+@media (min-width: 1024px) {
+  .docked {
+    left: var(--rail-w);
   }
 }

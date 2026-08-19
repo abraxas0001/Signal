@@ -2,6 +2,7 @@ import type { Config, Context } from '@netlify/functions'
 import { extractPost } from './lib/extract/index'
 import { resolveProviders } from './lib/provider'
 import { metaCredentials, whoAmI, facebookPagePosts, instagramMedia } from './lib/meta-graph'
+import { listConnections } from './lib/connections'
 
 /**
  * GET /api/diag — what actually happens from the deployed server.
@@ -108,6 +109,10 @@ export default async (_req: Request, _ctx: Context): Promise<Response> => {
 
   const providers = resolveProviders()
 
+  // Office-owned OAuth connections. Status only, from listConnections() —
+  // never a token, matching this endpoint's own stated purpose.
+  const connections = await listConnections().catch(() => [])
+
   return Response.json(
     {
       egress,
@@ -119,6 +124,7 @@ export default async (_req: Request, _ctx: Context): Promise<Response> => {
       },
       crawlerUaAllowed: process.env['ALLOW_CRAWLER_UA'] !== 'false',
       meta,
+      connections,
       // The deadline the running function is actually using. Netlify injects
       // environment variables at deploy time, so a dashboard change that has
       // not been redeployed reads correctly in the UI and does nothing here —

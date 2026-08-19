@@ -117,6 +117,18 @@ Neither is needed. Both are kept only as backstops.
 | `YOUTUBE_API_KEY` | No longer needed | Exact like and comment counts now come from the page itself and from YouTube's own comment continuation, so this only fills gaps. |
 | `META_APP_TOKEN` | Rarely | Meta's oEmbed returns no engagement data even with a token. The Facebook counts here come from reading the page, not the API. |
 
+### Connecting the office's own accounts
+
+Different from the two keys above: these read data no public request can
+reach at all — real comment bodies, exact share counts — for accounts your
+office actually owns. Nothing works without an explicit login as that account;
+none of it reaches a rival's page.
+
+| Key | What it buys |
+|---|---|
+| `META_PAGE_TOKEN` / `META_IG_USER_ID` | A Facebook Page/Instagram Business account's own posts, real comments, share counts and reel plays — via the Graph API. Pasted once, manually; see `meta-graph.ts`. |
+| `SETTINGS_ACCESS_KEY`, `CONNECTIONS_ENCRYPTION_KEY`, `OAUTH_STATE_SECRET`, `YOUTUBE_OAUTH_CLIENT_ID`/`_SECRET`, `LINKEDIN_OAUTH_CLIENT_ID`/`_SECRET`/`_SCOPE`, `X_OAUTH_CLIENT_ID`/`_SECRET` | The same idea for YouTube, LinkedIn and X, but connected from the app's own Settings screen via OAuth instead of a pasted token. YouTube ships full rich reads; LinkedIn and X ship identity-confirmation only for now — LinkedIn's post access needs a separate manual platform approval, and X's needs a paid API tier. See `.env.example` for the full setup, gotchas, and what each buys. |
+
 ---
 
 ## What can actually be extracted
@@ -241,6 +253,13 @@ exactly this.
 
 Read this before deploying commercially. The methods above are not equally
 defensible, and the difference matters.
+
+**Your own account, via OAuth.** Connecting a YouTube, LinkedIn or X account
+from Settings, or pasting a Facebook/Instagram Page token, is stronger than
+"sanctioned" below — it is explicit, revocable, platform-issued consent for
+one specific account, not just a documented public endpoint. It also cannot
+be made to read anyone else's account: a token only ever authorises the
+identity that granted it. See `.env.example` and `meta-graph.ts`.
 
 **Sanctioned.** Bluesky's AT Protocol API and Mastodon's REST API are public,
 documented, and intended for exactly this. Pinterest's widget endpoint and the

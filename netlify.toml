@@ -21,6 +21,36 @@
   # Netlify allows up to 60s for synchronous functions.
   timeout = 60
 
+[functions."grievance"]
+  # A batch is up to ten articles, each a fetch plus a classification and a
+  # misinformation pass. They run concurrently and stream back as they land,
+  # but the whole batch still needs the full window — without this the
+  # endpoint was killed mid-batch and the desk returned nothing at all.
+  timeout = 60
+
+[functions."influencers"]
+  # Reads several accounts and scores whatever mentions the office, which is
+  # one fetch per account before any model call happens.
+  timeout = 60
+
+[functions."oauth-callback"]
+  # Two sequential upstream calls (token exchange, then whoAmI), each with its
+  # own 9s timeout — worst case is close to the platform default of 10s.
+  timeout = 30
+
+[functions."opinion"]
+  # A grounded web search plus a structuring call. Runs rarely and is cached.
+  timeout = 60
+
+[functions."news-sources"]
+  # One grounded search plus up to eight live page reads, each of which has to
+  # be fetched and counted before it can be trusted as a source. Runs rarely.
+  timeout = 60
+
+[functions."connections"]
+  # The Meta status check calls whoAmI() live, with a 9s timeout of its own.
+  timeout = 20
+
 # The SPA catch-all. Functions declared with `config.path` are matched by
 # Netlify *before* redirects, so /api/analyse reaches the function and never
 # falls through to index.html — but this rule is scoped to exclude /api anyway

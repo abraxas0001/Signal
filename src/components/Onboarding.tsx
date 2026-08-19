@@ -1,0 +1,789 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useReducedMotion } from 'motion/react'
+import * as m from 'motion/react-m'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Building2,
+  CircleAlert,
+  ExternalLink,
+  Landmark,
+  Link2,
+  Loader2,
+  Pencil,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  UserRound,
+} from 'lucide-react'
+import type { Identity } from '@shared/identity'
+import { statedIdentity } from '@shared/identity'
+import {
+  editField,
+  looksLikeUrl,
+  resolveIdentity,
+  saveIdentity,
+  skipOnboarding,
+  type PersonCandidate,
+} from '@/lib/identity'
+import { Avatar, Button, Card, Chip, Shell, SignalGlyph } from './ui'
+import { IdentityRows } from './IdentityEditor'
+import { applyDeskPlan, describePlan, planDesk } from '@/lib/autoconfig'
+import { cn } from '@/lib/utils'
+import { fadeUp, listStagger } from '@/lib/motion'
+
+/**
+ * The first screen anybody sees.
+ *
+ * What was here before was a box asking for a link to a social media post. That
+ * is the right screen for somebody who already knows what this tool does and
+ * has a specific post in mind. It is the wrong one for the office it was built
+ * for: a member's staff opening it on a Monday morning does not have a link,
+ * they have a name, and the question they came with is "what is being said
+ * about us".
+ *
+ * So this asks who you are first, and the rest of the product configures itself
+ * from the answer — the news scan gets its search terms, the dashboard gets a
+ * face and a seat, and the greeting stops being generic.
+ *
+ * Two ways in, and both work on a deployment with nothing configured:
+ *
+ *   1. Paste a public profile link. What a public figure with public handles
+ *      will reach for, and it needs no credentials of any kind.
+ *   2. Type it in. Always available, never slower for somebody who knows their
+ *      own details, and the only one that works with no network at all.
+ *
+ * Connecting a real social account is deliberately NOT offered here. It needs
+ * an administrator to have registered an application with the platform and set
+ * a shared key on the deployment, and a first-run screen that opens with a
+ * control most people cannot use — and cannot tell whether they are supposed to
+ * be able to use — is a screen that teaches them the product is broken. It is
+ * offered from the dashboard afterwards, where the office can see what it would
+ * add to what they already have.
+ *
+ * Nothing here is mandatory. Skip lands on the same dashboard with less on it,
+ * because a setup wizard that cannot be dismissed is how a tool gets abandoned
+ * before it has shown anybody anything.
+ */
+
+type Step = 'choose' | 'working' | 'review'
+
+
+export function Onboarding({ onDone }: { onDone: () => void }) {
+  const reduce = useReducedMotion() === true
+
+  const [step, setStep] = useState<Step>('choose')
+  const [mode, setMode] = useState<'link' | 'manual'>('link')
+  const [query, setQuery] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [draft, setDraft] = useState<Identity | null>(null)
+
+  const [results, setResults] = useState<PersonCandidate[] | null>(null)
+  const [searching, setSearching] = useState(false)
+
+  // What the "type it in" path collects. Deliberately four fields: a name, what
+  // they do, where, and which party. Anything more is a form, and a form is
+  // what people close.
+  const [manual, setManual] = useState({ name: '', role: 'MLA', constituency: '', state: '' })
+
+  const urlRef = useRef<HTMLInputElement>(null)
+
+  /* ── searching ────────────────────────────────────────────────────────── */
+
+  /**
+   * Look the name up while it is being typed.
+   *
+   * Debounced at 350ms and floored at three characters, because the index is
+   * somebody else's public API and one search per keystroke is both rude and
+   * useless — the results for "dk a" are noise the reader has to scroll past to
+   * reach the results for "dk aruna".
+   *
+   * An address is not searched at all. Somebody who pastes a profile link has
+   * already told us exactly who they mean, and running a full-text search on a
+   * URL returns nothing while looking like the box is broken.
+   */
+  useEffect(() => {
+    const raw = query.trim()
+
+    if (raw.length < 3 || looksLikeUrl(raw)) {
+      setResults(null)
+      setSearching(false)
+      return
+    }
+
+    setSearching(true)
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/identity/search?q=${encodeURIComponent(raw)}`)
+          if (!res.ok) throw new Error(String(res.status))
+          const payload = (await res.json()) as { candidates?: PersonCandidate[] }
+          if (!cancelled) setResults(payload.candidates ?? [])
+        } catch {
+          // A failed lookup is not an error the reader needs to see: the box
+          // still accepts a link, and "use what I typed" needs no index.
+          if (!cancelled) setResults([])
+        } finally {
+          if (!cancelled) setSearching(false)
+        }
+      })()
+    }, 350)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [query])
+
+  /* ── resolving ────────────────────────────────────────────────────────── */
+
+  const lookUp = async (input: { url?: string; name?: string; role?: string; constituency?: string; state?: string }) => {
+    setError(null)
+    setStep('working')
+
+    const { identity, error: failure } = await resolveIdentity(input)
+
+    if (identity) {
+      setDraft(identity)
+      setStep('review')
+      return
+    }
+
+    // A failed lookup is not a dead end. If we know enough to build a card from
+    // what they typed, we go to review with that rather than sending them back
+    // to the start having lost their typing.
+    if (input.name) {
+      setDraft(
+        statedIdentity({
+          name: input.name,
+          role: input.role ?? null,
+          constituency: input.constituency ?? null,
+          state: input.state ?? null,
+        }),
+      )
+      setError(failure)
+      setStep('review')
+      return
+    }
+
+    setError(failure)
+    setStep('choose')
+  }
+
+  /**
+   * What the box does when it is submitted rather than picked from.
+   *
+   * One box, two meanings, decided by what was typed — the browser address bar
+   * pattern. A link resolves directly, because it is unambiguous. A name goes
+   * in as a name, which is the "none of these is right, use what I typed" path
+   * and the only one that works for the many sitting members who have no
+   * encyclopaedia article at all.
+   */
+  const submitQuery = () => {
+    const trimmed = query.trim()
+    if (!trimmed) {
+      setError('Type a name, or paste a link to a public profile.')
+      urlRef.current?.focus()
+      return
+    }
+    if (looksLikeUrl(trimmed)) {
+      void lookUp({ url: trimmed })
+      return
+    }
+    void lookUp({ name: trimmed })
+  }
+
+  /** A suggestion was chosen: resolve against that exact page. */
+  const pick = (candidate: PersonCandidate) => {
+    setResults(null)
+    void lookUp({ url: candidate.url, name: candidate.name })
+  }
+
+  const submitManual = () => {
+    const name = manual.name.trim()
+    if (!name) {
+      setError('A name is the one thing this cannot work without.')
+      return
+    }
+    void lookUp({
+      name,
+      role: manual.role.trim() || undefined,
+      constituency: manual.constituency.trim() || undefined,
+      state: manual.state.trim() || undefined,
+    })
+  }
+
+  const confirm = () => {
+    if (!draft) return
+    saveIdentity(draft)
+    onDone()
+  }
+
+  const skip = () => {
+    skipOnboarding()
+    onDone()
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════ */
+
+  return (
+    <div className="min-h-screen-safe overflow-y-auto">
+      <Shell className="page-end pt-[max(1.5rem,var(--sat))]">
+        {/* The masthead, so this screen belongs to the same product as the one
+            behind it. It was a bare form, which reads as a survey. */}
+        <div className="flex items-center gap-2.5">
+          <span className="text-[var(--accent)]">
+            <SignalGlyph size={26} />
+          </span>
+          <span className="hed text-[1.4rem] leading-none tracking-[-0.005em]">Signal</span>
+        </div>
+
+        {step === 'review' && draft ? (
+          <Review
+            identity={draft}
+            note={error}
+            onChange={setDraft}
+            onBack={() => {
+              setError(null)
+              setStep('choose')
+            }}
+            onConfirm={confirm}
+          />
+        ) : (
+          <m.div
+            /*
+              Two columns from lg up.
+
+              As one centred column this screen was a 736px strip of controls
+              in the middle of a 1440px window, which is the exact complaint
+              the layout pass was supposed to fix — it looked like the app had
+              not noticed the screen. The standing text sits left, the things
+              you operate sit right, and on a phone it collapses back to the
+              single column it always was.
+            */
+            className="mt-8 grid gap-x-16 gap-y-8 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)] lg:items-start"
+            variants={listStagger}
+            initial={reduce ? false : 'hidden'}
+            animate="show"
+          >
+            <m.header variants={fadeUp} className="lg:sticky lg:top-[calc(var(--topbar-h)+2rem)]">
+              <p className="kicker">Setting up</p>
+              <h1 className="hed mt-3 text-[clamp(2rem,1.5rem+2.2vw,2.9rem)] leading-[1.05]">
+                Whose desk is this?
+              </h1>
+              <p className="mt-4 max-w-[46ch] text-[15px] leading-relaxed text-ink-2">
+                Signal watches what is being said about one person. Tell it who, and it
+                sets up the news scan, the watch words and the dashboard from there.
+              </p>
+
+              {/* The promise and the way out, moved up beside the headline.
+                  At the foot of a long single column they were below the fold
+                  on every laptop, which is where a reassurance is worth least. */}
+              <div className="mt-7 border-t border-[var(--rule)] pt-5">
+                <p className="flex items-start gap-2.5 text-sm leading-relaxed text-ink-2">
+                  <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--pos)]" aria-hidden />
+                  <span>
+                    Everything stays on this device. Setting this up reads public pages on your
+                    behalf — it does not create an account anywhere, and nothing is uploaded.
+                  </span>
+                </p>
+                <button
+                  onClick={skip}
+                  className="mt-4 text-sm font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
+                >
+                  Skip for now — I just want to read a link
+                </button>
+              </div>
+            </m.header>
+
+            <div className="stack min-w-0">
+
+            {error && step === 'choose' && (
+              <m.div variants={fadeUp} role="alert">
+                <Notice tone="negative">{error}</Notice>
+              </m.div>
+            )}
+
+            {step === 'working' ? (
+              <m.div variants={fadeUp}>
+                <Working />
+              </m.div>
+            ) : (
+              <>
+                {/* ── the two typed routes ──────────────────────────────── */}
+                <m.section variants={fadeUp}>
+                  <div
+                    role="tablist"
+                    aria-label="How to identify this desk"
+                    className="inline-flex rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface-2)] p-1"
+                  >
+                    {(
+                      [
+                        ['link', 'Search by name'],
+                        ['manual', 'Type the details'],
+                      ] as const
+                    ).map(([id, label]) => (
+                      <button
+                        key={id}
+                        role="tab"
+                        aria-selected={mode === id}
+                        onClick={() => {
+                          setMode(id)
+                          setError(null)
+                        }}
+                        className={cn(
+                          'min-h-10 rounded-[--radius-sm] px-3.5 text-sm font-medium transition-colors',
+                          mode === id
+                            ? 'bg-[var(--surface)] text-ink shadow-[var(--e1)]'
+                            : 'text-ink-2 hover:text-ink',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-4">
+                    {mode === 'link' ? (
+                      <div>
+                        <label htmlFor="person-query" className="text-sm font-medium">
+                          Who is this desk for?
+                        </label>
+                        <p className="mt-1 text-sm leading-relaxed text-ink-2">
+                          Type a name. Add the seat or the office if the name alone is
+                          common — “aruna mahabubnagar” finds what “aruna” cannot. A link to
+                          a public profile works too.
+                        </p>
+
+                        <div className="relative mt-3">
+                          <div
+                            className={cn(
+                              'flex items-stretch overflow-hidden rounded-[--radius-lg] border bg-[var(--surface)]',
+                              'transition-[border-color] duration-200',
+                              error
+                                ? 'border-[var(--neg)]'
+                                : 'border-[var(--border-interactive)] focus-within:border-[var(--accent)]',
+                            )}
+                          >
+                            <span className="grid w-11 shrink-0 place-items-center text-ink-3">
+                              {searching ? (
+                                <Loader2 size={17} className="animate-spin" aria-hidden />
+                              ) : (
+                                <Search size={17} aria-hidden />
+                              )}
+                            </span>
+                            <input
+                              id="person-query"
+                              ref={urlRef}
+                              type="text"
+                              autoComplete="off"
+                              autoCapitalize="words"
+                              spellCheck={false}
+                              enterKeyHint="search"
+                              role="combobox"
+                              aria-expanded={results !== null && results.length > 0}
+                              aria-controls="person-results"
+                              aria-autocomplete="list"
+                              value={query}
+                              onChange={(e) => {
+                                setQuery(e.target.value)
+                                if (error) setError(null)
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') submitQuery()
+                                if (e.key === 'Escape') setResults(null)
+                              }}
+                              placeholder="e.g. D. K. Aruna, MP Mahabubnagar"
+                              className="h-14 min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-ink-3"
+                            />
+                          </div>
+
+                          {/* Suggestions.
+                              Rendered in the flow rather than as a floating
+                              popover: this screen has nothing below it that a
+                              list would cover, and a popover would need focus
+                              management, an outside-click handler and a
+                              z-index for no gain. */}
+                          {results !== null && (
+                            <div
+                              id="person-results"
+                              role="listbox"
+                              aria-label="Matching people"
+                              className="mt-2 overflow-hidden rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface)]"
+                            >
+                              {results.length === 0 ? (
+                                <p className="px-4 py-3.5 text-sm leading-relaxed text-ink-2">
+                                  Nobody by that name was found. Many sitting members have no
+                                  encyclopaedia article — press Enter to set the desk up under
+                                  the name you typed.
+                                </p>
+                              ) : (
+                                <ul className="divide-y divide-[var(--border)]">
+                                  {results.map((candidate) => (
+                                    <li key={candidate.url}>
+                                      <button
+                                        role="option"
+                                        aria-selected={false}
+                                        onClick={() => pick(candidate)}
+                                        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-2)]"
+                                      >
+                                        <Avatar
+                                          src={candidate.thumbnail}
+                                          name={candidate.name}
+                                          size={38}
+                                        />
+                                        <span className="min-w-0 flex-1">
+                                          <span className="block truncate text-sm font-semibold">
+                                            {candidate.name}
+                                          </span>
+                                          <span className="block truncate text-xs text-ink-3">
+                                            {candidate.description ??
+                                              (candidate.person ? 'Person' : 'Page')}
+                                          </span>
+                                        </span>
+                                        {/* Places and constituencies still get
+                                            offered, because the index is not
+                                            always right about which is which —
+                                            but they are marked, so nobody sets
+                                            their desk up as a district. */}
+                                        {!candidate.person && (
+                                          <Chip tone="neutral" className="shrink-0">
+                                            not a person
+                                          </Chip>
+                                        )}
+                                        <ArrowRight
+                                          size={14}
+                                          className="shrink-0 text-ink-3"
+                                          aria-hidden
+                                        />
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <Button onClick={submitQuery} size="lg" className="mt-3 w-full sm:w-auto">
+                          <Sparkles size={17} />
+                          {results && results.length > 0 ? 'Use what I typed' : 'Find my details'}
+                          <ArrowRight size={17} />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field
+                          id="m-name"
+                          label="Full name"
+                          placeholder="e.g. Kotagiri Sridhar"
+                          value={manual.name}
+                          onChange={(v) => setManual((s) => ({ ...s, name: v }))}
+                          Icon={UserRound}
+                          autoFocus
+                        />
+                        <Field
+                          id="m-role"
+                          label="Office held"
+                          placeholder="MLA"
+                          value={manual.role}
+                          onChange={(v) => setManual((s) => ({ ...s, role: v }))}
+                          Icon={Landmark}
+                        />
+                        <Field
+                          id="m-constituency"
+                          label="Constituency"
+                          placeholder="e.g. Eluru"
+                          value={manual.constituency}
+                          onChange={(v) => setManual((s) => ({ ...s, constituency: v }))}
+                          Icon={Building2}
+                        />
+                        <Field
+                          id="m-state"
+                          label="State"
+                          placeholder="e.g. Andhra Pradesh"
+                          value={manual.state}
+                          onChange={(v) => setManual((s) => ({ ...s, state: v }))}
+                          Icon={Building2}
+                        />
+
+                        <div className="sm:col-span-2">
+                          <Button onClick={submitManual} size="lg" className="w-full sm:w-auto">
+                            <Sparkles size={17} />
+                            Set up the desk
+                            <ArrowRight size={17} />
+                          </Button>
+                          <p className="mt-2 text-xs leading-relaxed text-ink-3">
+                            We will still try to find a photograph and a few public details from
+                            these. Anything we cannot confirm is left blank rather than guessed.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </m.section>
+
+              </>
+            )}
+            </div>
+          </m.div>
+        )}
+      </Shell>
+    </div>
+  )
+}
+
+/* ── review ──────────────────────────────────────────────────────────────── */
+
+/**
+ * What we found, before it becomes the app's answer to "who are you".
+ *
+ * This screen exists because of the one failure this feature can produce that
+ * the office would not notice: a plausible, fluent, wrong answer. Every field
+ * is editable in place and anything the reading was unsure of is marked, so the
+ * correction takes one tap at the only moment somebody is actually looking.
+ */
+function Review({
+  identity,
+  note,
+  onChange,
+  onBack,
+  onConfirm,
+}: {
+  identity: Identity
+  /** A failure that still produced something worth reviewing. */
+  note: string | null
+  onChange: (next: Identity) => void
+  onBack: () => void
+  onConfirm: () => void
+}) {
+  const reduce = useReducedMotion() === true
+
+  // Recomputed on every edit, so correcting the district in the rows below
+  // visibly changes which papers get read. That feedback is the whole argument
+  // for showing the plan here rather than after the fact: it is what makes the
+  // constituency field feel like it matters, because it does.
+  const plan = useMemo(() => planDesk(identity), [identity])
+
+  return (
+    <m.div
+      className="stack mt-8"
+      variants={listStagger}
+      initial={reduce ? false : 'hidden'}
+      animate="show"
+    >
+      <m.header variants={fadeUp}>
+        <p className="kicker">Step 2 of 2</p>
+        <h1 className="hed mt-3 text-[clamp(1.9rem,1.5rem+1.8vw,2.6rem)] leading-[1.05]">
+          Is this right?
+        </h1>
+        <p className="mt-4 max-w-[56ch] text-[15px] leading-relaxed text-ink-2">
+          Correct anything that is wrong — tap a value to edit it. What you type is treated
+          as certain; what we read is not.
+        </p>
+      </m.header>
+
+      {note && (
+        <m.div variants={fadeUp} role="status">
+          <Notice tone="warning">{note}</Notice>
+        </m.div>
+      )}
+
+      <m.div variants={fadeUp}>
+        <Card>
+          <div className="flex items-start gap-4">
+            <Avatar src={identity.photoUrl} name={identity.name} size={72} />
+            <div className="min-w-0 flex-1">
+              <p className="hed text-[1.6rem] leading-tight">{identity.name}</p>
+              <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
+                {[identity.role, identity.constituency, identity.party]
+                  .filter(Boolean)
+                  .join(' · ') || 'No office or seat recorded yet.'}
+              </p>
+              {identity.photoUrl === null && (
+                <p className="mt-2 text-xs text-ink-3">
+                  No photograph was found. The dashboard uses your initials instead.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {identity.bio && (
+            <p className="mt-4 border-t border-[var(--rule)] pt-4 text-sm leading-relaxed text-ink-2">
+              {identity.bio}
+            </p>
+          )}
+        </Card>
+      </m.div>
+
+      <m.div variants={fadeUp}>
+        <Card padded={false}>
+          <IdentityRows
+            identity={identity}
+            onEdit={(field, next) => onChange(editField(identity, field, next))}
+          />
+        </Card>
+      </m.div>
+
+      {identity.sources.length > 0 && (
+        <m.div variants={fadeUp}>
+          <p className="kicker">Read from</p>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {identity.sources.map((source) => (
+              <li key={source.url ?? source.label}>
+                {source.url ? (
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 text-xs text-ink-2 hover:text-ink"
+                  >
+                    {source.label}
+                    <ExternalLink size={12} aria-hidden />
+                  </a>
+                ) : (
+                  <Chip>{source.label}</Chip>
+                )}
+              </li>
+            ))}
+          </ul>
+        </m.div>
+      )}
+
+      {identity.notes.length > 0 && (
+        <m.ul variants={fadeUp} className="space-y-2">
+          {identity.notes.map((line) => (
+            <li key={line} className="flex gap-2 text-sm leading-relaxed text-ink-2">
+              <CircleAlert size={15} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+              <span>{line}</span>
+            </li>
+          ))}
+        </m.ul>
+      )}
+
+      <m.div variants={fadeUp} className="flex flex-wrap items-center gap-2 border-t border-[var(--rule)] pt-5">
+        <Button onClick={onConfirm} size="lg">
+          Looks right — open my dashboard
+          <ArrowRight size={17} />
+        </Button>
+        <Button onClick={onBack} variant="ghost" size="lg">
+          <ArrowLeft size={16} />
+          Start again
+        </Button>
+      </m.div>
+    </m.div>
+  )
+}
+
+/* ── small parts ─────────────────────────────────────────────────────────── */
+
+function Field({
+  id,
+  label,
+  placeholder,
+  value,
+  onChange,
+  Icon,
+  autoFocus,
+}: {
+  id: string
+  label: string
+  placeholder: string
+  value: string
+  onChange: (v: string) => void
+  Icon: typeof UserRound
+  autoFocus?: boolean
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="text-sm font-medium">
+        {label}
+      </label>
+      <div className="mt-1.5 flex items-stretch overflow-hidden rounded-[--radius-md] border border-[var(--border-interactive)] bg-[var(--surface)] focus-within:border-[var(--accent)]">
+        <span className="grid w-10 shrink-0 place-items-center text-ink-3">
+          <Icon size={16} aria-hidden />
+        </span>
+        <input
+          id={id}
+          value={value}
+          autoFocus={autoFocus}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="h-12 min-w-0 flex-1 bg-transparent pr-3 text-[16px] outline-none placeholder:text-ink-3"
+        />
+      </div>
+    </div>
+  )
+}
+
+function Notice({ tone, children }: { tone: 'warning' | 'negative'; children: React.ReactNode }) {
+  return (
+    <p
+      className={cn(
+        'flex items-start gap-2.5 rounded-[--radius-md] border px-3.5 py-3 text-sm leading-relaxed',
+        tone === 'negative'
+          ? 'border-[color-mix(in_oklab,var(--neg)_30%,transparent)] bg-[var(--neg-soft)] text-[var(--neg)]'
+          : 'border-[color-mix(in_oklab,var(--warn)_30%,transparent)] bg-[var(--warn-soft)] text-[var(--warn)]',
+      )}
+    >
+      <CircleAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
+      <span>{children}</span>
+    </p>
+  )
+}
+
+/**
+ * What the screen does while three pages and a model are being read.
+ *
+ * The steps are named rather than shown as a bar, because this genuinely takes
+ * ten to twenty seconds and an unlabelled bar at that length reads as a hang.
+ */
+function Working() {
+  const steps = [
+    'Reading the page you gave',
+    'Looking for a public record of the seat',
+    'Putting the card together',
+  ]
+  const [active, setActive] = useState(0)
+
+  useEffect(() => {
+    // Advances on a timer rather than on real progress: the endpoint answers
+    // once, at the end. The last step is never marked done here — that happens
+    // when the response actually lands.
+    const timer = setInterval(() => setActive((n) => Math.min(n + 1, steps.length - 1)), 4200)
+    return () => clearInterval(timer)
+  }, [steps.length])
+
+  return (
+    <Card>
+      <div className="flex items-center gap-3">
+        <Loader2 size={18} className="animate-spin text-[var(--accent)]" aria-hidden />
+        <p className="text-[15px] font-semibold">Finding your details…</p>
+      </div>
+      <ol className="mt-4 space-y-2.5">
+        {steps.map((label, i) => (
+          <li
+            key={label}
+            className={cn(
+              'flex items-center gap-2.5 text-sm transition-colors',
+              i < active ? 'text-ink-3' : i === active ? 'text-ink' : 'text-ink-3 opacity-55',
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                'size-1.5 shrink-0 rounded-full',
+                i <= active ? 'bg-[var(--accent)]' : 'bg-[var(--border-strong)]',
+              )}
+            />
+            {label}
+          </li>
+        ))}
+      </ol>
+      <p className="mt-4 text-xs leading-relaxed text-ink-3">
+        This reads live pages, so it takes a few seconds. Nothing is being uploaded.
+      </p>
+    </Card>
+  )
+}

@@ -91,52 +91,230 @@ function pickString(v: unknown): string | null {
   return null
 }
 
+/** Collapse whitespace. The one normalisation every path below agrees on. */
+const norm = (s: string): string => s.replace(/\s+/g, ' ').trim()
+
 /**
- * Pull readable body text. Deliberately simple rather than a full Readability
- * port: strip the furniture, prefer the densest article-ish container, and take
- * its paragraphs. Works well on news/e-paper pages, which is what this is for.
+ * The publisher's own summary, trimmed to a length worth testing containment
+ * on. Too short and every container matches; too long and none do.
  */
-function extractArticleText($: cheerio.CheerioAPI): string | null {
+function anchorOf(description: string | null): string | null {
+  if (!description) return null
+  const a = norm(description).slice(0, 60)
+  return a.length >= 25 ? a : null
+}
+
+/**
+ * JSON-LD `articleBody` is not reliably plain text.
+ *
+ * Some publishers put rendered markup in it, so without this the model is
+ * handed `<p><strong>అమరావతి, ఆగస్టు 18:</strong> …` and asked to read it as
+ * prose. Tags out, entities decoded, whitespace collapsed.
+ */
+function stripTags(html: string): string {
+  const text = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+  return norm(
+    text
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#0?39;|&apos;/gi, "'")
+      .replace(/&#(\d+);/g, (_, d: string) => String.fromCodePoint(Number(d)))
+      .replace(/&amp;/gi, '&'),
+  )
+}
+
+/** Whether a string still looks like markup after we tried to clean it. */
+const looksLikeHtml = (s: string): boolean => /<\/?[a-z][^>]*>/i.test(s)
+
+/**
+ * Pull readable body text.
+ *
+ * This replaced a rule that kept whichever container yielded the most text,
+ * which had a failure that looked exactly like success: on a news page we
+ * returned the right headline, the right date, the right language, and six
+ * thousand characters of the sidebar's list of other headlines. Nothing threw
+ * and no confidence dropped — the analysis was simply about the wrong article.
+ *
+ * Three things separate an article from the furniture around it, and all three
+ * are needed; each alone picks something wrong on at least one real site.
+ *
+ *   Prose, counted from `<p>` only. Sidebars are `<li>`, and counting `li` is
+ *   what let the rail win: on the page that prompted this, the outer container
+ *   measures 10,504 characters through `p, li, h2, h3` and 762 through `<p>`
+ *   alone. Nearly all of that difference is other people's headlines.
+ *
+ *   Link density. A rail is almost entirely anchor text and an article almost
+ *   none, so squaring the discount lets a short article beat a long list
+ *   without knowing anything about the site.
+ *
+ *   The page's own summary. Density alone still loses on one real page, where
+ *   a 381-character advertising disclaimer carries no links at all and so
+ *   outranks the 315-character story. Whichever container holds the
+ *   publisher's description is the story — and since that text came from the
+ *   page, this invents nothing.
+ *
+ * Deliberately NOT done: removing elements by class name. Two Telugu
+ * publishers wrap the article itself in `theiaStickySidebar` — a sticky-scroll
+ * plugin, not a sidebar — so a `[class*="sidebar"]` sweep deletes the article
+ * and scores zero. Link density does that job without guessing at names.
+ */
+function extractArticleText(
+  $: cheerio.CheerioAPI,
+  description: string | null,
+): { text: string | null; picked: string } {
   $('script, style, noscript, iframe, svg, nav, header, footer, aside, form').remove()
-  $('[class*="cookie" i], [class*="banner" i], [class*="advert" i], [id*="comment" i]').remove()
+  // Only classes that are never the article. `cookie` and `advert` are safe;
+  // anything naming position or relatedness is not — see the note above.
+  $('[class*="cookie" i], [class*="advert" i], [id*="comment" i]').remove()
 
-  const candidates = [
-    'article',
-    '[itemprop="articleBody"]',
-    '.article-body',
-    '.story-body',
-    '.entry-content',
-    '.post-content',
-    '.content-body',
-    'main',
-    '#content',
-  ]
+  const anchor = anchorOf(description)
 
-  let best = ''
-  for (const sel of candidates) {
-    const node = $(sel).first()
-    if (!node.length) continue
-    const text = node
-      .find('p, li, h2, h3')
-      .map((_, el) => $(el).text().trim())
+  // cheerio 1.x does not re-export its element type, so take it from `$` itself
+  // rather than reaching into a transitive dependency for it.
+  interface Candidate {
+    node: ReturnType<typeof $>
+    prose: number
+    score: number
+    depth: number
+    hasAnchor: boolean
+    label: string
+  }
+  const candidates: Candidate[] = []
+
+  $('article, main, section, div, [itemprop="articleBody"]').each((_, el) => {
+    const node = $(el)
+    const prose = node
+      .find('p')
+      .map((_i, p) => norm($(p).text()))
       .get()
       .filter((t) => t.length > 25)
-      .join('\n\n')
-    if (text.length > best.length) best = text
-  }
+      .join(' ').length
+    if (prose < 120) return
 
-  if (best.length < 200) {
-    // Nothing matched a known container — fall back to every substantial <p>.
-    const all = $('p')
-      .map((_, el) => $(el).text().trim())
+    const whole = norm(node.text())
+    const linkChars = node
+      .find('a')
+      .map((_i, a) => norm($(a).text()))
       .get()
-      .filter((t) => t.length > 40)
-      .join('\n\n')
-    if (all.length > best.length) best = all
+      .join(' ').length
+    const linkDensity = Math.min(1, linkChars / (whole.length || 1))
+    const hasAnchor = anchor ? whole.includes(anchor) : false
+
+    candidates.push({
+      node,
+      prose,
+      score: prose * (1 - linkDensity) ** 2 * (hasAnchor ? 4 : 1),
+      depth: node.parents().length,
+      hasAnchor,
+      label: `${node.attr('class') ?? ''}#${node.attr('id') ?? ''}`,
+    })
+  })
+
+  if (!candidates.length) return { text: null, picked: 'none' }
+
+  // When any container carries the page's own summary, only those compete.
+  const pool = candidates.some((c) => c.hasAnchor)
+    ? candidates.filter((c) => c.hasAnchor)
+    : candidates
+  const best = pool.reduce((a, b) => (b.score > a.score ? b : a))
+
+  // Nested containers all hold the same prose, so take the innermost — we want
+  // the article element, not the page wrapper that contains it.
+  const tightest = pool
+    .filter((c) => c.prose >= best.prose * 0.85 && c.score >= best.score * 0.6)
+    .reduce((a, b) => (b.depth > a.depth ? b : a), best)
+
+  const winner = tightest.node
+  const parts: string[] = []
+  const seen = new Set<string>()
+  winner.find('p, li, h2, h3, blockquote').each((_, el) => {
+    const t = norm($(el).text())
+    if (t.length <= 25) return
+    // "Also read:" promos are mostly link; body copy is not.
+    const linkLen = $(el)
+      .find('a')
+      .map((_i, a) => norm($(a).text()))
+      .get()
+      .join(' ').length
+    if (linkLen / (t.length || 1) > 0.7) return
+    if (seen.has(t)) return // some sites print each headline twice
+    seen.add(t)
+    parts.push(t)
+  })
+
+  const cleaned = parts.join('\n\n').replace(/\n{3,}/g, '\n\n').trim()
+  return {
+    text: cleaned.length > 120 ? cleaned.slice(0, 20_000) : null,
+    picked: `${tightest.label.slice(0, 50)} prose=${tightest.prose} anchor=${tightest.hasAnchor}`,
+  }
+}
+
+/**
+ * Publication dates that `new Date()` cannot read.
+ *
+ * This matters more than it looks. An office sorting a day's coverage by time
+ * cannot use an article whose date is `Invalid Date`, and one of these sources
+ * publishes every article that way — `Sun, 08/16/2026 - 05:58` parses to
+ * nothing at all. Another publishes `2026-08-16 19:53:00` with no offset,
+ * which V8 reads as server-local: the same URL yields one timestamp on a
+ * developer's machine in IST and another on Netlify in UTC, and Safari refuses
+ * it outright.
+ *
+ * These publishers are all in India, so a bare local time is read as +05:30.
+ * That is an assumption, and it is stated rather than hidden — but a date that
+ * is wrong by hours still beats one that silently differs per machine.
+ */
+export function normalisePublishedAt(raw: string | null): string | null {
+  if (!raw) return null
+  const s = raw.trim()
+  if (!s) return null
+
+  // Already carries a zone, so it means the same thing everywhere.
+  const direct = new Date(s)
+  if (!Number.isNaN(direct.getTime()) && /[Zz]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    return direct.toISOString()
   }
 
-  const cleaned = best.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim()
-  return cleaned.length > 120 ? cleaned.slice(0, 20_000) : null
+  const IST = '+05:30'
+
+  // "Sun, 08/16/2026 - 05:58" and "08/16/2026 - 05:58"
+  const us = /(\d{2})\/(\d{2})\/(\d{4})\s*-\s*(\d{1,2}):(\d{2})/.exec(s)
+  if (us) {
+    const d = new Date(`${us[3]}-${us[1]}-${us[2]}T${us[4]!.padStart(2, '0')}:${us[5]}:00${IST}`)
+    if (!Number.isNaN(d.getTime())) return d.toISOString()
+  }
+
+  // "2026-08-16 19:53:00" — ISO date, space separator, no offset.
+  const bare = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s)
+  if (bare) {
+    const d = new Date(`${bare[1]}-${bare[2]}-${bare[3]}T${bare[4]}:${bare[5]}:${bare[6] ?? '00'}${IST}`)
+    if (!Number.isNaN(d.getTime())) return d.toISOString()
+  }
+
+  return Number.isNaN(direct.getTime()) ? null : direct.toISOString()
+}
+
+/**
+ * A byline that names a person rather than the outlet's Twitter handle.
+ *
+ * `twitter:creator` is the masthead account on most of these sites, so reading
+ * it first reports the author of a district crime report as "@Eenadu.NET"
+ * while the page's own JSON-LD names the reporter who filed it.
+ */
+function pickAuthor(
+  $: cheerio.CheerioAPI,
+  node: Record<string, unknown> | undefined,
+): string | null {
+  const fromLd = pickString(node?.['author'])
+  if (fromLd && !fromLd.startsWith('@')) return fromLd
+  const named = firstMeta($, ['author', 'article:author'])
+  if (named && !named.startsWith('@')) return named
+  return fromLd ?? firstMeta($, ['twitter:creator'])
 }
 
 export function parseMetadata(html: string, sourceUrl: string): PageMetadata {
@@ -194,26 +372,61 @@ export function parseMetadata(html: string, sourceUrl: string): PageMetadata {
 
   const keywordsRaw = firstMeta($, ['keywords', 'news_keywords', 'article:tag'])
 
+  const description =
+    firstMeta($, ['og:description', 'twitter:description', 'description']) ??
+    pickString(node?.['description']) ??
+    null
+
+  /**
+   * The body text, resolved before the object below rather than inside it.
+   *
+   * Extraction mutates the document — it strips furniture out of `$` as it
+   * works — and property values in an object literal evaluate top to bottom.
+   * Every other field happens to read from `<head>` today, so nothing breaks,
+   * but a future DOM-backed field would silently read a mutilated document.
+   *
+   * `articleBody` is searched across every JSON-LD node rather than only the
+   * first Article-ish one. Publishers routinely emit two: a stub NewsArticle in
+   * the head and the real one lower down. Reading only the first meant the
+   * field looked absent on exactly the pages that had it.
+   */
+  let ldBody: string | null = null
+  for (const n of jsonLd) {
+    const raw = pickString(n['articleBody'])
+    if (!raw) continue
+    const body = looksLikeHtml(raw) ? stripTags(raw) : raw
+    if (body.length > (ldBody?.length ?? 0)) ldBody = body
+  }
+
+  const { text: domBody } = extractArticleText($, description)
+
+  /**
+   * Which of the two to trust.
+   *
+   * The DOM read wins by default: on these sources `articleBody` is routinely
+   * a stub — a couple of hundred characters of title and description against a
+   * story several times that. The publisher's field is preferred only when it
+   * is genuinely longer, which is the case on sites that publish the whole
+   * story there.
+   */
+  const articleText =
+    ldBody && (!domBody || ldBody.length > domBody.length) ? ldBody : (domBody ?? ldBody)
+
   return {
     title:
       firstMeta($, ['og:title', 'twitter:title']) ??
       pickString(node?.['headline'] ?? node?.['name']) ??
       $('title').first().text().trim() ??
       null,
-    description:
-      firstMeta($, ['og:description', 'twitter:description', 'description']) ??
-      pickString(node?.['description']) ??
-      null,
-    articleText: pickString(node?.['articleBody']) ?? extractArticleText($),
+    description,
+    articleText,
     siteName: firstMeta($, ['og:site_name', 'application-name']),
-    author:
-      firstMeta($, ['author', 'article:author', 'twitter:creator']) ??
-      pickString(node?.['author']) ??
-      null,
-    publishedAt:
+    author: pickAuthor($, node),
+    publishedAt: normalisePublishedAt(
       firstMeta($, ['article:published_time', 'og:updated_time', 'datePublished']) ??
-      pickString(node?.['datePublished'] ?? node?.['uploadDate']) ??
-      null,
+        pickString(node?.['datePublished'] ?? node?.['uploadDate']) ??
+        null,
+    ),
     image: firstMeta($, ['og:image:secure_url', 'og:image', 'twitter:image']),
     video: firstMeta($, ['og:video:secure_url', 'og:video:url', 'og:video']),
     canonical: $('link[rel="canonical"]').attr('href') ?? firstMeta($, ['og:url']) ?? sourceUrl,

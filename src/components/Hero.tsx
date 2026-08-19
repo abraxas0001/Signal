@@ -80,23 +80,33 @@ export function Hero({
 
   return (
     <m.div
-      className="mx-auto w-full max-w-[42rem] px-5 pb-10"
+      className="shell shell-prose pb-10"
       variants={listStagger}
       initial="hidden"
       animate="show"
     >
       {/* ── Opening ─────────────────────────────────────────────────────────
-          The mascot is back, but beside the headline rather than looming above
-          it — the old layout made a cartoon the biggest object on the screen,
-          which is what made the product read as a toy. Left-aligned, because
-          centring equalises everything and nothing can then outrank anything. */}
-      <m.div variants={listItem} className="mt-5 flex items-center gap-2.5">
-        <Mascot state="idle" size={56} />
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--accent)]/25 bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--accent)]">
-          <Sparkles size={12} />
-          Reads Telugu, Hindi and English
-        </span>
+          A dateline, not a badge.
+
+          This was a cartoon face beside a pastel pill. On a screen an office
+          opens to check what is being said about them — including who is
+          spreading fabricated video — a mascot is the single loudest signal
+          that the tool is not serious, and it was the largest object above the
+          fold. The line that replaces it is the one a wire dispatch carries:
+          where this desk sits, and what it can read. */}
+      <m.div variants={listItem} className="mt-5 flex items-center gap-3">
+        {/* Back by request, and sized to sit beside the dateline rather than
+            loom over the headline the way it first did. Its mood is the app's
+            state, not decoration: idle here, thinking while a screen is reading,
+            alarmed where something is overdue. */}
+        <Mascot state="idle" size={44} className="shrink-0" />
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+          <span className="kicker text-[var(--accent)]">Eluru desk</span>
+          <span aria-hidden className="h-3 w-px bg-[var(--rule)]" />
+          <span className="kicker">Telugu · Hindi · English</span>
+        </div>
       </m.div>
+      <div className="mt-3 border-b border-[var(--rule)]" />
 
       {/* Assembles word by word. Each word is its own transform, so the line
           arrives with authorship rather than appearing finished. */}

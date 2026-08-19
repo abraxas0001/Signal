@@ -3,6 +3,9 @@ import { fetchText, fetchJson } from './fetcher'
 import { decodeEntities, decodeJsonString, collectKey } from './extract/json-scan'
 import { parseHandleUrl } from '../../../shared/handle-url'
 import { metaCredentials, whoAmI, facebookPagePosts, instagramMedia } from './meta-graph'
+import { youtubeFreshToken, youtubeIdentityMatches, youtubeOwnUploads } from './youtube-oauth'
+import { linkedinFreshIdentity } from './linkedin-oauth'
+import { xFreshIdentity } from './x-oauth'
 
 /**
  * Reading an ACCOUNT rather than a post.
@@ -33,6 +36,17 @@ import { metaCredentials, whoAmI, facebookPagePosts, instagramMedia } from './me
 
 export interface HandlePost {
   url: string
+  /**
+   * The platform's own id for this post, when the route that produced it had
+   * one.
+   *
+   * Only the credentialed routes do, and it is the difference between being
+   * able to ask for a post's comments and not: Graph endpoints are addressed as
+   * `<post-id>/comments` and will not accept a permalink. Both Meta readers
+   * were already requesting this field and discarding it, so the comment calls
+   * beside them could never be used and sat as dead code.
+   */
+  id?: string | null
   title: string | null
   publishedAt: string | null
   views: number | null
@@ -176,7 +190,48 @@ function relativeToIso(rel: string | null): string | null {
  * extension — view, like and comment counts, so a channel's recent performance
  * arrives without touching a single video page.
  */
+/**
+ * The office's own channel, via OAuth — exact counts and real comment bodies
+ * where the public InnerTube path below carries views but no likes at all.
+ *
+ * Same shape as `readFacebook`'s credential branch: a connected token only
+ * ever authorises the account that signed in, so this fires exclusively for
+ * that channel — a rival's handle falls straight through to the public read.
+ */
+async function readYouTubeOwn(handle: string): Promise<HandleSummary | null> {
+  try {
+    const fresh = await youtubeFreshToken()
+    if (!fresh || !youtubeIdentityMatches(fresh.identity, handle)) return null
+    const { accessToken, identity } = fresh
+    const posts = identity.uploadsPlaylistId
+      ? await youtubeOwnUploads(accessToken, identity.uploadsPlaylistId)
+      : []
+    return {
+      platform: 'YouTube',
+      handle,
+      displayName: identity.title || null,
+      profileUrl: identity.customUrl
+        ? `https://www.youtube.com/${identity.customUrl}`
+        : `https://www.youtube.com/channel/${identity.channelId}`,
+      avatarUrl: null,
+      followers: identity.subscribers,
+      posts,
+      listing: {
+        available: posts.length > 0,
+        note: `${posts.length} uploads through the YouTube Data API, with exact like and comment counts — the InnerTube fallback below carries views but no likes at all.`,
+      },
+    }
+  } catch {
+    // A refused or expired token must not take the account down with it — the
+    // public read below still works and is what everyone else gets.
+    return null
+  }
+}
+
 async function readYouTube(handle: string): Promise<HandleSummary> {
+  const own = await readYouTubeOwn(handle)
+  if (own) return own
+
   const isChannelId = /^UC[\w-]{20,}$/.test(handle)
   const profileUrl = isChannelId
     ? `https://www.youtube.com/channel/${handle}`
@@ -577,6 +632,54 @@ function blank(platform: Platform, handle: string, profileUrl: string, note: str
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LinkedIn — identity confirmed, posts still gated
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * LinkedIn's self-serve OAuth proves who signed in and grants nothing else —
+ * reading a Company Page's posts needs LinkedIn's separate, manually reviewed
+ * Community Management API. There is no org-page lookup here yet (that call
+ * is part of that same gated tier), so an identity-confirmed connection
+ * cannot be matched to any ONE company handle with confidence — claiming a
+ * match on an unverified handle would risk attaching the office's identity to
+ * the wrong page. So this stays honest: every handle gets the same "behind a
+ * login" message, with a note naming who is connected when someone is, as
+ * context rather than a claim of ownership over this specific page.
+ */
+async function readLinkedIn(handle: string): Promise<HandleSummary> {
+  const profileUrl = `https://www.linkedin.com/company/${handle}/`
+  const identity = await linkedinFreshIdentity().catch(() => null)
+  const note = identity
+    ? `LinkedIn puts a page’s activity behind a login. Your office’s LinkedIn identity is connected as ${identity.name ?? identity.memberId} — company-page reads will activate automatically once LinkedIn approves this app for post access. Analyse individual posts and they will appear here.`
+    : 'LinkedIn puts a page’s activity behind a login. Analyse individual posts and they will appear here.'
+  return blank('LinkedIn', handle, profileUrl, note)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// X / Twitter — identity confirmed, reads gated behind a paid API tier
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * X's free API tier has no read access at all, even for your own account —
+ * that needs a paid tier, which is a cost decision for the office, not
+ * something to assume. So this confirms which X account is connected (the
+ * handle itself IS the username, so unlike LinkedIn this can be matched
+ * exactly) and stops there. Every other X handle gets the same message this
+ * platform got before any of this existed — there is no public account
+ * timeline reader for X in this codebase to fall back to.
+ */
+async function readX(handle: string): Promise<HandleSummary> {
+  const clean = handle.replace(/^@/, '')
+  const profileUrl = `https://x.com/${clean}`
+  const identity = await xFreshIdentity().catch(() => null)
+  const mine = identity?.username.toLowerCase() === clean.toLowerCase()
+  const note = mine
+    ? `Connected as @${identity!.username}. Reading engagement needs a paid X API tier, which is not enabled on this deployment yet — analyse individual posts and they will appear here.`
+    : 'Automatic tracking is not available for this platform. Analyse individual posts and they will appear here.'
+  return blank('Twitter/X', clean, profileUrl, note)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function num(v: string | undefined): number | null {
   if (!v) return null
@@ -615,12 +718,9 @@ export async function readHandle(ref: HandleRef): Promise<HandleSummary> {
     case 'Instagram':
       return readInstagram(ref.handle)
     case 'LinkedIn':
-      return blank(
-        'LinkedIn',
-        ref.handle,
-        `https://www.linkedin.com/in/${ref.handle}/`,
-        'LinkedIn puts a profile’s activity behind a login. Analyse individual posts and they will appear here.',
-      )
+      return readLinkedIn(ref.handle)
+    case 'Twitter/X':
+      return readX(ref.handle)
     default:
       return blank(
         ref.platform,

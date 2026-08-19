@@ -32,7 +32,7 @@ export function Pipeline({
 
   return (
     <m.div
-      className="mx-auto flex w-full max-w-lg flex-col items-center px-4 pt-6"
+      className="shell shell-prose flex flex-col items-center"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={spring.glide}

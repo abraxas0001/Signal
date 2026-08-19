@@ -1,5 +1,5 @@
 import * as m from 'motion/react-m'
-import { Gauge, LayoutGrid, GitCompareArrows, Clock, Link2 } from 'lucide-react'
+import { Gauge, Clock, Link2, FileWarning, Megaphone } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -14,25 +14,47 @@ import { cn } from '@/lib/utils'
  * carrying the accent fill, because a tab bar where everything looks equally
  * important tells the user nothing about what to do first.
  *
+ * There are eight destinations and five slots. Accounts and Compare are not on
+ * the bar — they are reached from the dashboard, which is where an office goes
+ * to ask how things are going rather than to do the day's work. That keeps the
+ * bar to the four screens opened every morning, and it is why there is no
+ * "More" button: an overflow menu would mean the bar had failed to choose.
+ *
  * Everything animates on transform and opacity only. This bar is fixed and
  * composited above scrolling content, so animating width, height or a
  * box-shadow here would repaint the whole surface on a device that cannot
  * afford it.
  */
 
-export type Tab = 'dashboard' | 'accounts' | 'analyse' | 'compare' | 'history'
+/**
+ * Every destination in the app, including the three the bar does not show.
+ * `accounts`, `compare` and `actions` are opened from the dashboard.
+ */
+export type Tab =
+  | 'dashboard'
+  | 'grievances'
+  | 'personas'
+  | 'analyse'
+  | 'influencers'
+  | 'history'
+  | 'accounts'
+  | 'compare'
+  | 'actions'
+  | 'settings'
 
 interface Props {
   active: Tab
   onSelect: (tab: Tab) => void
   /** Shown as a badge on History. */
   historyCount?: number
+  /** Unreviewed grievance records and unacknowledged mentions. */
+  counts?: Partial<Record<Tab, number>>
 }
 
 const SIDE = [
   { id: 'dashboard' as const, label: 'Dashboard', Icon: Gauge },
-  { id: 'accounts' as const, label: 'Accounts', Icon: LayoutGrid },
-  { id: 'compare' as const, label: 'Compare', Icon: GitCompareArrows },
+  { id: 'grievances' as const, label: 'Grievances', Icon: FileWarning },
+  { id: 'influencers' as const, label: 'Influencers', Icon: Megaphone },
   { id: 'history' as const, label: 'History', Icon: Clock },
 ]
 
@@ -85,23 +107,36 @@ function TabButton({
   )
 }
 
-export function TabBar({ active, onSelect, historyCount = 0 }: Props) {
+export function TabBar({ active, onSelect, historyCount = 0, counts }: Props) {
+  // Accounts, Compare and Actions are opened from the dashboard, so while one
+  // of them is on screen the dashboard tab stays lit — the bar should never
+  // show nothing selected.
+  const lit = (id: Tab): boolean =>
+    active === id ||
+    (id === 'dashboard' &&
+      (active === 'accounts' || active === 'compare' || active === 'actions' || active === 'settings'))
+
   return (
     <nav
       aria-label="Main"
       className={cn(
-        'fixed inset-x-0 bottom-0 z-30 no-print',
+        // Hidden from lg up: at that width the sidebar is the navigation.
+        // Material's adaptive-navigation rule is explicit that large screens
+        // prefer a sidebar, and showing both is the mixed-patterns mistake —
+        // two controls answering the same question in one viewport.
+        'fixed inset-x-0 bottom-0 z-30 no-print lg:hidden',
         'border-t border-[var(--border)] bg-[var(--surface-1)]/88 backdrop-blur-xl',
       )}
       style={{ paddingBottom: 'var(--sab)' }}
     >
-      <div className="mx-auto flex w-full max-w-2xl items-end gap-1 px-2 pb-1 pt-1">
+      <div className="mx-auto flex w-full max-w-lg items-end gap-1 px-2 pb-1 pt-1">
         {SIDE.slice(0, 2).map((t) => (
           <TabButton
             key={t.id}
             label={t.label}
             Icon={t.Icon}
-            active={active === t.id}
+            active={lit(t.id)}
+            badge={counts?.[t.id]}
             onClick={() => onSelect(t.id)}
           />
         ))}
@@ -138,8 +173,8 @@ export function TabBar({ active, onSelect, historyCount = 0 }: Props) {
             key={t.id}
             label={t.label}
             Icon={t.Icon}
-            active={active === t.id}
-            badge={t.id === 'history' ? historyCount : undefined}
+            active={lit(t.id)}
+            badge={t.id === 'history' ? historyCount : counts?.[t.id]}
             onClick={() => onSelect(t.id)}
           />
         ))}

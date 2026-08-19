@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as m from 'motion/react-m'
 import { Plus, RefreshCw, Trash2, ExternalLink, TrendingUp, TrendingDown, Radar, ShieldCheck, MessageSquareHeart } from 'lucide-react'
 import type { Platform } from '@shared/taxonomy'
-import { Button, Card, Chip, SectionTitle } from './ui'
+import { Button, Card, Chip, PageHeader, SectionTitle } from './ui'
+import { SuggestedAccounts } from './SuggestedAccounts'
+import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
 import { parseHandleUrl } from '@shared/handle-url'
@@ -221,6 +223,7 @@ export function Dashboard({
    */
   mode?: 'accounts' | 'compare'
 }) {
+  const store = useStore()
   const [handles, setHandles] = useState<TrackedHandle[]>([])
   const [input, setInput] = useState('')
   const [platform, setPlatform] = useState<Platform>('YouTube')
@@ -230,6 +233,14 @@ export function Dashboard({
   const [finding, setFinding] = useState(false)
   const [standings, setStandings] = useState<Record<string, Standing>>({})
   const [reading, setReading] = useState<string | null>(null)
+  /**
+   * Whether the rival search has been asked for.
+   *
+   * Off by default. Discovery is a model call plus a dozen live profile reads,
+   * and it fired on every visit to this tab to answer a question whose answer
+   * moves about once per election.
+   */
+  const [showRivals, setShowRivals] = useState(false)
 
   useEffect(() => setHandles(listHandles()), [])
 
@@ -512,24 +523,35 @@ export function Dashboard({
 
   return (
     <m.div
-      className="mx-auto w-full max-w-3xl space-y-6 px-4 pb-28"
+      className="shell shell-wide stack page-end"
       variants={listStagger}
       initial="hidden"
       animate="show"
     >
-      <m.div variants={fadeUp} className="flex items-center justify-between gap-3 pt-2">
-        <div>
-          <h1 className="hed text-2xl">{mode === 'compare' ? 'Compare' : 'Accounts'}</h1>
-          <p className="text-sm text-ink-3">
-            {handles.length
+      <m.div variants={fadeUp}>
+        <PageHeader
+          title={mode === 'compare' ? 'Compare' : 'Accounts'}
+          subtitle={
+            handles.length
               ? `${own.length} yours · ${watched.length} watched`
-              : 'Track your handles and the ones you are measured against.'}
-          </p>
-        </div>
-        <Button variant="ghost" onClick={onClose}>
-          Back
-        </Button>
+              : 'Track your handles and the ones you are measured against.'
+          }
+          actions={
+            <Button variant="ghost" onClick={onClose}>
+              Back
+            </Button>
+          }
+        />
       </m.div>
+
+      {/* ── Accounts we already believe are theirs ──────────────────────
+          Above the paste box, because an office that has just said who they
+          are should meet their own accounts before they meet an empty field. */}
+      {mode === 'accounts' && store.identity && (
+        <m.div variants={fadeUp}>
+          <SuggestedAccounts identity={store.identity} onAdded={setHandles} />
+        </m.div>
+      )}
 
       {/* ── Add ─────────────────────────────────────────────────────────── */}
       {mode === 'accounts' && (
@@ -596,8 +618,34 @@ export function Dashboard({
         </m.div>
       )}
 
-      {/* ── Who to compare against, found rather than typed ─────────────── */}
-      {mode === 'compare' && primary && (
+      {/* ── Who to compare against, found rather than typed ───────────────
+          Behind a press. Working out who a member is measured against is a
+          model call and a dozen live profile reads, and it was running its way
+          onto the screen every time the tab was opened — for an answer that
+          changes about once an election. */}
+      {mode === 'compare' && primary && !showRivals && (
+        <m.section variants={fadeUp}>
+          <Card>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[15px] font-semibold">
+                  Compare {primary.displayName ?? primary.handle} against rivals
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-ink-2">
+                  Finds who this account is actually measured against — a member is compared
+                  with other members, not with a national leader — then reads each one live.
+                </p>
+              </div>
+              <Button size="sm" className="shrink-0" onClick={() => setShowRivals(true)}>
+                <Radar size={15} />
+                Look for comparisons
+              </Button>
+            </div>
+          </Card>
+        </m.section>
+      )}
+
+      {mode === 'compare' && primary && showRivals && (
         <m.section variants={fadeUp}>
           <SectionTitle
             hint={

@@ -53,17 +53,12 @@ let LINKS: SheetLink[]
 try {
   LINKS = JSON.parse(readFileSync(DATA, 'utf8'))
 } catch {
-  console.log('
-No dataset found at scripts/sheet-links.json')
+  console.log('\nNo dataset found at scripts/sheet-links.json')
   console.log(
-    'This file is git-ignored on purpose: it is derived from the client workbook
-' +
-      'and names real officials and real allegations. Generate it locally from the
-' +
-      'workbook, or supply your own list of { url, sheetSays } entries in the same
-' +
-      'shape.
-',
+    'This file is git-ignored on purpose: it is derived from the client workbook\n' +
+      'and names real officials and real allegations. Generate it locally from the\n' +
+      'workbook, or supply your own list of { url, sheetSays } entries in the same\n' +
+      'shape.\n',
   )
   process.exit(0)
 }

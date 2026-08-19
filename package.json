@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Signal — paste any public social media post link and get a full intelligence readout: what it says, what it means, how it landed, and what to do about it.",
+  "description": "Signal \u2014 paste any public social media post link and get a full intelligence readout: what it says, what it means, how it landed, and what to do about it.",
   "scripts": {
     "dev": "netlify dev",
     "dev:vite": "vite",
@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:extract": "tsx scripts/test-extract.ts",
+    "test:news": "tsx scripts/test-news.ts",
     "test:sheet": "tsx scripts/test-sheet.ts",
     "test:model": "tsx scripts/test-model.ts",
     "compare:models": "tsx scripts/compare-models.ts",
@@ -22,11 +23,16 @@
     "test:export": "tsx scripts/test-export.ts",
     "test:typography": "tsx scripts/test-typography.ts",
     "test:ssrf": "tsx scripts/test-ssrf.ts",
-    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:comments && npm run test:export && npm run test:extract"
+    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:scoping && npm run test:places && npm run test:autoconfig && npm run test:matching && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:comments && npm run test:export && npm run test:extract && npm run test:news",
+    "test:scoping": "tsx scripts/test-scoping.ts",
+    "test:places": "tsx scripts/test-places.ts",
+    "test:autoconfig": "tsx scripts/test-autoconfig.ts",
+    "test:matching": "tsx scripts/test-matching.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
     "@mozilla/readability": "^0.6.0",
+    "@netlify/blobs": "^11.0.1",
     "@number-flow/react": "^0.6.2",
     "canvas-confetti": "^1.9.4",
     "cheerio": "^1.2.0",
@@ -48,6 +54,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
+    "netlify-cli": "^27.1.2",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.12",
     "typescript": "^5.9.2",

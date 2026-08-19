@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Report } from '@shared/types'
+import { scopedKey } from '@/lib/store'
 
-const KEY = 'signal:history:v1'
+/**
+ * Scoped per signed-in account. See scopedKey in lib/store.
+ *
+ * A read history is a list of exactly which posts and stories somebody chose to
+ * look at, which is as revealing as the records themselves — it was shared
+ * across every account on the device.
+ */
+const KEY = (): string => scopedKey('signal:history:v1')
 const LIMIT = 30
 
 export interface HistoryEntry {
@@ -75,7 +83,7 @@ export function useHistory() {
 
 function read(): HistoryEntry[] {
   try {
-    const raw = localStorage.getItem(KEY)
+    const raw = localStorage.getItem(KEY())
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     return Array.isArray(parsed) ? (parsed as HistoryEntry[]) : []
@@ -86,11 +94,11 @@ function read(): HistoryEntry[] {
 
 function write(entries: HistoryEntry[]) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(entries))
+    localStorage.setItem(KEY(), JSON.stringify(entries))
   } catch {
     // Quota exceeded — drop the oldest half rather than losing everything.
     try {
-      localStorage.setItem(KEY, JSON.stringify(entries.slice(0, Math.floor(entries.length / 2))))
+      localStorage.setItem(KEY(), JSON.stringify(entries.slice(0, Math.floor(entries.length / 2))))
     } catch {
       /* storage is unavailable entirely; history is a convenience, not a feature */
     }

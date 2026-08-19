@@ -93,6 +93,192 @@ export async function whoAmI(
   }
 }
 
+/**
+ * Everything wrong with a token, named.
+ *
+ * The most error-prone step in setting this up is not obtaining a token — it is
+ * obtaining the WRONG one, and every wrong one fails identically from the
+ * outside. There are four distinct mistakes and a single "Meta refused it"
+ * tells an operator which of them they made: none.
+ *
+ *   a User token instead of a Page token — the commonest by a distance,
+ *     because Graph Explorer hands you one by default and it looks the same
+ *   a Page token for the wrong Page, on an account that administers several
+ *   a token missing pages_read_engagement, which reads posts but no comments
+ *   a short-lived token, which works for about an hour and then stops,
+ *     usually after the operator has closed the tab and moved on
+ *
+ * So this asks Meta what the token actually is, rather than only whether it
+ * works right now. `debug_token` is the endpoint that answers it, and it takes
+ * the token as its own inspector — no app secret needed, which matters because
+ * this deployment does not have one and should not need one to tell somebody
+ * their token expires this afternoon.
+ */
+export interface TokenReport {
+  ok: boolean
+  /**
+   * Granted scopes that can change or delete things.
+   *
+   * Not a failure — it is their page and their choice. But a monitoring tool
+   * holding delete-a-comment rights is worth saying out loud, because nobody
+   * ticks those deliberately; they come from copying a permissions list.
+   */
+  writeScopes: string[]
+  /** 'PAGE' when correct. 'USER' is the commonest mistake. */
+  type: string | null
+  /** The page this token authorises, which may not be the one they meant. */
+  page: { id: string; name: string; followers: number | null } | null
+  scopes: string[]
+  missingScopes: string[]
+  /** Null when the token never expires, which is what we want. */
+  expiresAt: string | null
+  /** True when it expires soon enough to be about to break. */
+  expiringSoon: boolean
+  /** What to do, in plain words. Empty when nothing is wrong. */
+  problems: string[]
+}
+
+/**
+ * The permissions this app genuinely uses, and what each one buys.
+ *
+ * The distinction between the two "read" scopes is easy to get wrong and I did:
+ *
+ *   pages_read_engagement  — content posted BY THE PAGE, plus follower data and
+ *                            metadata. This is the Page talking.
+ *   pages_read_user_content — content posted BY USERS on the Page: their posts,
+ *                            their COMMENTS, their ratings. This is the public
+ *                            talking, which is the entire point of this product.
+ *
+ * A token holding only the first reads a page's own output and returns an empty
+ * comment array — indistinguishable, from every screen, from a page nobody has
+ * commented on. So the second is required, not optional, and its absence is
+ * reported as a problem rather than passing silently.
+ *
+ * Nothing that writes is requested. pages_manage_posts and
+ * pages_manage_engagement can create, edit and DELETE posts and comments, and a
+ * media-monitoring tool has no business holding either — a bug in this codebase
+ * should never be able to delete a constituent's comment.
+ */
+const REQUIRED_SCOPES: { name: string; why: string }[] = [
+  { name: 'pages_read_user_content', why: 'reading the comments your constituents leave' },
+  { name: 'pages_read_engagement', why: 'reading your own posts and follower counts' },
+  { name: 'pages_show_list', why: 'confirming which page the token belongs to' },
+]
+
+/**
+ * Scopes that let this app change things, which it must never need.
+ *
+ * Held separately from a missing-scope problem because it is the opposite kind
+ * of finding: not "you have too little access" but "you have granted more than
+ * this tool should hold". Reported, never enforced — it is the operator's page.
+ */
+const WRITE_SCOPES = [
+  'pages_manage_posts',
+  'pages_manage_engagement',
+  'pages_manage_metadata',
+  'pages_manage_ads',
+]
+
+export async function inspectToken(creds: MetaCredentials): Promise<TokenReport> {
+  const problems: string[] = []
+
+  let debug: {
+    type?: string
+    scopes?: string[]
+    expires_at?: number
+    is_valid?: boolean
+    profile_id?: string
+  } = {}
+
+  try {
+    const res = await graph<{ data?: typeof debug }>('debug_token', creds.pageToken, {
+      input_token: creds.pageToken,
+    })
+    debug = res.data ?? {}
+  } catch (err) {
+    return {
+      ok: false,
+      writeScopes: [],
+      type: null,
+      page: null,
+      scopes: [],
+      missingScopes: REQUIRED_SCOPES.map((s) => s.name),
+      expiresAt: null,
+      expiringSoon: false,
+      problems: [
+        `Meta would not inspect this token: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }. It is probably expired, or was copied incompletely.`,
+      ],
+    }
+  }
+
+  const scopes = Array.isArray(debug.scopes) ? debug.scopes : []
+  const missingScopes = REQUIRED_SCOPES.filter((s) => !scopes.includes(s.name)).map((s) => s.name)
+
+  // 0 means it never expires, which is what a long-lived Page token looks like.
+  const expiresAt =
+    typeof debug.expires_at === 'number' && debug.expires_at > 0
+      ? new Date(debug.expires_at * 1000).toISOString()
+      : null
+  const expiringSoon =
+    expiresAt !== null && Date.parse(expiresAt) - Date.now() < 7 * 24 * 60 * 60 * 1000
+
+  /* the four mistakes, each named */
+
+  if (debug.type && debug.type.toUpperCase() !== 'PAGE') {
+    problems.push(
+      `This is a ${debug.type} token, not a Page token. Graph API Explorer gives you a User token by default — use its "Get Page Access Token" option and pick the page, or the comment calls will keep being refused.`,
+    )
+  }
+
+  for (const scope of REQUIRED_SCOPES) {
+    if (!scopes.includes(scope.name)) {
+      problems.push(
+        `Missing the ${scope.name} permission, which is what authorises ${scope.why}. Re-issue the token with it ticked.`,
+      )
+    }
+  }
+
+  if (expiringSoon && expiresAt) {
+    problems.push(
+      `This token expires ${new Date(expiresAt).toUTCString()}. Short-lived tokens last about an hour — exchange it for a long-lived one at developers.facebook.com/tools/debug/accesstoken, or this stops working today.`,
+    )
+  }
+
+  if (debug.is_valid === false) {
+    problems.push('Meta reports this token as no longer valid. Issue a new one.')
+  }
+
+  /* and which page it actually is, which is the other half of "wrong token" */
+
+  let page: TokenReport['page'] = null
+  try {
+    const me = await whoAmI(creds)
+    page = me
+  } catch (err) {
+    problems.push(
+      `The token could not name its own page: ${
+        err instanceof Error ? err.message : 'unknown error'
+      }`,
+    )
+  }
+
+  const writable = WRITE_SCOPES.filter((w) => scopes.includes(w))
+
+  return {
+    ok: problems.length === 0 && page !== null,
+    writeScopes: writable,
+    type: debug.type ?? null,
+    page,
+    scopes,
+    missingScopes,
+    expiresAt,
+    expiringSoon,
+    problems,
+  }
+}
+
 interface FbPost {
   id: string
   message?: string
@@ -130,6 +316,8 @@ export async function facebookPagePosts(creds: MetaCredentials): Promise<HandleP
     const plays = p.insights?.data?.find((d) => d.name === 'post_video_views')?.values?.[0]?.value
     return {
       url: p.permalink_url ?? `https://www.facebook.com/${p.id}`,
+      // Kept, so the comments on this post can actually be asked for.
+      id: p.id ?? null,
       title: p.message?.slice(0, 140) ?? null,
       publishedAt: p.created_time ?? null,
       views: typeof plays === 'number' ? plays : null,
@@ -207,6 +395,7 @@ export async function instagramMedia(creds: MetaCredentials): Promise<HandlePost
     const plays = m.insights?.data?.find((d) => d.name === 'plays')?.values?.[0]?.value
     return {
       url: m.permalink ?? `https://www.instagram.com/p/${m.id}/`,
+      id: m.id ?? null,
       title: m.caption?.slice(0, 140) ?? null,
       publishedAt: m.timestamp ?? null,
       views: typeof plays === 'number' ? plays : null,

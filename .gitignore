@@ -23,3 +23,8 @@ scripts/sheet-links.json
 
 # Throwaway probe scripts written by research agents — never commit these.
 scripts/_*.ts
+
+# Sample dataset for local demos. Built from real published news by the real
+# classifier, so it carries "suspected fake" judgements about named outlets and
+# real people — that must not live in a public git history.
+public/sample-data.json

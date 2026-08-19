@@ -98,7 +98,7 @@ export function ReportView({
 
   return (
     <m.div
-      className="mx-auto w-full max-w-2xl space-y-6 px-4 pb-[calc(10rem+var(--sab))]"
+      className="shell shell-prose stack page-end"
       variants={listStagger}
       initial="hidden"
       animate="show"
@@ -114,9 +114,7 @@ export function ReportView({
             <ConfidenceChip tier={analysis.confidence} />
           </div>
 
-          <h1 className="mt-3 text-2xl font-semibold leading-[1.12] tracking-[-0.022em]">
-            {analysis.headline}
-          </h1>
+          <h1 className="hed mt-3 text-3xl">{analysis.headline}</h1>
 
           <p className="mt-3 text-base leading-relaxed text-ink-2">
             {analysis.summary}
@@ -431,9 +429,8 @@ export function ReportView({
       </m.div>
 
       {/* Bottom-anchored primary action, inside the thumb zone. */}
-      <div className="fixed inset-x-0 z-20 border-t border-[var(--border)] bg-[var(--bg)]/90 px-4 py-3 backdrop-blur-md no-print"
-        style={{ bottom: 'var(--tabbar-h)' }}>
-        <div className="mx-auto flex max-w-2xl gap-2">
+      <div className="docked z-20 border-t border-[var(--border)] bg-[var(--bg)]/90 py-3 backdrop-blur-md no-print">
+        <div className="shell shell-prose flex gap-2">
           <Button variant="primary" onClick={onReset} className="flex-1">
             <RotateCcw size={16} />
             Analyse another post

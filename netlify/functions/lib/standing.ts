@@ -1,6 +1,8 @@
 import { complete } from './openai-compat'
 import { resolveProviders } from './provider'
 import { extractPost } from './extract/index'
+import { metaCredentials, type MetaCredentials } from './meta-graph'
+import { commentsForPost } from './social-source'
 import { readHandle, type HandleRef, type HandleSummary } from './handles'
 import type { Comment } from '../../../shared/types'
 
@@ -127,6 +129,33 @@ export async function standingFromPosts(
   })
 }
 
+/**
+ * Comments on one post, through whichever route can actually get them.
+ *
+ * The routing itself lives in social-source.ts, which is the one place that
+ * knows the difference between a page the office administers, a page bought
+ * from a data provider, and a page the platform simply publishes. This wrapper
+ * exists only to hand it the public reader, so that file never has to depend on
+ * the extraction stack.
+ */
+async function commentsFor(
+  post: { url: string; id?: string | null },
+  platform: string,
+  creds: MetaCredentials | null,
+): Promise<Comment[]> {
+  const { data } = await commentsForPost({
+    url: post.url,
+    id: post.id ?? null,
+    platform,
+    creds,
+    publicRead: async (url) => {
+      const { snapshot } = await extractPost(url, { keys: {} })
+      return snapshot.comments ?? []
+    },
+  })
+  return data
+}
+
 export async function readStanding(ref: HandleRef): Promise<Standing> {
   const summary: HandleSummary = await readHandle(ref)
   if (!summary.posts.length) {
@@ -142,18 +171,15 @@ export async function readStanding(ref: HandleRef): Promise<Standing> {
   const candidates = summary.posts.slice(0, POSTS_TO_TRY)
   let postsTried = 0
 
+  // Resolved once rather than per post: it reads the environment and the answer
+  // cannot change mid-account.
+  const creds = metaCredentials()
+
   for (let i = 0; i < candidates.length; i += 2) {
     const batch = candidates.slice(i, i + 2)
     postsTried += batch.length
     const got = await Promise.all(
-      batch.map(async (p) => {
-        try {
-          const { snapshot } = await extractPost(p.url, { keys: {} })
-          return snapshot.comments ?? []
-        } catch {
-          return []
-        }
-      }),
+      batch.map((p) => commentsFor(p, summary.platform, creds)),
     )
     for (const list of got) pool.push(...(list ?? []))
     if (pool.length >= ENOUGH_COMMENTS) break

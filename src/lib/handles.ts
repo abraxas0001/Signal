@@ -1,4 +1,5 @@
 import type { Platform } from '@shared/taxonomy'
+import { scopedKey } from '@/lib/store'
 
 /**
  * The dashboard's store, kept on the reader's own machine.
@@ -15,7 +16,15 @@ import type { Platform } from '@shared/taxonomy'
  * from measurements actually taken rather than from interpolation.
  */
 
-const KEY = 'signal.handles.v1'
+/**
+ * Scoped per signed-in account, not device-wide.
+ *
+ * Read through a function rather than captured in a constant on purpose: the
+ * active account changes at runtime when somebody signs in or out, and a
+ * module-level constant would freeze whichever account happened to be active
+ * when this module was first imported.
+ */
+const KEY = (): string => scopedKey('signal.handles.v1')
 /** Roughly a year of daily refreshes per handle, and a bound on the quota. */
 const MAX_SNAPSHOTS = 400
 
@@ -54,7 +63,7 @@ export interface TrackedHandle {
 
 function read(): TrackedHandle[] {
   try {
-    const raw = localStorage.getItem(KEY)
+    const raw = localStorage.getItem(KEY())
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     return Array.isArray(parsed) ? (parsed as TrackedHandle[]) : []
@@ -67,13 +76,13 @@ function read(): TrackedHandle[] {
 
 function write(handles: TrackedHandle[]): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(handles))
+    localStorage.setItem(KEY(), JSON.stringify(handles))
   } catch {
     // Over quota. Drop the oldest snapshots rather than losing the handles
     // themselves — which accounts are tracked is the part the user typed in.
     const trimmed = handles.map((h) => ({ ...h, snapshots: h.snapshots.slice(-20) }))
     try {
-      localStorage.setItem(KEY, JSON.stringify(trimmed))
+      localStorage.setItem(KEY(), JSON.stringify(trimmed))
     } catch {
       /* nothing further to try; the session still works, it just will not persist */
     }
@@ -275,7 +284,7 @@ export interface RivalCache {
   foundAt: string
 }
 
-const RIVALS_KEY = 'signal.rivals.v1'
+const RIVALS_KEY = (): string => scopedKey('signal.rivals.v1')
 
 /**
  * Discovery is cached because it is the expensive half.
@@ -287,7 +296,7 @@ const RIVALS_KEY = 'signal.rivals.v1'
  */
 export function readRivals(handleId: string): RivalCache | null {
   try {
-    const all = JSON.parse(localStorage.getItem(RIVALS_KEY) ?? '{}') as Record<string, RivalCache>
+    const all = JSON.parse(localStorage.getItem(RIVALS_KEY()) ?? '{}') as Record<string, RivalCache>
     return all[handleId] ?? null
   } catch {
     return null
@@ -296,9 +305,9 @@ export function readRivals(handleId: string): RivalCache | null {
 
 export function saveRivals(handleId: string, cache: RivalCache): void {
   try {
-    const all = JSON.parse(localStorage.getItem(RIVALS_KEY) ?? '{}') as Record<string, RivalCache>
+    const all = JSON.parse(localStorage.getItem(RIVALS_KEY()) ?? '{}') as Record<string, RivalCache>
     all[handleId] = cache
-    localStorage.setItem(RIVALS_KEY, JSON.stringify(all))
+    localStorage.setItem(RIVALS_KEY(), JSON.stringify(all))
   } catch {
     /* a cache that cannot be written is a slower app, not a broken one */
   }
@@ -322,7 +331,7 @@ export interface Standing {
   readAt: string
 }
 
-const STANDING_KEY = 'signal.standing.v1'
+const STANDING_KEY = (): string => scopedKey('signal.standing.v1')
 
 /**
  * Cached because it is the most expensive thing this product does: several live
@@ -331,7 +340,7 @@ const STANDING_KEY = 'signal.standing.v1'
  */
 export function readStandingCache(handleId: string): Standing | null {
   try {
-    const all = JSON.parse(localStorage.getItem(STANDING_KEY) ?? '{}') as Record<string, Standing>
+    const all = JSON.parse(localStorage.getItem(STANDING_KEY()) ?? '{}') as Record<string, Standing>
     return all[handleId] ?? null
   } catch {
     return null
@@ -340,9 +349,9 @@ export function readStandingCache(handleId: string): Standing | null {
 
 export function saveStandingCache(handleId: string, standing: Standing): void {
   try {
-    const all = JSON.parse(localStorage.getItem(STANDING_KEY) ?? '{}') as Record<string, Standing>
+    const all = JSON.parse(localStorage.getItem(STANDING_KEY()) ?? '{}') as Record<string, Standing>
     all[handleId] = standing
-    localStorage.setItem(STANDING_KEY, JSON.stringify(all))
+    localStorage.setItem(STANDING_KEY(), JSON.stringify(all))
   } catch {
     /* a cache that will not write is a slower app, not a broken one */
   }
@@ -364,7 +373,7 @@ export function saveStandingCache(handleId: string, standing: Standing): void {
 export function analysedPostsFor(handle: TrackedHandle): string[] {
   let entries: { url?: string; platform?: string; report?: unknown }[] = []
   try {
-    entries = JSON.parse(localStorage.getItem('signal:history:v1') ?? '[]') as typeof entries
+    entries = JSON.parse(localStorage.getItem(scopedKey('signal:history:v1')) ?? '[]') as typeof entries
   } catch {
     return []
   }
