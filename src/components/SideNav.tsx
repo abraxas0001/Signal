@@ -7,13 +7,12 @@ import {
   LayoutGrid,
   Link2,
   ListChecks,
-  Lock,
   Megaphone,
   Newspaper,
   Settings as SettingsIcon,
-  UserSearch,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { GROUPS, type NavItem, type Tab } from '@/lib/nav'
 import { SignalGlyph } from '@/components/ui'
 import { pressable, spring } from '@/lib/motion'
 
@@ -37,54 +36,28 @@ import { pressable, spring } from '@/lib/motion'
  * would repaint the whole strip.
  */
 
-export type NavKey =
-  | 'dashboard'
-  | 'grievances'
-  | 'personas'
-  | 'influencers'
-  | 'actions'
-  | 'accounts'
-  | 'compare'
-  | 'analyse'
-  | 'history'
-  | 'settings'
+export type NavKey = Tab
 
 interface Props {
   active: NavKey
   onSelect: (k: NavKey) => void
   /** Row badges. A key that is absent or zero shows no badge. */
   counts?: Partial<Record<NavKey, number>>
-  /** Omitted when there is nothing to lock behind — then no lock control. */
-  onLock?: () => void
 }
 
-interface NavItem {
-  id: NavKey
-  label: string
-  Icon: typeof Newspaper
-}
-
-const GROUPS: ReadonlyArray<{ heading: string; items: readonly NavItem[] }> = [
-  {
-    heading: 'Today',
-    items: [
-      { id: 'dashboard', label: 'Dashboard', Icon: Newspaper },
-      { id: 'grievances', label: 'Grievances', Icon: Inbox },
-      { id: 'personas', label: 'People', Icon: UserSearch },
-      { id: 'influencers', label: 'Influencers', Icon: Megaphone },
-      { id: 'actions', label: 'Actions', Icon: ListChecks },
-    ],
-  },
-  {
-    heading: 'Reference',
-    items: [
-      { id: 'accounts', label: 'Accounts', Icon: LayoutGrid },
-      { id: 'compare', label: 'Compare', Icon: GitCompareArrows },
-      { id: 'history', label: 'History', Icon: Clock },
-      { id: 'settings', label: 'Settings', Icon: SettingsIcon },
-    ],
-  },
-]
+/**
+ * The sidebar's own body, taken from lib/nav rather than retyped.
+ *
+ * This file used to keep a fifth copy of the destination list, and copies are
+ * what let five screens go unreachable on a phone while every list looked
+ * complete on its own. Settings is filtered out here and pinned at the foot
+ * instead — it is in the shared groups so the phone's More sheet still carries
+ * it, since a sheet has no foot to pin anything to.
+ */
+const SIDEBAR_GROUPS = GROUPS.map((g) => ({
+  heading: g.heading,
+  items: g.items.filter((i) => i.id !== 'settings'),
+})).filter((g) => g.items.length > 0)
 
 /**
  * index.css rounds every :focus-visible target to --radius-xs, and that rule is
@@ -163,7 +136,7 @@ function NavRow({
   )
 }
 
-export function SideNav({ active, onSelect, counts, onLock }: Props) {
+export function SideNav({ active, onSelect, counts }: Props) {
   const reduced = useReducedMotion() === true
 
   return (
@@ -220,7 +193,7 @@ export function SideNav({ active, onSelect, counts, onLock }: Props) {
         {/* Scrolls on its own so a short laptop window never pushes the lock
             control off the bottom of the column. */}
         <div className="scroller mt-6 min-h-0 flex-1 space-y-5 overflow-y-auto">
-          {GROUPS.map((group) => (
+          {SIDEBAR_GROUPS.map((group) => (
             <div key={group.heading}>
               <p
                 aria-hidden
@@ -245,22 +218,33 @@ export function SideNav({ active, onSelect, counts, onLock }: Props) {
           ))}
         </div>
 
-        {onLock && (
-          <div className="mt-3 border-t border-[var(--border)] pt-3">
-            <button
-              onClick={onLock}
-              className={cn(
-                ROW,
-                FOCUS,
-                'px-4 text-sm font-medium',
-                'text-ink-2 hover:bg-[var(--surface-2)] hover:text-ink',
-              )}
-            >
-              <Lock size={16} strokeWidth={1.9} className="shrink-0" aria-hidden />
-              Lock
-            </button>
-          </div>
-        )}
+        {/* Settings sits at the foot, pinned under a rule, the way settings
+            usually does — and the way this column already treated the control
+            that used to be here.
+
+            That control was Lock, which is now only in the header. It was in
+            both places at once, and of the two the header is the right one: it
+            is beside the theme toggle and the history button, it is present on
+            every width including the phone, and a padlock is the one control an
+            office reaches for in a hurry. Duplicating it here bought nothing
+            and cost the foot of the column, which Settings had no home in. */}
+        <div className="mt-3 border-t border-[var(--border)] pt-3">
+          <button
+            onClick={() => onSelect('settings')}
+            aria-current={active === 'settings' ? 'page' : undefined}
+            className={cn(
+              ROW,
+              FOCUS,
+              'px-4 text-sm font-medium',
+              active === 'settings'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                : 'text-ink-2 hover:bg-[var(--surface-2)] hover:text-ink',
+            )}
+          >
+            <SettingsIcon size={16} strokeWidth={active === 'settings' ? 2.4 : 1.9} className="shrink-0" aria-hidden />
+            Settings
+          </button>
+        </div>
       </div>
     </m.nav>
   )

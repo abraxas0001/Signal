@@ -1,6 +1,7 @@
 import * as m from 'motion/react-m'
-import { Gauge, Clock, Link2, FileWarning, Megaphone } from 'lucide-react'
+import { Gauge, Link2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { BAR_SIDE, type Tab } from '@/lib/nav'
 
 /**
  * The bottom navigation.
@@ -14,11 +15,19 @@ import { cn } from '@/lib/utils'
  * carrying the accent fill, because a tab bar where everything looks equally
  * important tells the user nothing about what to do first.
  *
- * There are eight destinations and five slots. Accounts and Compare are not on
- * the bar — they are reached from the dashboard, which is where an office goes
- * to ask how things are going rather than to do the day's work. That keeps the
- * bar to the four screens opened every morning, and it is why there is no
- * "More" button: an overflow menu would mean the bar had failed to choose.
+ * There are TEN destinations and five slots, and this comment used to say eight
+ * and two. That undercount is why the rule it stated stopped working: it also
+ * said the rest "are reached from the dashboard", and the dashboard does not
+ * keep that promise on an empty desk — of its seventeen navigation call sites
+ * exactly one is unconditional, and Settings' only route runs when the news
+ * scan is BROKEN. Five screens were reachable by no route at all at 360px.
+ *
+ * The same comment argued that a "More" button "would mean the bar had failed
+ * to choose". The bar did choose, and its four daily screens are unchanged. It
+ * is the delegation that failed — and an app whose overflow menu appears only
+ * when a fetch fails already had one, just an invisible one. So slot five is
+ * now a labelled door, and `lib/nav.ts` makes the compiler check that every
+ * destination is behind one.
  *
  * Everything animates on transform and opacity only. This bar is fixed and
  * composited above scrolling content, so animating width, height or a
@@ -26,37 +35,26 @@ import { cn } from '@/lib/utils'
  * afford it.
  */
 
-/**
- * Every destination in the app, including the three the bar does not show.
- * `accounts`, `compare` and `actions` are opened from the dashboard.
- */
-export type Tab =
-  | 'dashboard'
-  | 'grievances'
-  | 'personas'
-  | 'analyse'
-  | 'influencers'
-  | 'history'
-  | 'accounts'
-  | 'compare'
-  | 'actions'
-  | 'settings'
+/** Re-exported so existing importers keep working; it is owned by lib/nav.ts. */
+export type { Tab }
 
 interface Props {
   active: Tab
   onSelect: (tab: Tab) => void
-  /** Shown as a badge on History. */
-  historyCount?: number
   /** Unreviewed grievance records and unacknowledged mentions. */
   counts?: Partial<Record<Tab, number>>
 }
 
-const SIDE = [
-  { id: 'dashboard' as const, label: 'Dashboard', Icon: Gauge },
-  { id: 'grievances' as const, label: 'Grievances', Icon: FileWarning },
-  { id: 'influencers' as const, label: 'Influencers', Icon: Megaphone },
-  { id: 'history' as const, label: 'History', Icon: Clock },
-]
+/**
+ * Four side slots and the raised centre. The fifth used to be History; it is
+ * now More, and History moved into the sheet behind it.
+ *
+ * History was the weakest of the five: it is a log of past readings, looked at
+ * occasionally, while Settings — which shares its new home — could not be
+ * opened on a phone at all. Swapping which of the two is one tap away and which
+ * is two costs the reader almost nothing and buys five screens a route.
+ */
+const SIDE = BAR_SIDE
 
 function TabButton({
   label,
@@ -107,14 +105,11 @@ function TabButton({
   )
 }
 
-export function TabBar({ active, onSelect, historyCount = 0, counts }: Props) {
-  // Accounts, Compare and Actions are opened from the dashboard, so while one
-  // of them is on screen the dashboard tab stays lit — the bar should never
-  // show nothing selected.
-  const lit = (id: Tab): boolean =>
-    active === id ||
-    (id === 'dashboard' &&
-      (active === 'accounts' || active === 'compare' || active === 'actions' || active === 'settings'))
+export function TabBar({ active, onSelect, counts }: Props) {
+  // Overflow screens light the More slot instead of borrowing the dashboard's,
+  // so the bar always shows where the reader actually is. `personas` is
+  // unlisted, and falls back to the dashboard because it has no slot at all.
+  const lit = (id: Tab): boolean => active === id || (id === 'dashboard' && active === 'personas')
 
   return (
     <nav
@@ -174,7 +169,7 @@ export function TabBar({ active, onSelect, historyCount = 0, counts }: Props) {
             label={t.label}
             Icon={t.Icon}
             active={lit(t.id)}
-            badge={t.id === 'history' ? historyCount : counts?.[t.id]}
+            badge={counts?.[t.id]}
             onClick={() => onSelect(t.id)}
           />
         ))}

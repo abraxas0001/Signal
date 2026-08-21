@@ -1,5 +1,5 @@
 import * as m from 'motion/react-m'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { pressable, spring } from '@/lib/motion'
@@ -15,6 +15,10 @@ type ButtonProps = {
   type?: 'button' | 'submit'
   className?: string
   'aria-label'?: string
+  /** Hover text. Already spread onto the element by ...rest; only the type
+      was missing, so every attempt to explain a button on hover was a
+      compile error. */
+  title?: string
 }
 
 export function Button({
@@ -54,6 +58,20 @@ export function Button({
 }
 
 /* ── Chip ────────────────────────────────────────────────────────────────── */
+
+/**
+ * A native <select> styled to match the inputs and buttons around it.
+ *
+ * Shared rather than copied: the grievance filters and the influencer sort are
+ * the same control doing the same job on two screens, and a filter row that
+ * looks subtly different from one screen to the next reads as two different
+ * features. Native <select> on purpose — it gives a phone its own wheel picker,
+ * which no custom dropdown here has matched.
+ */
+export const selectClass =
+  'select min-h-11 shrink-0 rounded-[--radius-md] border border-[var(--border-interactive)] ' +
+  'bg-[var(--surface)] py-2 pl-3 text-sm text-ink outline-none transition-colors ' +
+  'hover:border-[var(--accent)] focus:border-[var(--accent)]'
 
 export type ChipTone = 'neutral' | 'accent' | 'positive' | 'warning' | 'negative' | 'info'
 
@@ -106,18 +124,37 @@ export function Card({
   className,
   padded = true,
   tone,
+  /**
+   * How much this panel should assert itself.
+   *
+   * Every card carried identical weight, so a screen of six said nothing about
+   * which to read first and the eye had to work it out from the words. One
+   * lifted panel per screen, everything else level, and supporting detail
+   * quiet.
+   */
+  level = 'base',
+  id,
 }: {
   children: ReactNode
   className?: string
+  /** So a screen can send somebody straight to one card. */
+  id?: string
   padded?: boolean
   tone?: 'accent'
+  level?: 'base' | 'lift' | 'quiet'
 }) {
   return (
     <div
+      id={id}
       className={cn(
         'card relative overflow-hidden',
+        level === 'lift' && 'card-lift',
+        level === 'quiet' && 'card-quiet',
         tone === 'accent' && 'grad-border',
-        padded && 'p-4 sm:p-5',
+        // Padding was 16px, which on a panel with a heading, body copy and a
+        // row of chips left nothing between the content and the edge. The
+        // crowding read as the text problem it actually was.
+        padded && 'p-5 sm:p-6',
         className,
       )}
     >
@@ -134,18 +171,25 @@ export function SectionTitle({
   children,
   hint,
   action,
+  eyebrow,
 }: {
   children: ReactNode
   hint?: string
   action?: ReactNode
+  /** Small-caps label above the title, for screens that need a second level. */
+  eyebrow?: string
 }) {
   return (
-    <div className="mb-3 flex items-end justify-between gap-3">
+    <div className="section-head">
       <div className="min-w-0">
+        {eyebrow && <p className="eyebrow mb-2">{eyebrow}</p>}
         <h2 className="text-lg font-semibold tracking-[-0.011em]">{children}</h2>
-        {hint && <p className="mt-0.5 text-xs text-ink-3">{hint}</p>}
+        {/* Capped measure and its own breathing room. The hint sat 2px under
+            the heading at the same width as the page, so a one-line title and
+            a three-line explanation read as a single paragraph. */}
+        {hint && <p className="measure mt-1.5 text-sm leading-relaxed text-ink-3">{hint}</p>}
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   )
 }
@@ -168,7 +212,7 @@ const PROVENANCE: Record<string, { label: string | null; tone: ChipTone; title: 
   // Not measured by us. These are the ones a reader has to know about.
   'user-supplied': { label: 'you added this', tone: 'accent', title: 'You entered this figure' },
   vision: { label: 'from screenshot', tone: 'accent', title: 'Read from your screenshot' },
-  inferred: { label: 'estimate', tone: 'warning', title: 'Estimated — not measured' },
+  inferred: { label: 'estimate', tone: 'warning', title: 'Estimated, not measured' },
   unavailable: { label: null, tone: 'neutral', title: 'This platform does not publish it' },
 }
 
@@ -292,18 +336,36 @@ export function SkeletonLines({ lines = 4, className }: { lines?: number; classN
  * of fighting it. Geometry is the favicon's, scaled from its 32-unit grid.
  */
 export function SignalGlyph({ size = 16 }: { size?: number }) {
+  /**
+   * A gradient id unique to this instance.
+   *
+   * It was the literal string "signal-mark", and the mark is rendered more than
+   * once per document — the sidebar carries one and the header another. Two
+   * elements defining the same SVG id makes `url(#signal-mark)` resolve to
+   * whichever the browser saw first, and when that one sits inside a
+   * `display:none` branch (the header lockup is `lg:hidden`) the fill can fail
+   * to paint altogether. The tile then rendered flat and the mark read as three
+   * washed-out grey bars instead of the accent lockup.
+   *
+   * `useId` is React's answer to exactly this, and it costs nothing.
+   */
+  const gradientId = `signal-mark-${useId()}`
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
       <defs>
-        <linearGradient id="signal-mark" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--accent)" />
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="currentColor" />
           <stop
             offset="1"
-            stopColor="color-mix(in oklab, var(--accent) 62%, var(--info, #3B82C4))"
+            stopColor="color-mix(in oklab, currentColor 62%, var(--info, #3B82C4))"
           />
         </linearGradient>
       </defs>
-      <rect width="32" height="32" rx="8" fill="url(#signal-mark)" />
+      {/* currentColor rather than var(--accent): the mark then takes the colour
+          of whatever it is placed in, the way every lucide icon in this app
+          already does, and a caller cannot end up with a lockup that ignores
+          the colour it was given. */}
+      <rect width="32" height="32" rx="8" fill={`url(#${gradientId})`} />
       <rect x="5" y="18" width="4.4" height="9" rx="2.2" fill="#fff" opacity=".55" />
       <rect x="12.2" y="12.6" width="4.4" height="14.4" rx="2.2" fill="#fff" opacity=".75" />
       <rect x="19.4" y="5" width="4.4" height="22" rx="2.2" fill="#fff" />
@@ -504,8 +566,13 @@ export function Empty({
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center rounded-[--radius-sm] border border-dashed',
-        'border-[var(--border)] px-5 py-7 text-center sm:py-8',
+        // A solid panel, not a dashed outline. The dashed border is the
+        // convention for a drop target or a placeholder that is about to be
+        // filled by the user, and these are neither: they are finished states
+        // that happen to be empty. On a screen with three of them it read as a
+        // page that had failed to load.
+        'flex flex-col items-center justify-center rounded-[--radius-md] border',
+        'border-[var(--border)] bg-[var(--surface-2)] px-5 py-8 text-center sm:py-10',
         className,
       )}
     >

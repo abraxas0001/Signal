@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronRight, Loader2, RefreshCw, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
 import type { OpinionSurvey, OpinionTheme } from '@/lib/opinion'
 import { Button, Card, Chip } from './ui'
+import { RecoveryPlan } from './RecoveryPlan'
 import { cn, relativeTime } from '@/lib/utils'
 
 /**
@@ -33,12 +34,23 @@ const WEIGHT_LABEL: Record<OpinionTheme['weight'], string> = {
 
 export function OpinionPanel({
   survey,
+  person,
+  onOpenActions,
   busy,
   stage,
   error,
   onRefresh,
 }: {
   survey: OpinionSurvey | null
+  /**
+   * Who this is about. Only used to ask for a recovery plan, which needs the
+   * name, seat and party to reason usefully. Optional so every existing
+   * caller keeps working; without it the plan button does not appear, which
+   * is correct rather than broken.
+   */
+  person?: { name: string; role?: string | null; constituency?: string | null; party?: string | null } | null
+  /** Route to the task list, for steps filed out of the recovery plan. */
+  onOpenActions?: () => void
   busy: boolean
   /** Which half is running. Half a minute of one spinner reads as a hang. */
   stage: 'searching' | 'reading' | null
@@ -75,7 +87,7 @@ export function OpinionPanel({
         <p className="text-[15px] font-semibold">Nothing has been read yet</p>
         <p className="mt-1 text-sm leading-relaxed text-ink-2">
           {error ??
-            'This reads the published record — news, editorials, what opponents have said — and reports what is actually being claimed about you.'}
+            'This reads the published record: news, editorials, what opponents have said. It reports what is actually being claimed about you.'}
         </p>
         <Button size="sm" className="mt-3" onClick={onRefresh}>
           <RefreshCw size={15} />
@@ -137,11 +149,24 @@ export function OpinionPanel({
         {/* Said on the face of it, not in a footnote. Mistaking this for a poll
             is the one misreading that would actually cost a member something. */}
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
-          Read from {survey.sources.length} published sources — journalists, opponents and
+          Read from {survey.sources.length} published sources: journalists, opponents and
           commentators. This is not a survey of your constituents.
           {survey.readAt ? ` Read ${relativeTime(survey.readAt)}.` : ''}
         </p>
       </Card>
+
+      {/*
+        Only when the reading is actually negative, and only when there is a
+        person to plan for.
+
+        A repair plan offered against warm coverage would be the app inventing
+        a problem to solve, and an office that sees "fix your reputation" on a
+        good week learns to ignore the panel. The endpoint refuses on its own
+        if no criticism was gathered, so this is the second of two gates.
+      */}
+      {person && survey.score != null && survey.score < 0 && survey.criticism.length > 0 && (
+        <RecoveryPlan survey={survey} person={person} onOpenActions={onOpenActions} />
+      )}
 
       {groups.map((group) => {
         const ThemeIcon = Icon[group.tone]

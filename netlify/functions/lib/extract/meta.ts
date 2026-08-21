@@ -563,7 +563,7 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
       ok: false,
       attempts,
       blocked: {
-        reason: 'This post has been deleted or made private — Facebook no longer serves it to anyone.',
+        reason: 'This post has been deleted or made private. Facebook no longer serves it to anyone.',
         suggestion:
           'The link itself is valid, so the post existed. If you have a screenshot or the text, upload it and we will analyse that.',
       },
@@ -578,7 +578,7 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
       blocked: {
         reason: 'Facebook did not return this post to our server.',
         suggestion:
-          'Facebook blocks most automated reads. Paste the post text below — everything else still works.',
+          'Facebook blocks most automated reads. Paste the post text below. Everything else still works.',
       },
     }
   }
@@ -607,7 +607,7 @@ async function extractFacebook(id: UrlIdentity, _ctx: ExtractContext): Promise<E
         reason:
           'Facebook served our server a placeholder page for this share link, with no post on it.',
         suggestion:
-          'Open the post on Facebook, copy the address from the browser bar — it looks like facebook.com/<page>/posts/<number> — and paste that instead. That form works. Or paste the post text below.',
+          'Open the post on Facebook and copy the address from the browser bar. It looks like facebook.com/<page>/posts/<number>. Paste that instead: that form works. Or paste the post text below.',
       },
     }
   }
@@ -865,7 +865,7 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
           ? `That is ${id.handle ? `@${id.handle}'s profile` : 'a profile page'}, not a single post.`
           : 'That Instagram link does not point at a post.',
         suggestion:
-          'Open the post itself and copy its link — it will look like instagram.com/p/… or instagram.com/reel/….',
+          'Open the post itself and copy its link. It will look like instagram.com/p/… or instagram.com/reel/….',
       },
     }
   }

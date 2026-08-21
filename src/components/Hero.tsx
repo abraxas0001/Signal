@@ -30,11 +30,22 @@ const SUPPORTED = [
 export function Hero({
   onSubmit,
   onOpenExample,
+  onClose,
   initialUrl = '',
 }: {
   onSubmit: (url: string) => void
   /** Opens the worked example, so the home screen can show its own output. */
   onOpenExample: () => void
+  /**
+   * Back to the dashboard.
+   *
+   * Every other screen carries one and this was the only one that did not: a
+   * desk that tapped "Analyse a link", then thought better of it, had no way
+   * out except the navigation — which reads as being stuck on a screen you
+   * only meant to glance at. Optional, because on a first run this IS the
+   * screen and there is nothing behind it.
+   */
+  onClose?: () => void
   initialUrl?: string
 }) {
   const [url, setUrl] = useState(initialUrl)
@@ -85,6 +96,17 @@ export function Hero({
       initial="hidden"
       animate="show"
     >
+      {/* The way out, in the same place and with the same words every other
+          screen puts it. Absent on a first run, where this is the whole app
+          and there is nothing behind it to go back to. */}
+      {onClose && (
+        <m.div variants={listItem} className="flex justify-end pt-2">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Back
+          </Button>
+        </m.div>
+      )}
+
       {/* ── Opening ─────────────────────────────────────────────────────────
           A dateline, not a badge.
 
@@ -255,7 +277,7 @@ export function Hero({
         variants={listItem}
         className="mt-5 border-t border-[var(--border)] pt-3 text-xs leading-relaxed text-ink-3"
       >
-        Public posts only. Nothing is stored on a server — your history stays on this device.
+        Public posts only. Nothing is stored on a server, so your history stays on this device.
       </m.p>
     </m.div>
   )

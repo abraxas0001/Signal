@@ -38,8 +38,24 @@
   # own 9s timeout — worst case is close to the platform default of 10s.
   timeout = 30
 
+[functions."recovery"]
+  # One model call over criticism that has already been gathered, so no web
+  # search and no second round trip. Well inside the window, but a plan over
+  # eight themes is a long generation and the 10s default is not enough.
+  timeout = 30
+
 [functions."opinion"]
   # A grounded web search plus a structuring call. Runs rarely and is cached.
+  timeout = 60
+
+[functions."compare"]
+  # The same shape as "opinion" above, and it was missing this block entirely.
+  # The grounded search in lib/compare.ts allows itself 45s, so on the platform
+  # default of 10s the request could never finish: the runtime killed the
+  # function before the search's own timeout ever fired, and the screen showed
+  # "Could not reach the server" for what was really a working search that was
+  # never given time to answer. Split into two steps, the search half is still
+  # the long pole.
   timeout = 60
 
 [functions."news-sources"]
@@ -50,6 +66,36 @@
 [functions."connections"]
   # The Meta status check calls whoAmI() live, with a 9s timeout of its own.
   timeout = 20
+
+# The three below had no block at all, so they ran on the platform's 10s
+# default while each spending far more than that — the same arithmetic that
+# broke "compare" above, found by reviewing the licensed-provider wiring.
+
+[functions."account-search"]
+  # One InnerTube search, then a channel page and a feed for each of up to six
+  # results when verify=1. The verification is the point — a subscriber count is
+  # what separates a real channel from a lookalike — but it is six sequential
+  # pairs of fetches, so the 10s default is nowhere near enough.
+  timeout = 60
+
+[functions."handle"]
+  # Already over budget before any provider existed: readYouTube alone can
+  # spend 9s on the channel page, 8s on the RSS feed and 9s on InnerTube. The
+  # endpoint also fans out over six handles at once, and the licensed read in
+  # social-source.ts allows itself a further 15s. A kill here does not just
+  # lose the gated account — it discards the follower counts every other
+  # handle in the batch had already returned, and the screen blames the
+  # reader's network for it.
+  timeout = 30
+
+[functions."rivals"]
+  # One model call, then up to ten candidates read live, up to three handles
+  # each, sequentially.
+  timeout = 60
+
+[functions."standing"]
+  # readHandle, then several live post extractions, then a model call.
+  timeout = 60
 
 # The SPA catch-all. Functions declared with `config.path` are matched by
 # Netlify *before* redirects, so /api/analyse reaches the function and never

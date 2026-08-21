@@ -25,6 +25,7 @@ import type {
   Sentiment,
 } from '../../../shared/taxonomy'
 import type { FakeAssessment, FakeSignal, Recommendation } from '../../../shared/grievance'
+import { HOUSE_STYLE } from './house-style'
 
 /**
  * The persona tracker.
@@ -410,7 +411,7 @@ export async function findPersonaMentions(input: PersonaFindInput): Promise<Pers
   const candidates = kept.slice(0, MAX_CANDIDATES)
   if (kept.length > MAX_CANDIDATES) {
     notes.push(
-      `Kept the first ${MAX_CANDIDATES} of ${kept.length} stories. The rest were found but are not listed — narrow the mastheads or the spellings.`,
+      `Kept the first ${MAX_CANDIDATES} of ${kept.length} stories. The rest were found but are not listed. Narrow the mastheads or the spellings.`,
     )
   }
 
@@ -425,7 +426,7 @@ export async function findPersonaMentions(input: PersonaFindInput): Promise<Pers
   )
   if (!aliases.length) {
     notes.push(
-      'No other spellings were given. A Telugu or Hindi masthead writes the name in its own script, and this scan cannot match a spelling it was not given — add them to see that coverage.',
+      'No other spellings were given. A Telugu or Hindi masthead writes the name in its own script, and this scan cannot match a spelling it was not given. Add them to see that coverage.',
     )
   }
   notes.push(...scan.notes)
@@ -538,7 +539,10 @@ Name things. A village, a scheme, a rupee amount, the meeting where a quote was 
 
 Articles are usually in Telugu, sometimes Hindi or English. Read them in the original and write every field in English, except place names and personal names, which keep their common English spelling.
 
-Fill every field. Use an empty string rather than omitting anything, and never invent a detail the article does not contain.`
+Fill every field. Use an empty string rather than omitting anything, and never invent a detail the article does not contain.
+
+${HOUSE_STYLE}
+`
 
 const READ_SCHEMA: Record<string, unknown> = obj({
   languageCode: str('BCP-47 code of the language the article is written in, e.g. "te", "hi", "en".'),
@@ -569,7 +573,10 @@ The rule that matters most: you can only read text. State what the text shows, a
 - confidence is how sure you are of the OBSERVATION, not of the conclusion.
 - Always emit a consistency signal and a recirculation signal. Never more than four signals in total.
 
-Set suspicion to "No" unless one of the real signals above actually fired. Most articles about a public figure are ordinary journalism and come back "No", with a type of "Not Applicable".`
+Set suspicion to "No" unless one of the real signals above actually fired. Most articles about a public figure are ordinary journalism and come back "No", with a type of "Not Applicable".
+
+${HOUSE_STYLE}
+`
 
 const CLAIM_SCHEMA: Record<string, unknown> = obj({
   suspicion: enumOf(
@@ -652,7 +659,7 @@ export async function analysePersonaMention(
   const raw = (meta.articleText ?? meta.description ?? '').trim()
   const junk = detectJunk(raw)
   if (junk) {
-    throw new Error(`Could not read that article — ${junk}. Try the story on another masthead.`)
+    throw new Error(`Could not read that article: ${junk}. Try the story on another masthead.`)
   }
   /**
    * A body this short is not an article, whatever the page claims to be.
@@ -884,7 +891,7 @@ async function assessClaim(input: ClaimInput): Promise<FakeAssessment> {
   if (CLIP_CUES_LATIN.test(haystack) || CLIP_CUES_INDIC.test(haystack)) {
     signals.push({
       kind: 'provenance',
-      finding: `This story rests on a clip or a screenshot attributed to ${input.persona}. Nothing here has seen it, and no automated check can separate a filmed clip from a generated or re-edited one — least of all after the re-compression a forwarded clip goes through. Someone has to watch it and find where it first appeared.`,
+      finding: `This story rests on a clip or a screenshot attributed to ${input.persona}. Nothing here has seen it, and no automated check can separate a filmed clip from a generated or re-edited one, least of all after the re-compression a forwarded clip goes through. Someone has to watch it and find where it first appeared.`,
       confidence: 'low',
       supports: 'inconclusive',
     })
@@ -954,7 +961,7 @@ function sourceSignal(url: string, publisher: string | null): FakeSignal {
   if (known) {
     return {
       kind: 'source',
-      finding: `Served by ${known.label} (${host}), a masthead already on the desk's list. Weak evidence of authenticity — established mastheads carry wrong stories too — but this is not an anonymous repost.`,
+      finding: `Served by ${known.label} (${host}), a masthead already on the desk's list. Weak evidence of authenticity, since established mastheads carry wrong stories too, but this is not an anonymous repost.`,
       confidence: 'high',
       supports: 'authentic',
     }
@@ -1023,9 +1030,9 @@ function corroborationSignal(input: ClaimInput): FakeSignal {
   if (!hits.length) {
     return {
       kind: 'corroboration',
-      finding: `No other story in this scan — ${others.length} across ${mastheads} masthead${
+      finding: `No other story in this scan, ${others.length} across ${mastheads} masthead${
         mastheads === 1 ? '' : 's'
-      } — shares wording with this headline. That is not evidence the story is false: the scan reads one index page per masthead and misses most of what each publishes.`,
+      }, shares wording with this headline. That is not evidence the story is false: the scan reads one index page per masthead and misses most of what each publishes.`,
       confidence: 'medium',
       supports: 'inconclusive',
     }
@@ -1037,7 +1044,7 @@ function corroborationSignal(input: ClaimInput): FakeSignal {
     kind: 'corroboration',
     finding: `${named.join(', ')} carried a headline in the same scan sharing the words ${shared
       .map((w) => `"${w}"`)
-      .join(', ')}. That means the event was reported elsewhere too, not that it happened as described — syndicated copy travels the same way.`,
+      .join(', ')}. That means the event was reported elsewhere too, not that it happened as described. Syndicated copy travels the same way.`,
     confidence: 'medium',
     supports: 'authentic',
   }

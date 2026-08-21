@@ -129,7 +129,12 @@ function profileUrl(platform: Platform, handle: string): string | null {
  * do not exist.
  */
 function resolved(s: HandleSummary): boolean {
-  return s.followers != null || s.posts.length > 0
+  // A reseller's rows are not proof that a model's guess names a real account:
+  // a provider that answers for a fabricated handle would verify an invented
+  // opponent, which is precisely what this file exists to make impossible.
+  // Discovery passes `licensed: false` so this should never be reachable —
+  // it is here so that stops being load-bearing.
+  return s.followers != null || (s.posts.length > 0 && s.listing.route !== 'licensed')
 }
 
 export interface RivalsResult {
@@ -192,7 +197,14 @@ export async function findRivals(subject: HandleSummary): Promise<RivalsResult> 
         if (!ref) continue
         checked++
         try {
-          const summary = await readHandle(ref)
+          // `licensed: false` because every handle in this loop is a MODEL'S
+          // GUESS, not a confirmed account. Letting discovery fall through to
+          // the paid provider means buying a lookup for each invented handle —
+          // one press of "Find rivals" is up to ten candidates times three
+          // handles. Discovery only needs `resolved()`, which a free read
+          // answers; the paid read happens later, once, when a person presses
+          // Track on a rival they have actually confirmed.
+          const summary = await readHandle(ref, { licensed: false })
           if (resolved(summary)) profiles.push(summary)
         } catch {
           /* an unreachable handle is a discarded guess, not an error */

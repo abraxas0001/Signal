@@ -166,7 +166,7 @@ export class VaultError extends Error {
  * person who actually owns the records.
  */
 const CANNOT_OPEN =
-  'That did not open. Either the passphrase is wrong or these records are damaged. Capitals and spaces count — check and try again. Nothing has been deleted.'
+  'That did not open. Either the passphrase is wrong or these records are damaged. Capitals and spaces count, so check and try again. Nothing has been deleted.'
 
 /* ── Bytes ───────────────────────────────────────────────────────────────── */
 
@@ -471,7 +471,7 @@ function writeIndex(index: AccountIndex): void {
   } catch {
     throw new VaultError(
       'storage',
-      'This device would not save the account list — storage is full, or the browser is in private mode. Free some space, or open Signal in a normal window, and try again.',
+      'This device would not save the account list. Storage is full, or the browser is in private mode. Free some space, or open Signal in a normal window, and try again.',
     )
   }
 }
@@ -481,7 +481,7 @@ function requireIndex(): AccountIndex {
   if (!state.ok) {
     throw new VaultError(
       'storage',
-      'Signal cannot read the list of accounts on this device, so it will not change it — that could hide records rather than lose them. The encrypted records are still here. Restore a backup on another device, or clear this site’s data only if you have one.',
+      'Signal cannot read the list of accounts on this device, so it will not change it. Doing so could hide records rather than lose them. The encrypted records are still here. Restore a backup on another device, or clear this site’s data only if you have one.',
     )
   }
   return state.index
@@ -701,7 +701,7 @@ function writeRawAt(storageKey: string, value: string): void {
   } catch {
     throw new VaultError(
       'storage',
-      'This device would not save the records — storage is full, or the browser is in private mode. Free some space, or open Signal in a normal window, and try again.',
+      'This device would not save the records. Storage is full, or the browser is in private mode. Free some space, or open Signal in a normal window, and try again.',
     )
   }
 }
@@ -871,6 +871,205 @@ function migrateLegacyVault(): void {
   }
 }
 
+/* ── Surviving a reload ──────────────────────────────────────────────────── */
+
+/**
+ * Staying signed in across a refresh, without giving up what the key protects.
+ *
+ * The derived key lives in a module variable, so pressing F5 dropped it and the
+ * office was asked for the passphrase again — several times a morning, on a
+ * screen that also warns them not to type it where anyone can see. A lock that
+ * fires that often gets worked around, usually by choosing a shorter
+ * passphrase, and then it protects less than it did before.
+ *
+ * TWO THINGS MAKE THIS SAFE TO DO, and neither is a compromise:
+ *
+ * The key is stored in IndexedDB, which structured-clones a `CryptoKey`
+ * OBJECT. It stays `extractable: false` — the bytes never enter JavaScript, in
+ * this module or in anything injected into it. Nothing is written that an
+ * attacker could read a passphrase or a key out of. The passphrase itself is
+ * still never stored anywhere, in any form.
+ *
+ * And the restore needs a token from sessionStorage as well as the key. That
+ * is what bounds it to a TAB rather than to the device: a refresh keeps
+ * sessionStorage and the session survives; closing the tab discards it and the
+ * orphaned key is ignored and swept up on the next load. So this restores a
+ * reload, not a walk-away — which is the case the lock screen exists for, and
+ * it is unchanged.
+ *
+ * A wall-clock expiry backs both up, for a tab left open all weekend.
+ */
+const SESSION_DB = 'signal-session'
+const SESSION_STORE = 'key'
+const SESSION_TOKEN_KEY = 'signal:session'
+/** A tab open longer than this re-asks, however alive sessionStorage still is. */
+const SESSION_MAX_MS = 12 * 60 * 60 * 1000
+
+interface StoredSession {
+  token: string
+  key: CryptoKey
+  header: Header
+  accountId: string
+  blob: string
+  at: number
+}
+
+function openDb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(SESSION_DB, 1)
+      req.onupgradeneeded = () => {
+        const db = req.result
+        if (!db.objectStoreNames.contains(SESSION_STORE)) db.createObjectStore(SESSION_STORE)
+      }
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => resolve(null)
+      // Private mode, or a browser that refuses storage entirely. Not fatal:
+      // the app simply asks for the passphrase as it always did.
+      req.onblocked = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+async function writeSession(value: StoredSession | null): Promise<void> {
+  const db = await openDb()
+  if (!db) return
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction(SESSION_STORE, 'readwrite')
+      const store = tx.objectStore(SESSION_STORE)
+      if (value) store.put(value, 'current')
+      else store.delete('current')
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+      tx.onabort = () => resolve()
+    } catch {
+      resolve()
+    }
+  })
+  db.close()
+}
+
+async function readSession(): Promise<StoredSession | null> {
+  const db = await openDb()
+  if (!db) return null
+  const value = await new Promise<StoredSession | null>((resolve) => {
+    try {
+      const tx = db.transaction(SESSION_STORE, 'readonly')
+      const req = tx.objectStore(SESSION_STORE).get('current')
+      req.onsuccess = () => resolve((req.result as StoredSession | undefined) ?? null)
+      req.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+  db.close()
+  return value
+}
+
+function sessionToken(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+/** Remember this session for the life of the tab. Never throws. */
+async function rememberSession(): Promise<void> {
+  if (!key || !header || !activeId || !activeBlob) return
+  try {
+    const token = toB64(randomBytes(18))
+    sessionStorage.setItem(SESSION_TOKEN_KEY, token)
+    await writeSession({
+      token,
+      key,
+      header,
+      accountId: activeId,
+      blob: activeBlob,
+      at: Date.now(),
+    })
+  } catch {
+    // A browser that will not keep it just means the passphrase is asked for
+    // again after a refresh, which is where this started.
+  }
+}
+
+async function forgetSession(): Promise<void> {
+  try {
+    sessionStorage.removeItem(SESSION_TOKEN_KEY)
+  } catch {
+    /* nothing to remove */
+  }
+  await writeSession(null)
+}
+
+/**
+ * True while a stored session is being checked, so the app can wait rather than
+ * flashing the lock screen at somebody who is about to be let straight back in.
+ */
+let restoring = typeof window !== 'undefined' && sessionToken() !== null
+
+export function isRestoring(): boolean {
+  return restoring
+}
+
+/**
+ * Put a tab's session back after a reload.
+ *
+ * Every guard here is a way the stored session can be wrong rather than
+ * malicious: the tab was closed (no token), the token does not match the stored
+ * one, the account has since been deleted, the blob was re-keyed by another
+ * tab, or the whole thing is simply too old.
+ */
+export async function restoreSession(): Promise<void> {
+  if (!restoring) return
+  try {
+    const token = sessionToken()
+    const stored = token ? await readSession() : null
+
+    if (!stored || !token || stored.token !== token || Date.now() - stored.at > SESSION_MAX_MS) {
+      // Includes the closed-tab case: the key is orphaned, so sweep it.
+      if (stored) await forgetSession()
+      return
+    }
+
+    const state = readIndex()
+    if (!state.ok) return
+    const account = state.index.accounts.find((a) => a.id === stored.accountId)
+    if (!account || account.blob !== stored.blob) {
+      await forgetSession()
+      return
+    }
+
+    const raw = readRawAt(stored.blob)
+    const envelopeNow = raw === null ? null : parseEnvelope(raw)
+    if (!envelopeNow) {
+      await forgetSession()
+      return
+    }
+
+    // The real proof. If the passphrase was changed in another tab this fails,
+    // and failing means asking for the new one — never showing stale records.
+    const plaintext = await unseal(stored.key, envelopeNow)
+    const parsed: unknown = JSON.parse(plaintext)
+    if (!isRecord(parsed)) {
+      await forgetSession()
+      return
+    }
+
+    adopt(account, { key: stored.key, header: envelopeNow.header }, raw!, plaintext)
+  } catch {
+    // Anything unexpected leaves the app locked, which is the safe direction.
+    await forgetSession().catch(() => undefined)
+  } finally {
+    restoring = false
+    notify()
+  }
+}
+
 let installed = false
 
 /**
@@ -1020,6 +1219,7 @@ export async function createAccount(name: string, passphrase: string): Promise<A
   }
 
   adopt(account, { key: nextKey, header: nextHeader }, sealed, text)
+  void rememberSession()
   return { id, name: trimmed, createdAt: now, lastUsedAt: now }
 }
 
@@ -1047,6 +1247,8 @@ export async function signIn(accountId: string, passphrase: string): Promise<voi
   if (raw === null) throw new VaultError('unreadable', CANNOT_OPEN)
 
   adopt(account, opened, raw, opened.plaintext)
+  // Survive a refresh in this tab. Never blocks the sign-in.
+  void rememberSession()
   try {
     writeIndex(touch(index, account.id))
   } catch {
@@ -1065,6 +1267,8 @@ export async function signIn(accountId: string, passphrase: string): Promise<voi
  */
 export async function signOut(): Promise<void> {
   await flushNow()
+  // Signing out is explicit and must not be undone by a refresh.
+  await forgetSession()
   // Anything still queued belongs to the account being closed and can no longer
   // be sealed. Clearing it stops the next account's first write from inheriting
   // a stale pending payload that was never theirs.
@@ -1110,6 +1314,10 @@ export async function changePassphrase(
   header = nextHeader
   plain = text
   envelope = sealed
+  // The stored session holds the OLD key, which no longer opens this blob.
+  // Re-recording it here keeps the tab signed in through a passphrase change;
+  // leaving it would fail the unseal on the next refresh and lock them out.
+  void rememberSession()
   notify()
 }
 

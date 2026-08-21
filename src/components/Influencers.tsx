@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Plus,
   RefreshCw,
+  ScanEye,
   Search,
   TriangleAlert,
   X,
@@ -17,6 +18,7 @@ import type {
   Influencer,
   InfluencerMention,
 } from '@shared/grievance'
+import { isWaiting, pruneMentions } from '@shared/grievance'
 import { deskPlaces } from '@/lib/autoconfig'
 import {
   CONFIDENCE_TIERS,
@@ -29,7 +31,8 @@ import {
 import type { Platform } from '@shared/taxonomy'
 import { readStore, update, useStore } from '@/lib/store'
 import { Mascot } from './Mascot'
-import { Button, Card, Chip, PageHeader, SectionTitle, type ChipTone } from './ui'
+import { Button, Card, Chip, PageHeader, SectionTitle, selectClass, type ChipTone } from './ui'
+import { AddInfluencer, SearchInfluencers } from './AddInfluencer'
 import { cn, relativeTime } from '@/lib/utils'
 import { fadeUp, listItem, listStagger } from '@/lib/motion'
 
@@ -82,12 +85,29 @@ const STANCE_TONE: Record<InfluencerMention['stance'], ChipTone> = {
   unclear: 'warning',
 }
 
-/** "unclear" is spelled out, because a blank stance chip reads as a bug. */
+/**
+ * The chip. "unclear" is spelled out, because a blank stance chip reads as a
+ * bug.
+ *
+ * Kept separate from STANCE_SENTENCE below because the two are read in
+ * different places and cannot share a string. The chip stands alone and has to
+ * name what it is measuring; the sentence already supplies "towards you" from
+ * its own grammar, and reusing the chip's wording there produced "Neutral
+ * towards you towards you, neutral in tone".
+ */
 const STANCE_LABEL: Record<InfluencerMention['stance'], string> = {
   supportive: 'Supportive',
   critical: 'Critical',
   neutral: 'Neutral towards you',
   unclear: 'Stance unclear',
+}
+
+/** The same four stances as they read mid-sentence, before "towards you". */
+const STANCE_SENTENCE: Record<InfluencerMention['stance'], string> = {
+  supportive: 'Supportive',
+  critical: 'Critical',
+  neutral: 'Neutral',
+  unclear: 'Unclear',
 }
 
 const SENTIMENT_CHIP: Record<string, ChipTone> = {
@@ -193,6 +213,8 @@ function toMention(raw: unknown): InfluencerMention | null {
     postedAt: text(raw['postedAt']),
     excerpt: text(raw['excerpt']) ?? '',
     mentionsSubject: raw['mentionsSubject'] !== false,
+    // Absent means judged: only the unfiltered path sends an explicit false.
+    judged: raw['judged'] !== false,
     stance: oneOf(raw['stance'], STANCES, 'unclear'),
     sentiment: oneOf(raw['sentiment'], SENTIMENTS, 'Neutral'),
     fake: toFake(raw['fake']),
@@ -260,6 +282,14 @@ function WatchTerms() {
     update((s) => ({
       ...s,
       profile: {
+        // Spread FIRST, then fill required fields. Listing the fields without
+        // the spread dropped every optional one on each edit — `district` most
+        // damagingly, which the news scan needs to fetch a district edition.
+        // Editing a watch word here silently widened the scan to the whole
+        // state, which is the exact failure the comment on OfficeProfile.district
+        // describes. A rebuild that names its fields goes stale the day someone
+        // adds a field; the spread cannot.
+        ...(s.profile ?? {}),
         subject: s.profile?.subject ?? 'This office',
         constituency: s.profile?.constituency ?? '',
         state: s.profile?.state ?? '',
@@ -279,11 +309,11 @@ function WatchTerms() {
 
   return (
     <Card>
-      <p className="text-sm font-medium">What counts as being about you</p>
+      <p className="text-sm font-medium">Words that mean a post is about you</p>
       <p className="mt-1 text-xs leading-relaxed text-ink-2">
-        A post is only surfaced when it carries one of these. Add the member&rsquo;s name, the
-        Telugu spelling, the constituency, a scheme — whatever the channels actually say.
-        Without at least one word a check has nothing to match and reads nothing.
+        We flag a post when it uses one of these words. Add the member&rsquo;s name, the Telugu
+        spelling, the constituency, a scheme &mdash; whatever the channels actually say. Leave
+        this empty and we will simply show you everything these accounts post.
       </p>
 
       <div className="mt-3 flex gap-2">
@@ -297,7 +327,7 @@ function WatchTerms() {
             }
           }}
           placeholder="Eluru, ఏలూరు, the member's name…"
-          aria-label="Add a word this check should look for"
+          aria-label="Add a word to look for"
           className="min-h-11 min-w-0 flex-1 rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-sm outline-none focus:border-[var(--accent)]"
         />
         <Button size="sm" variant="outline" onClick={add} disabled={!draft.trim()}>
@@ -323,14 +353,29 @@ function WatchTerms() {
       ) : (
         <p className="mt-2.5 flex items-center gap-1.5 text-xs text-[var(--warn)]">
           <TriangleAlert size={13} />
-          No words set — Check now has nothing to look for.
+          No search words yet, so Check now will show you everything these accounts post.
         </p>
       )}
     </Card>
   )
 }
 
-export function Influencers({ onClose }: { onClose: () => void }) {
+export function Influencers({
+  onClose,
+  onRead,
+}: {
+  onClose: () => void
+  /**
+   * Run the full analysis on one mention's post.
+   *
+   * Owned by App rather than here, because the app has exactly one analysis in
+   * flight at a time and one place that renders it. A second hook in this
+   * screen would be a second source of truth for "is something running", and
+   * the two would disagree the first time somebody started a run from the
+   * paste box and then opened this list.
+   */
+  onRead: (mention: InfluencerMention) => void
+}) {
   const store = useStore()
   const reduced = useReducedMotion()
   /**
@@ -348,6 +393,48 @@ export function Influencers({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState<'suggest' | 'check' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [capped, setCapped] = useState<string[]>([])
+
+  /**
+   * Did the last check run without usable search words?
+   *
+   * Drives the heading over the coverage card. Filing "we did not filter any of
+   * this" under "What this check missed" read as an apology for a fault; it is
+   * a description of the mode the office asked for.
+   */
+  const [unfilteredRead, setUnfilteredRead] = useState(false)
+
+  /**
+   * Sort and scope for the list below.
+   *
+   * The view defaults to "everything" when no search words are set, because in
+   * that state nothing is marked as being about the office and defaulting to
+   * "about you" would show an empty list directly under a result that just
+   * fetched twenty posts.
+   */
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
+
+  /**
+   * Is there anything for the "about you" view to show?
+   *
+   * Keyed on the stored posts, NOT on whether search words are set. Keying it
+   * on the words meant typing one retroactively emptied the screen: ninety-six
+   * posts fetched under no words are all marked not-about-you, so the moment a
+   * word existed the default flipped to a view that excluded every one of them
+   * and the office watched their results vanish on a keystroke, with no check
+   * having run. What is on screen should only ever change when the data does.
+   */
+  const hasAboutYou = store.mentions.some((x) => x.mentionsSubject)
+
+  /**
+   * `null` means "nobody has chosen", so the default can follow the terms.
+   *
+   * Not a useState default, because what it should default to is not known at
+   * mount: the desk seeds itself in an effect that runs after the first render,
+   * and a check can land later still. Deriving it each render fixes that, and
+   * the moment somebody touches the control their choice sticks.
+   */
+  const [viewChoice, setViewChoice] = useState<'about' | 'all' | null>(null)
+  const view: 'about' | 'all' = viewChoice ?? (hasAboutYou ? 'about' : 'all')
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
   const [verified, setVerified] = useState<{ checked: number; discarded: number; added: number } | null>(null)
 
@@ -362,22 +449,73 @@ export function Influencers({ onClose }: { onClose: () => void }) {
   /* ── What is new ───────────────────────────────────────────────────────── */
 
   /**
-   * Mentions that are actually about this office, newest first.
+   * When a post went up, for ordering.
    *
-   * A mention the reader judged not to be about the subject is kept in the
-   * store — it is evidence about what a channel covers — but it is not shown
-   * here, because this list answers "what did they say about us".
+   * `postedAt` is what the platform says and it is what a reader means by
+   * "latest". It is nullable, so `seenAt` — when we read it — is the fallback.
+   * Ordering on `seenAt` alone was the bug: every post from one check shares a
+   * timestamp to the millisecond, so a batch of twenty came out in whatever
+   * order the accounts happened to be read in, and the newest video of the day
+   * could sit below a clip from last month.
    */
-  const mentions = useMemo(
-    () =>
-      [...store.mentions]
-        .filter((x) => x.mentionsSubject)
-        .sort((a, b) => Date.parse(b.seenAt) - Date.parse(a.seenAt)),
-    [store.mentions],
-  )
+  const postedTime = (x: InfluencerMention): number | null => {
+    const posted = x.postedAt ? Date.parse(x.postedAt) : Number.NaN
+    return Number.isNaN(posted) ? null : posted
+  }
 
-  /** Not yet cleared by a person. The only count worth putting a badge on. */
-  const unread = useMemo(() => mentions.filter((x) => !x.acknowledged), [mentions])
+  /**
+   * Undated posts go last, whichever way the sort runs.
+   *
+   * Falling back to `seenAt` put them at the top of "Newest first" — seenAt is
+   * the time of the last check, so an undated post always looks like the most
+   * recent thing that exists, and it would sit above a video published an hour
+   * ago, permanently. Gated platforms are the ones that publish no date, so
+   * that was a standing false top-of-list. Sinking them under BOTH orders is
+   * the only arrangement that never claims a date it does not have; the server
+   * already does exactly this in `newestFirst`.
+   */
+  const byDate = (a: InfluencerMention, b: InfluencerMention, dir: 'newest' | 'oldest'): number => {
+    const ta = postedTime(a)
+    const tb = postedTime(b)
+    if (ta === null && tb === null) return Date.parse(b.seenAt) - Date.parse(a.seenAt)
+    if (ta === null) return 1
+    if (tb === null) return -1
+    return dir === 'newest' ? tb - ta : ta - tb
+  }
+
+  /**
+   * What the list shows, in the order asked for.
+   *
+   * `view` exists because a check with no search words set returns everything
+   * the accounts posted, and none of it claims to be about this office. Under
+   * the old fixed `mentionsSubject` filter that whole result would have been
+   * fetched and then hidden, which is the most confusing possible outcome. It
+   * also earns its keep with words set: "everything" is how you find out that a
+   * channel you watch has gone quiet about you but is posting constantly.
+   */
+  const mentions = useMemo(() => {
+    const rows = view === 'all' ? [...store.mentions] : store.mentions.filter((x) => x.mentionsSubject)
+    return rows.sort((a, b) => byDate(a, b, sort))
+  }, [store.mentions, view, sort])
+
+  /**
+   * Not yet cleared by a person. The only count worth putting a badge on.
+   *
+   * Computed from the STORE, not from the filtered list above, and that is
+   * load-bearing. The badge, the page subtitle and the "Clear all" button all
+   * read this number. Deriving it from a filtered view would mean narrowing the
+   * filter appeared to clear the inbox — the office would switch to "only posts
+   * about you", watch "12 new" drop to "2 new", and reasonably believe ten
+   * items had gone somewhere. A filter changes what you are looking at; it must
+   * never change what is waiting for you.
+   */
+  const unread = useMemo(() => store.mentions.filter(isWaiting), [store.mentions])
+
+  /** Waiting AND actually about the office — the only thing worth alarming over. */
+  const alarming = useMemo(
+    () => unread.filter((x) => x.judged !== false && x.mentionsSubject),
+    [unread],
+  )
 
   /* ── Actions ───────────────────────────────────────────────────────────── */
 
@@ -392,6 +530,24 @@ export function Influencers({ onClose }: { onClose: () => void }) {
     update((s) => ({ ...s, mentions: s.mentions.map((x) => ({ ...x, acknowledged: true })) }))
   }, [])
 
+  /** Shared by both ways onto the roster, so neither can drift from the other. */
+  const tracked = useCallback(
+    (platform: Platform, handle: string) =>
+      readStore().influencers.some(
+        (i) => i.platform === platform && i.handle.toLowerCase() === handle.toLowerCase(),
+      ),
+    [],
+  )
+
+  const addInfluencer = useCallback((influencer: Influencer) => {
+    update((s) => ({
+      ...s,
+      influencers: s.influencers.some((i) => i.id === influencer.id)
+        ? s.influencers
+        : [...s.influencers, influencer],
+    }))
+  }, [])
+
   /**
    * Read the watched accounts again.
    *
@@ -403,16 +559,30 @@ export function Influencers({ onClose }: { onClose: () => void }) {
     const current = readStore()
     if (current.influencers.length === 0) {
       setError(
-        'No accounts are being watched yet. Tap Suggest to find the channels with an audience in this seat.',
+        'You are not watching any accounts yet. Tap Suggest and we will find the channels people follow around here.',
       )
       return
     }
 
+    // No guard on the search words on purpose. With none set the server reads
+    // the accounts anyway and hands back everything it found, unjudged — see
+    // the `unfiltered` path in lib/influencers.ts. Blocking the read until a
+    // word was typed meant an office could not look at its own channels until
+    // it had already guessed what to look for.
     const watchTerms = current.profile?.watchTerms ?? []
-    if (watchTerms.length === 0) {
-      setError('No search words are set, so a check has nothing to match. Add one above.')
-      return
-    }
+
+    /**
+     * Start where the last check stopped.
+     *
+     * The server reads the first N of whatever it is sent. Sending the roster
+     * rotated means N moves down the list on every check instead of pinning to
+     * the top, so an office with more accounts than one check can cover reaches
+     * all of them by checking again — which is what the coverage note now tells
+     * them to do. Before this, that advice would have been false.
+     */
+    const roster = current.influencers
+    const offset = roster.length > 0 ? current.influencerScanOffset % roster.length : 0
+    const rotated = offset === 0 ? roster : [...roster.slice(offset), ...roster.slice(0, offset)]
 
     setBusy('check')
     setError(null)
@@ -422,13 +592,13 @@ export function Influencers({ onClose }: { onClose: () => void }) {
       const res = await fetch('/api/influencers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ influencers: current.influencers, watchTerms }),
+        body: JSON.stringify({ influencers: rotated, watchTerms }),
       })
       const parsed: unknown = await res.json()
       const body = isRecord(parsed) ? parsed : {}
 
       if (!res.ok) {
-        setError(text(body['error']) ?? 'Could not read those accounts. Try again in a minute.')
+        setError(text(body['error']) ?? 'We could not read those accounts. Try again in a minute.')
         return
       }
 
@@ -436,15 +606,44 @@ export function Influencers({ onClose }: { onClose: () => void }) {
         .map(toMention)
         .filter(nonNull)
 
+      // How many accounts the server actually got through: one coverage row per
+      // account attempted, readable or not. Taken from the response rather than
+      // assumed, so the cursor cannot drift out of step with the server's cap.
+      const read = Array.isArray(body['coverage']) ? body['coverage'].length : 0
+
+      /**
+       * Was this response judged by a model, or is it a raw listing?
+       *
+       * Mirrors the server's own test: it drops terms shorter than two
+       * characters, and reads unfiltered when nothing survives. Getting this
+       * wrong in either direction only costs a refresh, but getting it right
+       * prevents the overwrite below.
+       */
+      const judged = watchTerms.filter((t) => t.trim().length >= 2).length > 0
+
       update((s) => {
         // Keyed on the post, so re-reading a channel does not file the same
         // video twice — and a mention already cleared stays cleared.
         const byId = new Map(s.mentions.map((x) => [x.postUrl, x]))
         for (const row of incoming) {
           const existing = byId.get(row.postUrl)
+          // An unjudged row must never overwrite a judged one. A check with no
+          // search words returns every post with stance "unclear" and no fake
+          // assessment; letting that land on top of a post a model had already
+          // read as hostile would silently downgrade it and drop it out of the
+          // about-you view. The post itself has not changed — only how much we
+          // know about it — so the richer record wins.
+          if (existing && !judged) continue
           byId.set(row.postUrl, existing ? { ...row, acknowledged: existing.acknowledged } : row)
         }
-        return { ...s, mentions: [...byId.values()] }
+        return {
+          ...s,
+          mentions: pruneMentions([...byId.values()]),
+          // Advance past what was just read. Modulo the CURRENT roster length,
+          // which may have grown while the check was in flight.
+          influencerScanOffset:
+            s.influencers.length > 0 ? (offset + read) % s.influencers.length : 0,
+        }
       })
 
       setCapped(
@@ -452,9 +651,10 @@ export function Influencers({ onClose }: { onClose: () => void }) {
           (c): c is string => typeof c === 'string',
         ),
       )
+      setUnfilteredRead(!judged)
       setCheckedAt(new Date().toISOString())
     } catch {
-      setError('Could not reach the server. Check your connection and try again.')
+      setError('We could not reach the server. Check your connection and try again.')
     } finally {
       setBusy(null)
     }
@@ -464,7 +664,7 @@ export function Influencers({ onClose }: { onClose: () => void }) {
   const suggest = useCallback(async () => {
     const subject = readStore().profile?.subject?.trim()
     if (!subject) {
-      setError('Set up the desk first — a suggestion needs the name it is meant to find accounts about.')
+      setError('Set up the desk first. We need to know whose name to search for.')
       return
     }
 
@@ -480,7 +680,7 @@ export function Influencers({ onClose }: { onClose: () => void }) {
       const body = isRecord(parsed) ? parsed : {}
 
       if (!res.ok) {
-        setError(text(body['error']) ?? 'Could not suggest accounts. Try again in a minute.')
+        setError(text(body['error']) ?? 'We could not find any accounts just now. Try again in a minute.')
         return
       }
 
@@ -500,7 +700,7 @@ export function Influencers({ onClose }: { onClose: () => void }) {
         added: fresh.length,
       })
     } catch {
-      setError('Could not reach the server. Check your connection and try again.')
+      setError('We could not reach the server. Check your connection and try again.')
     } finally {
       setBusy(null)
     }
@@ -519,7 +719,10 @@ export function Influencers({ onClose }: { onClose: () => void }) {
         <PageHeader
           lead={
             <Mascot
-              state={busy ? 'thinking' : unread.length > 0 ? 'error' : 'idle'}
+              // The alarm face is for something said about the office, not for
+              // a listing nobody has read. An unjudged pile is work waiting,
+              // which is not the same as bad news.
+              state={busy ? 'thinking' : alarming.length > 0 ? 'error' : 'idle'}
               size={40}
               className="mt-1 shrink-0"
             />
@@ -527,7 +730,7 @@ export function Influencers({ onClose }: { onClose: () => void }) {
           title="Influencer watch"
           subtitle={
             store.influencers.length
-              ? `${store.influencers.length} ${store.influencers.length === 1 ? 'account' : 'accounts'} watched · ${unread.length} to look at`
+              ? `You are watching ${store.influencers.length} ${store.influencers.length === 1 ? 'account' : 'accounts'}. ${unread.length > 0 ? `${unread.length} waiting for you.` : 'Nothing new right now.'}`
               : 'The pages and channels that move opinion where you work.'
           }
           actions={
@@ -540,6 +743,33 @@ export function Influencers({ onClose }: { onClose: () => void }) {
 
       <m.div variants={fadeUp} className="mt-4">
         <WatchTerms />
+      </m.div>
+
+      {/* Two ways onto the roster, and both end in a live read before anything
+          is stored. Search covers YouTube, which is the only platform that
+          answers a query from a server; everything else has to be named. */}
+      <m.div
+        variants={fadeUp}
+        className="mt-4 space-y-4 rounded-[--radius-md] border border-[var(--border)] p-3"
+      >
+        <SearchInfluencers
+          constituency={store.identity?.constituency ?? null}
+          suggestedQuery={
+            [store.identity?.constituency, store.identity?.state].find(Boolean)
+              ? `${[store.identity?.constituency, store.identity?.state].find(Boolean)} politics`
+              : ''
+          }
+          isTracked={tracked}
+          onAdd={addInfluencer}
+        />
+
+        <div className="border-t border-[var(--border)] pt-4">
+          <AddInfluencer
+            constituency={store.identity?.constituency ?? null}
+            isTracked={tracked}
+            onAdd={addInfluencer}
+          />
+        </div>
       </m.div>
 
       <m.div variants={fadeUp} className="mt-4 flex flex-wrap items-center gap-2">
@@ -570,7 +800,7 @@ export function Influencers({ onClose }: { onClose: () => void }) {
         )}
 
         {checkedAt && (
-          <span className="text-xs text-ink-3">Last read {relativeTime(checkedAt)}.</span>
+          <span className="text-xs text-ink-3">We last read these {relativeTime(checkedAt)}.</span>
         )}
       </m.div>
 
@@ -582,8 +812,8 @@ export function Influencers({ onClose }: { onClose: () => void }) {
 
       {verified && (
         <m.p variants={fadeUp} className="mt-3 text-sm text-ink-2">
-          Opened {verified.checked} {verified.checked === 1 ? 'channel' : 'channels'}, dropped{' '}
-          {verified.discarded} that could not be read, added {verified.added}.
+          We opened {verified.checked} {verified.checked === 1 ? 'channel' : 'channels'},{' '}
+          {verified.discarded} would not load, and added {verified.added} to your list.
         </m.p>
       )}
 
@@ -599,7 +829,11 @@ export function Influencers({ onClose }: { onClose: () => void }) {
           question. */}
       <m.section variants={fadeUp} className="mt-6">
         <SectionTitle
-          hint="What the accounts with an audience here have actually said about you."
+          hint={
+            view === 'all'
+              ? 'Everything the channels you watch have posted recently.'
+              : 'What the channels people follow around here are saying about you.'
+          }
         >
           To look at
           {unread.length > 0 && (
@@ -609,7 +843,9 @@ export function Influencers({ onClose }: { onClose: () => void }) {
 
         {capped.length > 0 && (
           <Card className="mb-3">
-            <p className="text-sm font-medium">What that check did not cover</p>
+            <p className="text-sm font-medium">
+              {unfilteredRead ? 'About this check' : 'What this check missed'}
+            </p>
             <ul className="mt-1.5 space-y-1">
               {capped.map((line) => (
                 <li key={line} className="text-sm leading-relaxed text-ink-2">
@@ -620,13 +856,46 @@ export function Influencers({ onClose }: { onClose: () => void }) {
           </Card>
         )}
 
+        {/* Same row pattern as the grievance filters: one line that scrolls
+            sideways inside itself on a phone and wraps on a desktop, so the
+            page body never scrolls sideways. */}
+        {store.mentions.length > 0 && (
+          <div className="-mx-4 mb-3 flex items-center gap-2 overflow-x-auto px-4 pb-1 scroller lg:mx-0 lg:flex-wrap lg:overflow-x-visible lg:px-0">
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value === 'oldest' ? 'oldest' : 'newest')}
+              aria-label="Order posts by date"
+              className={cn(selectClass, sort === 'oldest' && 'select-active')}
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+
+            <select
+              value={view}
+              onChange={(e) => setViewChoice(e.target.value === 'all' ? 'all' : 'about')}
+              aria-label="Which posts to show"
+              className={cn(selectClass, view === 'all' && 'select-active')}
+            >
+              <option value="about">Only posts about you</option>
+              <option value="all">Everything we read</option>
+            </select>
+
+            <span className="shrink-0 text-sm text-ink-3">
+              {mentions.length} {mentions.length === 1 ? 'post' : 'posts'}
+            </span>
+          </div>
+        )}
+
         {mentions.length === 0 ? (
           <Card>
             <p className="text-sm font-medium">Nothing yet</p>
             <p className="mt-1 text-sm leading-relaxed text-ink-3">
               {store.influencers.length === 0
-                ? 'No accounts are being watched. Tap Suggest to find the channels with an audience in this seat — it needs no key and takes a few seconds.'
-                : 'The accounts being watched have posted nothing that names you. Tap Check now to read them again.'}
+                ? 'You are not watching anything yet. Tap Suggest to find the channels people follow around here.'
+                : view === 'about' && store.mentions.length > 0
+                  ? 'None of the posts we read mention you. Switch to “Everything we read” above to see what these accounts did post.'
+                  : 'These accounts have not posted anything that mentions you. Tap Check now to read them again.'}
             </p>
           </Card>
         ) : (
@@ -637,6 +906,7 @@ export function Influencers({ onClose }: { onClose: () => void }) {
                   mention={mention}
                   influencer={byInfluencer.get(mention.influencerId) ?? null}
                   onAcknowledge={acknowledge}
+                  onRead={onRead}
                 />
               </m.li>
             ))}
@@ -652,10 +922,13 @@ function MentionRow({
   mention,
   influencer,
   onAcknowledge,
+  onRead,
 }: {
   mention: InfluencerMention
   influencer: Influencer | null
   onAcknowledge: (id: string) => void
+  /** Hand this post to the full analysis pipeline — the paste box's own route. */
+  onRead: (mention: InfluencerMention) => void
 }) {
   const open = !mention.acknowledged
   const fake = mention.fake
@@ -671,9 +944,19 @@ function MentionRow({
    */
   const [expanded, setExpanded] = useState(false)
 
+  /**
+   * Listed, not read. Everything below that looks like a judgement is hidden.
+   *
+   * `judged` is absent on records stored before unfiltered checks existed, and
+   * every one of those came from the scored path — so only an explicit false
+   * counts.
+   */
+  const unjudged = mention.judged === false
+
   return (
-    <m.li variants={listItem}>
-      <article
+    // Not an <li>: the caller already wraps this in one. Two nested list items
+    // is invalid markup and ran the stagger variant twice on every card.
+    <article
         className={cn(
           'rounded-[--radius-md] border p-3',
           // Colour alone never carries this: the accent tint is reinforced by
@@ -694,36 +977,53 @@ function MentionRow({
             <p className="mt-0.5 text-xs text-ink-3">
               {mention.postedAt
                 ? relativeTime(mention.postedAt)
-                : `date not published · read ${relativeTime(mention.seenAt)}`}
+                : `No date on this one. We read it ${relativeTime(mention.seenAt)}`}
             </p>
           </div>
           {open && (
             <Chip tone="accent" className="shrink-0">
-              Not acknowledged
+              New
             </Chip>
           )}
         </div>
 
+        {/* Nothing read this post, so it gets no verdict chips.
+            The row below used to render regardless, which meant a post nobody
+            had assessed still displayed a stance, a sentiment, and a "Not about
+            you" chip whose tooltip said one of your words had appeared — a
+            thing that cannot have happened, because with no words set nothing
+            was matched. Those values are struct defaults, not findings. */}
+        {unjudged ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Chip tone="neutral" title="This came from a check with no search words set, so it was listed rather than read.">
+              Not read yet
+            </Chip>
+          </div>
+        ) : (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <Chip tone={STANCE_TONE[mention.stance]}>{STANCE_LABEL[mention.stance]}</Chip>
           <Chip tone={SENTIMENT_CHIP[SENTIMENT_TONE[mention.sentiment]] ?? 'neutral'}>
             {mention.sentiment}
           </Chip>
           {!mention.mentionsSubject && (
-            <Chip tone="neutral" title="A watch term appeared, but the post is about something else">
-              not about you
+            <Chip tone="neutral" title="One of your words showed up, but the post turned out to be about something else">
+              Not about you
             </Chip>
           )}
           {fake && (
             <Chip
               tone={fake.suspicion === 'Yes' ? 'negative' : 'warning'}
               icon={<TriangleAlert size={12} />}
-              title={fake.note ?? undefined}
+              title={[`Suspicion: ${fake.suspicion}`, fake.note].filter(Boolean).join('. ')}
             >
-              {fake.type ?? 'Needs checking'} · {fake.suspicion}
+              {/* The suspicion level rode in the label as a raw enum, so this
+                  chip read "Fabricated quote · Yes" — a data dump. The type is
+                  the useful half; the level moves into the tooltip. */}
+              {fake.type ?? 'Needs checking'}
             </Chip>
           )}
         </div>
+        )}
 
         <button
           onClick={() => setExpanded((v) => !v)}
@@ -739,7 +1039,9 @@ function MentionRow({
             {mention.excerpt}
           </span>
           <span className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)]">
-            {expanded ? 'Show less' : 'What this says about you'}
+            {/* Nothing worked out what this says about anyone, so the link
+                does not offer to tell you. */}
+            {expanded ? 'Show less' : unjudged ? 'Show the whole post' : 'What this says about you'}
             <ChevronRight
               size={12}
               aria-hidden
@@ -751,14 +1053,32 @@ function MentionRow({
         {expanded && (
           <div className="mt-3 space-y-3 border-t border-[var(--border)] pt-3">
             <div>
-              <p className="kicker">How it reads</p>
+              {/* An unjudged post has no reading, so it does not get a sentence
+                  that sounds like one. "Unclear towards you, neutral in tone"
+                  is not a finding — it is three struct defaults read aloud, and
+                  an office would take it for an assessment. */}
+              <p className="kicker">{unjudged ? 'What we know' : 'How it reads'}</p>
               <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                {STANCE_LABEL[mention.stance]} towards you, {mention.sentiment.toLowerCase()} in
-                tone
-                {influencer?.followers
-                  ? `, from an account ${influencer.followers.toLocaleString('en-IN')} people follow`
-                  : ''}
-                .
+                {unjudged ? (
+                  <>
+                    Nobody has read this one yet. It came back from a check with no search
+                    words set, so we listed it without working out whether it is about you or
+                    what it says
+                    {influencer?.followers
+                      ? `. The account has ${influencer.followers.toLocaleString('en-IN')} followers`
+                      : ''}
+                    . Add a search word and check again, or open it and read it yourself.
+                  </>
+                ) : (
+                  <>
+                    {STANCE_SENTENCE[mention.stance]} towards you, {mention.sentiment.toLowerCase()}{' '}
+                    in tone
+                    {influencer?.followers
+                      ? `, from an account ${influencer.followers.toLocaleString('en-IN')} people follow`
+                      : ''}
+                    .
+                  </>
+                )}
               </p>
             </div>
 
@@ -768,7 +1088,7 @@ function MentionRow({
                 opposite. */}
             {fake && fake.signals.length > 0 && (
               <div>
-                <p className="kicker">What was noticed</p>
+                <p className="kicker">What we spotted</p>
                 <ul className="mt-1.5 space-y-2">
                   {fake.signals.map((signal, i) => (
                     <li key={`${signal.kind}-${i}`} className="flex gap-2 text-sm leading-relaxed">
@@ -805,7 +1125,7 @@ function MentionRow({
 
         {fake?.note && (
           <p className="mt-2 border-l-2 border-[var(--border-strong)] pl-3 text-xs text-ink-3">
-            {fake.note} Nobody has checked this yet — it is flagged for a person to look at.
+            {fake.note} Nobody has checked this yet, so someone should take a look.
           </p>
         )}
 
@@ -819,14 +1139,23 @@ function MentionRow({
             <ExternalLink size={13} />
             Open the post
           </a>
+
+          {/* The same analysis the paste box runs, on the post this card is
+              about. "Open the post" sends the reader off to do the reading
+              themselves, which is the work this screen exists to have already
+              done — this does it here instead. */}
+          <Button size="sm" variant="outline" onClick={() => onRead(mention)}>
+            <ScanEye size={14} />
+            Read it fully
+          </Button>
+
           {open && (
             <Button size="sm" variant="ghost" onClick={() => onAcknowledge(mention.id)}>
               <Check size={14} />
-              Acknowledge
+              Clear
             </Button>
           )}
         </div>
       </article>
-    </m.li>
   )
 }

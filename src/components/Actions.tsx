@@ -34,6 +34,7 @@ import {
 import { ACTION_PRIORITIES, PRIORITY_RANK, type ActionPriority } from '@shared/taxonomy'
 import { Button, Card, Chip, PageHeader, type ChipTone } from './ui'
 import { makeId, update, useStore } from '@/lib/store'
+import { takeActionFocus } from '@/lib/focus'
 import { Mascot } from './Mascot'
 import { fadeUp, haptic, listStagger } from '@/lib/motion'
 import { absoluteDate, cn, pluralise } from '@/lib/utils'
@@ -383,15 +384,20 @@ function ActionCard({
   now,
   onPatch,
   onRemove,
+  focused = false,
 }: {
   item: ActionItem
   records: Map<string, GrievanceRecord>
   now: number
   onPatch: (change: Partial<ActionItem>) => void
   onRemove: () => void
+  /** Arrived here from the screen that filed this task. */
+  focused?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [armed, setArmed] = useState(false)
+  /** The notes box is hidden until asked for; see the note by the field. */
+  const [noteOpen, setNoteOpen] = useState(false)
 
   // An armed delete left sitting on a card is a mis-tap waiting to happen.
   useEffect(() => {
@@ -433,10 +439,15 @@ function ActionCard({
 
   return (
     <Card
+      id={`action-${item.id}`}
       padded={false}
       className={cn(
-        'p-3.5',
+        'p-3.5 scroll-mt-24',
         breached && 'ring-1 ring-[color-mix(in_oklab,var(--neg)_45%,transparent)]',
+        // The task somebody was just sent to. Held rather than flashed:
+        // a highlight that fades before the eye lands on it is worse than
+        // none, and this one is cleared by the next navigation anyway.
+        focused && 'ring-2 ring-[var(--accent)]',
       )}
     >
       <div className="flex flex-wrap items-center gap-1.5">
@@ -681,14 +692,34 @@ function ActionCard({
             </div>
           )}
 
-          <LiveField
-            id={`${item.id}-notes`}
-            label={(item.steps ?? []).length > 0 ? 'Anything else' : 'Next step'}
-            value={item.notes}
-            placeholder="Site visit on Thursday, then a written reply"
-            multiline
-            onCommit={(next) => onPatch({ notes: next })}
-          />
+          {/*
+            Out of the way until somebody wants it.
+
+            An always-open textarea headed "Anything else" sat under every
+            task, empty, on a card that already carries the steps, the channel
+            and the linked story. It read as one more thing to take in on a
+            screen the office scans rather than reads. It is worth keeping,
+            because a note about who was spoken to and when is the one thing
+            here nothing else records, so it collapses rather than going.
+          */}
+          {item.notes || noteOpen ? (
+            <LiveField
+              id={`${item.id}-notes`}
+              label={(item.steps ?? []).length > 0 ? 'Your notes' : 'Next step'}
+              value={item.notes}
+              placeholder="Spoke to the collector, he will call back Tuesday"
+              multiline
+              onCommit={(next) => onPatch({ notes: next })}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setNoteOpen(true)}
+              className="mt-1 text-xs font-medium text-[var(--accent)] hover:underline"
+            >
+              Add a note
+            </button>
+          )}
 
           {!breached && (
             <LiveField
@@ -1014,6 +1045,7 @@ function Column({
   now,
   onPatch,
   onRemove,
+  focusId,
 }: {
   status: ActionStatus
   items: ActionItem[]
@@ -1023,6 +1055,8 @@ function Column({
   now: number
   onPatch: (id: string, change: Partial<ActionItem>) => void
   onRemove: (id: string) => void
+  /** The task the reader was sent here to see, if it is in this column. */
+  focusId: string | null
 }) {
   const [showAll, setShowAll] = useState(false)
 
@@ -1059,6 +1093,7 @@ function Column({
             <ActionCard
               key={item.id}
               item={item}
+              focused={item.id === focusId}
               records={records}
               now={now}
               onPatch={(change) => onPatch(item.id, change)}
@@ -1087,6 +1122,27 @@ export function Actions({ onClose }: { onClose: () => void }) {
   const store = useStore()
   const reduced = useReducedMotion()
   const [composing, setComposing] = useState(false)
+
+  /**
+   * The task somebody was sent here to see.
+   *
+   * Read once, on mount, from lib/focus. Opening Actions any other way leaves
+   * it null and nothing moves, which is the point: this is an instruction
+   * from the screen that just filed something, not a preference.
+   */
+  const [focusId] = useState<string | null>(() => takeActionFocus())
+
+  useEffect(() => {
+    if (!focusId) return
+    // After paint: the list renders from the store on this same tick, so the
+    // element does not exist yet when the effect first runs.
+    const t = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`action-${focusId}`)
+        ?.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(t)
+  }, [focusId, reduced])
 
   // A deadline that reads "in 2 hours" for the whole afternoon is a lie. One
   // minute is fine: nothing here is measured in seconds.
@@ -1216,7 +1272,7 @@ export function Actions({ onClose }: { onClose: () => void }) {
             <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
               An action is a complaint turned into somebody’s job: what needs doing, which
               department owns it, and the date the office promised. Once it has a date, this
-              screen is what tells you it has run out — and what to escalate.
+              screen is what tells you it has run out, and what to escalate.
             </p>
             <ul className="mt-3 space-y-1.5 text-xs text-ink-3">
               <li className="flex items-start gap-1.5">
@@ -1225,7 +1281,7 @@ export function Actions({ onClose }: { onClose: () => void }) {
               </li>
               <li className="flex items-start gap-1.5">
                 <ArrowUp size={13} className="mt-0.5 shrink-0" aria-hidden />
-                A late item offers the next escalation level — officer, department, minister.
+                A late item offers the next escalation level: officer, department, minister.
               </li>
               <li className="flex items-start gap-1.5">
                 <Link2 size={13} className="mt-0.5 shrink-0" aria-hidden />
@@ -1257,6 +1313,7 @@ export function Actions({ onClose }: { onClose: () => void }) {
                 <ActionCard
                   key={item.id}
                   item={item}
+                  focused={item.id === focusId}
                   records={records}
                   now={now}
                   onPatch={(change) => patch(item.id, change)}
@@ -1284,7 +1341,8 @@ export function Actions({ onClose }: { onClose: () => void }) {
               now={now}
               onPatch={patch}
               onRemove={remove}
-            />
+                          focusId={focusId}
+/>
           ))}
         </m.div>
       )}

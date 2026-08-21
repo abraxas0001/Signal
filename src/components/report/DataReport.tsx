@@ -17,7 +17,8 @@ import { StatTile } from '../charts'
 import { PostCard } from './PostCard'
 import { ExtractionNotice } from './ExtractionNotice'
 import { absoluteDate, compact, relativeTime } from '@/lib/utils'
-import { downloadWorkbook } from '@/lib/export'
+import { downloadCsv, downloadWorkbook } from '@/lib/export'
+import { ExportButton } from '@/components/ExportButton'
 import { fadeUp, listStagger } from '@/lib/motion'
 
 /**
@@ -194,15 +195,15 @@ export function DataReport({
           <Button onClick={onReset} className="flex-1">
             Read another post
           </Button>
-          <Button
-            onClick={() => void downloadWorkbook([report])}
-            variant="outline"
-            aria-label="Download this report as a spreadsheet"
-            className="shrink-0 px-4"
-          >
-            <Download size={16} />
-            CSV
-          </Button>
+          {/* Both formats. The docked bar is narrow, but a member opening
+              this on a phone with no spreadsheet app needs the flat file, and
+              that was the one format this button never actually produced. */}
+          <ExportButton
+            className="shrink-0"
+            count={1}
+            noun="post"
+            run={(format) => (format === 'csv' ? downloadCsv([report]) : downloadWorkbook([report]))}
+          />
         </div>
       </div>
     </m.div>
@@ -242,14 +243,14 @@ function headline(snapshot: PostSnapshot, interactions: number): string {
   const views = snapshot.engagement.views.value
 
   if (views != null && views > 0) {
-    return `${who} — ${compact(views)} ${views === 1 ? 'view' : 'views'}, ${compact(interactions)} ${
+    return `${who}: ${compact(views)} ${views === 1 ? 'view' : 'views'}, ${compact(interactions)} ${
       interactions === 1 ? 'interaction' : 'interactions'
     }`
   }
   if (interactions > 0) {
-    return `${who} — ${compact(interactions)} ${interactions === 1 ? 'interaction' : 'interactions'}`
+    return `${who}: ${compact(interactions)} ${interactions === 1 ? 'interaction' : 'interactions'}`
   }
-  return `${who} — post read in full`
+  return `${who}: post read in full`
 }
 
 /** Kept exported for the type, so a Metric change here fails loudly. */

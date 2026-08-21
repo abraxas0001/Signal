@@ -52,7 +52,16 @@ export interface AccountSuggestion {
  * cannot disagree about where an account lives, and cannot produce two entries
  * for one account.
  */
-export function suggestionsFromIdentity(identity: Identity | null): AccountSuggestion[] {
+export function suggestionsFromIdentity(
+  identity: Identity | null,
+  /**
+   * Whose identity this is. It only changes one word, and that word is a
+   * claim: this function is now also used to look up OTHER people by name, and
+   * labelling a rival's Instagram account "from your profile" tells the reader
+   * the office owns an account it does not.
+   */
+  whose: 'yours' | 'theirs' = 'yours',
+): AccountSuggestion[] {
   if (!identity) return []
 
   const out: AccountSuggestion[] = []
@@ -72,7 +81,11 @@ export function suggestionsFromIdentity(identity: Identity | null): AccountSugge
       url: handle.url,
       displayName: identity.name,
       avatarUrl: null,
-      source: handle.connected ? 'connected account' : 'from your profile',
+      source: handle.connected
+        ? 'connected account'
+        : whose === 'yours'
+          ? 'from your profile'
+          : 'from the public record',
       verified: handle.verified,
     })
   }
@@ -138,7 +151,7 @@ export function SuggestedAccounts({
             <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
               Public records carry a politician&rsquo;s social accounts only when somebody has
               added them, and for most sitting members nobody has. Paste the addresses below and
-              mark them as yours — that is what lets this desk read the comments under your own
+              mark them as yours. That is what lets this desk read the comments under your own
               posts.
             </p>
             <p className="mt-2 text-xs leading-relaxed text-ink-3">
@@ -241,7 +254,7 @@ export function SuggestedAccounts({
         <TriangleAlert size={13} className="mt-0.5 shrink-0" aria-hidden />
         <span>
           These come from public records, which anybody can edit. If one of them is not actually
-          yours, do not add it — open it first. An account impersonating you belongs on the
+          yours, do not add it. Open it first. An account impersonating you belongs on the
           Influencer watch, not here.
         </span>
       </p>

@@ -62,7 +62,7 @@ const CONNECTORS: Connector[] = [
     posts: 'none',
     comments: 'partial',
     followers: true,
-    note: 'Follower count only — the page publishes no post list to anyone without a login. Individual posts read fine, with 10 comments each (2 on reels).',
+    note: 'Follower count only. The page publishes no post list to anyone without a login. Individual posts read fine, with 10 comments each (2 on reels).',
   },
   {
     platform: 'Instagram',
@@ -83,7 +83,7 @@ const CONNECTORS: Connector[] = [
     posts: 'none',
     comments: 'none',
     followers: false,
-    note: 'Individual posts read fine. Replies are capped at 1–3 by the platform, so they are not collected.',
+    note: 'Individual posts read fine. Replies are capped at one to three by the platform, so they are not collected.',
   },
 ]
 
@@ -316,8 +316,8 @@ export function Overview({
                 <li key={c.platform} className="text-xs text-ink-3">
                   <span className="text-ink-2">
                     {c.platform === 'Twitter/X' ? 'X' : c.platform}
-                  </span>{' '}
-                  — {c.note}
+                  </span>{': '}
+                  {c.note}
                 </li>
               ))}
             </ul>

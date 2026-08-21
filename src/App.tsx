@@ -6,6 +6,7 @@ import { Clock, Moon, RefreshCw, Sun, TriangleAlert } from 'lucide-react'
 // (the Reporting API), which otherwise shadows ours and produces a baffling
 // "Type 'Report' is not assignable to type 'Report'".
 import type { AnalyseRequest, Report } from '@shared/types'
+import { isWaiting } from '@shared/grievance'
 import { useAnalysis } from '@/hooks/useAnalysis'
 import { useHistory } from '@/hooks/useHistory'
 import { Hero } from '@/components/Hero'
@@ -22,11 +23,12 @@ import { Actions } from '@/components/Actions'
 import { Settings } from '@/components/Settings'
 import { Onboarding } from '@/components/Onboarding'
 import { TabBar, type Tab } from '@/components/TabBar'
+import { MoreSheet } from '@/components/MoreSheet'
 import { SideNav } from '@/components/SideNav'
 import { emptyStore, useStore, update, writeStore } from '@/lib/store'
 import { LockButton, LockScreen, useVaultState } from '@/components/Lock'
 import { signOut } from '@/lib/vault'
-import { Button, Card, Shell, SignalGlyph } from '@/components/ui'
+import { Avatar, Button, Card, Shell, SignalGlyph } from '@/components/ui'
 import { applyDeviceClass, ease, haptic, pageIn } from '@/lib/motion'
 
 /**
@@ -47,6 +49,8 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>('light')
   const [rescueOpen, setRescueOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  /** The phone's overflow sheet. Never opened above lg, where the sidebar shows. */
+  const [moreOpen, setMoreOpen] = useState(false)
   const [tab, setTab] = useState<Tab>('dashboard')
   const [lastRequest, setLastRequest] = useState<AnalyseRequest | null>(null)
   /** An issue the dashboard asked to have opened, cleared once it is left. */
@@ -69,7 +73,33 @@ export default function App() {
   // The only badge worth showing: things a person has not cleared yet. A count
   // of everything ever recorded is a number that only ever grows, which the eye
   // learns to ignore within a week.
-  const unacknowledged = store.mentions.filter((mention) => !mention.acknowledged).length
+  /**
+   * Must match what the Influencers screen actually lists, or the badge is a
+   * promise the screen does not keep.
+   *
+   * This counted every unacknowledged mention, while the screen shows only the
+   * ones that are genuinely ABOUT the member — it filters on `mentionsSubject`,
+   * because a post that merely contains a watch word is not somebody talking
+   * about them. The badge said 8, the screen said "2 to look at", and the six
+   * missing ones could not be found or cleared anywhere.
+   *
+   * The rule now lives in `isWaiting` and both sides import it, because writing
+   * it out here a second time is exactly how they drifted the first time. Do
+   * not inline it back.
+   */
+  const unacknowledged = store.mentions.filter(isWaiting).length
+
+  /**
+   * Tasks still owed to somebody.
+   *
+   * Actions took the bottom bar's fifth slot from the More button, so it needs
+   * its own count for the same reason every other slot has one: a tab that
+   * never says how much is behind it gets opened once and then ignored.
+   * Declined counts as closed — it was decided, not left.
+   */
+  const openActions = store.actions.filter(
+    (a) => a.status !== 'Completed' && a.status !== 'Declined',
+  ).length
 
   // Gate the expensive visual layers once, at boot.
   useEffect(() => {
@@ -83,6 +113,9 @@ export default function App() {
     // and it makes the report screen reachable without a live analysis.
     const params = new URLSearchParams(window.location.search)
     if (params.has('demo')) {
+      // The worked example renders on the analyse screen, which is now shown
+      // by tab alone — so the tab has to move with it.
+      setTab('analyse')
       void import('@/lib/demo').then((m) => setDemo(m.DEMO_REPORT))
     }
 
@@ -157,7 +190,40 @@ export default function App() {
     (url: string) => {
       const req: AnalyseRequest = { url }
       setLastRequest(req)
+      setCameFrom(null)
+      // The history panel starts runs from whichever screen is open, so this
+      // cannot assume the analyse tab is already the one showing.
+      setTab('analyse')
       void run(req)
+    },
+    [run],
+  )
+
+  /**
+   * Read one influencer mention in full.
+   *
+   * Deliberately the SAME path as the paste box — one request shape, one
+   * endpoint, one report. The office asked for "the same analysis we get by
+   * pasting a link", and the way to guarantee that is to not build a second
+   * one; a parallel reading path would drift from this one within a release.
+   *
+   * `cameFrom` is the whole addition: it remembers which screen sent us here so
+   * that closing the report returns to the list of mentions rather than to the
+   * paste box. Without it, reading three mentions means walking back through
+   * the dashboard three times.
+   */
+  const readPost = useCallback(
+    (postUrl: string, from: 'influencers' | 'dashboard') => {
+      const req: AnalyseRequest = { url: postUrl }
+      setLastRequest(req)
+      setDemo(null)
+      setCameFrom(from)
+      // Move the tab, not just the state. The analyse screen is shown by tab
+      // alone now, so a run started from another screen has to bring the tab
+      // with it — otherwise it would run invisibly behind the list.
+      setTab('analyse')
+      void run(req)
+      window.scrollTo({ top: 0 })
     },
     [run],
   )
@@ -173,9 +239,35 @@ export default function App() {
     [lastRequest, run],
   )
 
+  /**
+   * Which screen sent us into an analysis, so the way out leads back to it.
+   * Null means the paste box, which is the home this app already returns to.
+   */
+  const [cameFrom, setCameFrom] = useState<'influencers' | 'dashboard' | null>(null)
+
+  /**
+   * Close the report and go back where the reader came from.
+   *
+   * `startOver` returns to the paste box, which is right when the paste box is
+   * where they started and wrong when a mention card is. Both callers reset the
+   * same analysis state; only the destination differs.
+   */
+  const closeReport = useCallback(() => {
+    const back = cameFrom
+    reset()
+    setLastRequest(null)
+    setDemo(null)
+    setRescueOpen(false)
+    setCameFrom(null)
+    if (back) setTab(back)
+    haptic.tap()
+    window.scrollTo({ top: 0 })
+  }, [cameFrom, reset])
+
   const startOver = useCallback(() => {
     reset()
     setLastRequest(null)
+    setCameFrom(null)
     // Clearing the demo is what actually returns you home: without it, tapping
     // the wordmark reset the analysis state while the worked example stayed on
     // screen, so the control looked dead.
@@ -208,11 +300,29 @@ export default function App() {
         update((s) => ({ ...s, lastSeenAt: new Date().toISOString() }))
       }
       if (next !== 'grievances') setFocusIssue(null)
+
+      /**
+       * Leaving the analyse screen ends the analysis on it.
+       *
+       * Without this a finished or failed run sits in state for the rest of
+       * the session, and coming back to the tab shows a report about a post
+       * the reader has long since moved on from. Cancelling a run in flight
+       * also stops it spending a model call on a screen nobody is looking at.
+       */
+      if (tab === 'analyse' && next !== 'analyse') {
+        if (state.status === 'running') cancel()
+        reset()
+        setLastRequest(null)
+        setDemo(null)
+        setRescueOpen(false)
+        setCameFrom(null)
+      }
+
       setTab(next)
       setHistoryOpen(false)
       window.scrollTo({ top: 0 })
     },
-    [tab],
+    [tab, state.status, cancel, reset],
   )
 
   const toggleTheme = () => {
@@ -228,6 +338,19 @@ export default function App() {
    * which is precisely what an office sharing a phone is locking them against.
    * Returning early means the decrypted store is never read at all.
    */
+  /**
+   * A reload is checking whether this tab was already signed in.
+   *
+   * Held blank rather than showing the lock screen, because for the common case
+   * — a refresh — the answer is yes and the screen would appear for a few
+   * hundred milliseconds and vanish. A passphrase prompt that flashes teaches
+   * the office that the app logs them out at random, which is precisely the
+   * complaint this exists to fix.
+   */
+  if (vault.restoring) {
+    return <div className="min-h-screen-safe bg-[var(--bg)]" aria-busy="true" />
+  }
+
   if (sealed) {
     return (
       <LazyMotion features={domAnimation} strict>
@@ -273,8 +396,25 @@ export default function App() {
    * header that stays put. That also gets every screen onto the same measure,
    * which is the other half of why nothing lined up.
    */
-  const analysing = state.status !== 'idle' || Boolean(demo)
-  const showAnalyse = tab === 'analyse' || analysing
+  /**
+   * The analyse flow owns the screen only when the reader is ON it.
+   *
+   * This was `tab === 'analyse' || state.status !== 'idle' || demo`, and that
+   * second clause was a trap: `status` is non-idle for 'running', 'done' AND
+   * 'error', so the moment an analysis finished or failed this branch won
+   * whatever `tab` said. Every navigation control still SET the tab — and the
+   * screen never changed. The whole app looked frozen on one page, with the
+   * dashboard, the desk and the settings all one dead click away.
+   *
+   * It went unnoticed while an analysis could only be started from this tab,
+   * where tab was already 'analyse' and the extra clause changed nothing.
+   * Adding "Read it fully" to the dashboard and the influencer list made it
+   * reachable from anywhere, and turned it into a dead end.
+   *
+   * So the tab decides, and every caller that starts an analysis from another
+   * screen moves the tab with it — see `readPost` and the history panel.
+   */
+  const showAnalyse = tab === 'analyse'
 
   const screen = () => {
     if (showAnalyse) {
@@ -298,8 +438,12 @@ export default function App() {
             <Hero
               onSubmit={start}
               onOpenExample={() => {
+                setTab('analyse')
                 void import('@/lib/demo').then((mod) => setDemo(mod.DEMO_REPORT))
               }}
+              // Only once there is a desk behind it. Before setup this screen
+              // is the app, and "Back" would lead nowhere.
+              onClose={store.onboardedAt ? () => goTo('dashboard') : undefined}
             />
           </m.div>
         )
@@ -318,7 +462,7 @@ export default function App() {
           <m.div key="report" variants={pageIn} initial="hidden" animate="show" exit="exit">
             <ReportView
               report={state.report}
-              onReset={startOver}
+              onReset={closeReport}
               onEditMetric={() => setRescueOpen(true)}
             />
           </m.div>
@@ -372,13 +516,26 @@ export default function App() {
       case 'personas':
         return <Persona key="personas" onClose={go('dashboard')} />
       case 'influencers':
-        return <Influencers key="influencers" onClose={go('dashboard')} />
+        return (
+          <Influencers
+            key="influencers"
+            onClose={go('dashboard')}
+            onRead={(mention) => readPost(mention.postUrl, 'influencers')}
+          />
+        )
       case 'actions':
         return <Actions key="actions" onClose={go('dashboard')} />
       case 'accounts':
         return <Dashboard key="accounts" mode="accounts" onClose={go('dashboard')} />
       case 'compare':
-        return <Dashboard key="compare" mode="compare" onClose={go('dashboard')} />
+        return (
+          <Dashboard
+            key="compare"
+            mode="compare"
+            onClose={go('dashboard')}
+            onOpenActions={() => goTo('actions')}
+          />
+        )
       case 'settings':
         return (
           <Settings
@@ -394,6 +551,7 @@ export default function App() {
         return (
           <Briefing
             key="dashboard"
+            onRead={(postUrl) => readPost(postUrl, 'dashboard')}
             onEditIdentity={() => {
               // Clearing the stamp is what puts the setup screen back in front:
               // it is the same one-screen flow, pre-filled with nothing, and it
@@ -436,13 +594,19 @@ export default function App() {
             width="wide"
             className="flex h-[var(--topbar-h)] items-center justify-between gap-3"
           >
+            {/* Hidden from lg up, where the sidebar carries the wordmark two
+                inches to the left. Two "Signal" lockups on one screen reads as
+                a rendering fault, and the sidebar's is the one that belongs to
+                the navigation. Below lg the sidebar is gone and this is the
+                only mark — and the only way back to the dashboard by tapping
+                the logo — so it stays. */}
             <button
               onClick={() => {
                 goTo('dashboard')
                 startOver()
               }}
-              className="group flex min-w-0 items-center gap-2.5"
-              aria-label="Signal — dashboard"
+              className="group flex min-w-0 items-center gap-2.5 lg:hidden"
+              aria-label="Signal: dashboard"
             >
               <span className="shrink-0 text-[var(--accent)] transition-transform group-active:scale-95">
                 <SignalGlyph size={24} />
@@ -452,7 +616,11 @@ export default function App() {
               </span>
             </button>
 
-            <div className="flex shrink-0 items-center gap-0.5">
+            {/* ml-auto, not justify-between. The wordmark beside this is
+                `lg:hidden`, so above that width this is the only child and
+                justify-between left it hard against the sidebar instead of at
+                the far edge where a toolbar belongs. */}
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {history.entries.length > 0 && (
                 <button
                   onClick={() => setHistoryOpen(true)}
@@ -479,12 +647,39 @@ export default function App() {
                 {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
               </button>
 
-              {/* The way in and the way out. It lived in a fixed layer pinned to
-                  the top-right corner of the viewport, floating over whatever
-                  happened to be under it — which on a phone was the first line
-                  of every screen. It is a header control; it belongs in the
-                  header. */}
-              <LockButton />
+              {/*
+                The office's own account, and the door to everything that is not
+                a daily screen.
+
+                This slot held a padlock. A padlock is an action, not a place,
+                and it was the only thing in the header that looked like a
+                destination — so the one control a person reaches for when they
+                want "my stuff" was missing, while the one they touch twice a
+                day sat in the most prominent corner of the app. The member's
+                own face is a better door: it says whose desk this is, it opens
+                the settings and reference screens, and Lock is inside it where
+                a sign-out belongs.
+              */}
+              <button
+                onClick={() => setMoreOpen(true)}
+                aria-label="Your desk, settings and more"
+                aria-haspopup="dialog"
+                aria-expanded={moreOpen}
+                title={store.identity?.name ?? 'Your desk'}
+                className="ml-1 grid size-10 shrink-0 place-items-center rounded-full transition-colors hover:bg-[var(--surface-2)] lg:hidden"
+              >
+                <Avatar
+                  src={store.identity?.photoUrl}
+                  name={store.identity?.name ?? 'Signal'}
+                  size={30}
+                />
+              </button>
+
+              {/* On a laptop the sidebar already lists every destination, so
+                  the sheet has nothing to add and the padlock stays a padlock. */}
+              <span className="hidden lg:block">
+                <LockButton />
+              </span>
             </div>
           </Shell>
         </header>
@@ -506,10 +701,8 @@ export default function App() {
         <SideNav
           active={tab}
           counts={{ influencers: unacknowledged, history: history.entries.length }}
-          // Only offered once there is an account to sign out of. On a device
-          // nobody has locked, a "sign out" control would be a button that does
-          // nothing and raises a question the screen cannot answer.
-          onLock={vault.exists ? () => void signOut() : undefined}
+          // No onLock: the padlock in the header is the one Lock control now,
+          // present at every width. The sidebar's foot carries Settings.
           onSelect={(next) => {
             if (next === 'history') {
               setHistoryOpen(true)
@@ -522,8 +715,7 @@ export default function App() {
 
         <TabBar
           active={tab}
-          historyCount={history.entries.length}
-          counts={{ influencers: unacknowledged }}
+          counts={{ influencers: unacknowledged, actions: openActions }}
           onSelect={(next) => {
             if (next === 'history') {
               setHistoryOpen(true)
@@ -543,6 +735,22 @@ export default function App() {
                 box?.scrollIntoView({ block: 'center', behavior: 'smooth' })
                 box?.focus()
               })
+              return
+            }
+            goTo(next)
+          }}
+        />
+
+        <MoreSheet
+          open={moreOpen}
+          active={tab}
+          counts={{ influencers: unacknowledged, history: history.entries.length }}
+          onClose={() => setMoreOpen(false)}
+          onLock={vault.exists ? () => void signOut() : undefined}
+          person={store.identity}
+          onSelect={(next) => {
+            if (next === 'history') {
+              setHistoryOpen(true)
               return
             }
             goTo(next)

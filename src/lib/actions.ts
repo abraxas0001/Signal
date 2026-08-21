@@ -1,5 +1,5 @@
 import type { ActionItem, ActionStep, Recommendation } from '@shared/grievance'
-import type { ActionPriority } from '@shared/taxonomy'
+import type { ActionPriority, CommsChannel } from '@shared/taxonomy'
 import { makeId, readStore, update } from '@/lib/store'
 
 /**
@@ -93,7 +93,7 @@ export function actionFromRecommendation(
     linkedRecordIds: [source.id],
     description: [rec.action, source.subject, source.headline]
       .filter((part): part is string => Boolean(part))
-      .join(' — '),
+      .join(' · '),
     department: null,
     owner: null,
     status: 'Planned',
@@ -102,19 +102,88 @@ export function actionFromRecommendation(
     completedAt: null,
     escalation: 'None',
     delayReason: null,
-    notes: [
-      rec.rationale,
-      `Suggested channel: ${rec.channel}.`,
-      source.publisher ? `Published by ${source.publisher}.` : null,
-      source.url ? `Story: ${source.url}` : null,
-      rec.talkingPoints.length
-        ? `Lines to use:\n${rec.talkingPoints.map((p) => `  · ${p}`).join('\n')}`
-        : null,
-      `Raised from the ${source.raisedFrom}.`,
-    ]
-      .filter((line): line is string => Boolean(line))
-      .join('\n'),
+    /**
+     * Left empty on purpose.
+     *
+     * This used to be filled with the rationale, the suggested channel, the
+     * talking points and where it came from. Every one of those already has a
+     * home on the card: the lines ARE the steps, the channel sits on each
+     * step, and the provenance is the linked record. So the field rendered a
+     * second copy of the card underneath the card, inside a textarea, under a
+     * heading reading "Anything else" - which is precisely what it was not.
+     *
+     * The field itself stays. An office writing "spoke to the collector, he
+     * will call back Tuesday" is the entire point of it. It just starts blank
+     * now, so what is in it was written by a person.
+     */
+    notes: '',
   }
+}
+
+/**
+ * File a task whose instruction is free text rather than a category.
+ *
+ * `Recommendation.action` is an ActionCategory — one of ten fixed values —
+ * because a grievance record's recommendation is classified, not written. The
+ * comparison produces something different: one specific instruction for one
+ * specific gap, "publish the ward-wise spend against his figure". Forcing that
+ * through the enum would file it as "Public clarification" and drop the only
+ * sentence in it worth reading.
+ *
+ * So this takes the instruction as written and makes it the first step. Same
+ * dedup rule as fileAction, same shape out — the Actions screen cannot tell the
+ * two apart, and should not need to.
+ */
+export function fileFreeAction(input: {
+  action: string
+  rationale: string
+  talkingPoints: string[]
+  priority: ActionPriority
+  channel: CommsChannel
+  source: ActionSource
+}): boolean {
+  const { action, rationale, talkingPoints, priority, channel, source } = input
+
+  const already = readStore().actions.some(
+    (a) =>
+      a.linkedRecordIds.includes(source.id) &&
+      (a.status === 'Planned' || a.status === 'In Progress'),
+  )
+  if (already) return false
+
+  const steps: ActionStep[] = [
+    { id: `${source.id}-do`, text: action, channel, done: false, doneAt: null },
+    ...talkingPoints.map((point, i) => ({
+      id: `${source.id}-say-${i}`,
+      text: `Say: “${point}”`,
+      channel,
+      done: false,
+      doneAt: null,
+    })),
+  ]
+
+  const item: ActionItem = {
+    id: makeId('action'),
+    createdAt: new Date().toISOString(),
+    steps,
+    linkedRecordIds: [source.id],
+    description: [action, source.subject, source.headline]
+      .filter((part): part is string => Boolean(part))
+      .join(' · '),
+    department: null,
+    owner: null,
+    status: 'Planned',
+    priority,
+    dueAt: dueIn(DUE_DAYS[priority]),
+    completedAt: null,
+    escalation: 'None',
+    delayReason: null,
+    /** Blank, for the reason given on actionFromRecommendation above. */
+    notes: '',
+  }
+
+  update((s) => ({ ...s, actions: [item, ...s.actions] }))
+  return true
 }
 
 /**

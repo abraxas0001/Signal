@@ -363,7 +363,7 @@ export function resolvePlace(input: {
       notes.push(
         `Read "${districtMatch.given}" as the ${districtMatch.canonical} district${
           districtMatch.alternatives.length
-            ? ` — it could also be ${districtMatch.alternatives.join(' or ')}`
+            ? `; it could also be ${districtMatch.alternatives.join(' or ')}`
             : ''
         }.`,
       )
@@ -400,3 +400,35 @@ export function placeVariants(match: PlaceMatch | null, given?: string | null): 
 }
 
 export { stateOfCity }
+
+/**
+ * Does the district or seat independently vouch for the state?
+ *
+ * `resolvePlace` deliberately does NOT answer this. Its `stateMatch` says
+ * whether the string is a state this app knows — so `{ state: 'Kerala',
+ * district: 'Mahabubnagar' }` comes back `exact`, because Kerala is a real
+ * state, even though Mahabubnagar is in Telangana. Treating that as
+ * confirmation would stamp a plainly wrong state as verified.
+ *
+ * This is the cross-check: the registry maps the district or the seat back to
+ * a state, and it has to be the same one. Two independent facts agreeing is
+ * what confirmation means; a value simply being well-spelled is not.
+ *
+ * Returns false when there is no district or seat to check against — that is
+ * "cannot corroborate", not "wrong", and the caller should leave the value's
+ * standing exactly as it found it.
+ */
+export function stateCorroborated(
+  state: string | null | undefined,
+  district: string | null | undefined,
+  constituency?: string | null,
+): boolean {
+  if (!state) return false
+  const want = foldPlace(state)
+  for (const place of [district, constituency]) {
+    if (!place) continue
+    const derived = stateOfCity(place)
+    if (derived && foldPlace(derived) === want) return true
+  }
+  return false
+}

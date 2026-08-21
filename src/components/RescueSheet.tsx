@@ -263,7 +263,7 @@ export function RescueSheet({
               <div className="mt-4">
                 <span className="text-sm font-medium">Screenshot</span>
                 <span className="ml-1.5 text-xs text-ink-3">
-                  optional — we will read it
+                  optional, and we will read it
                 </span>
 
                 <input

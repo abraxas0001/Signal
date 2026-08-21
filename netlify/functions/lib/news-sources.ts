@@ -309,7 +309,7 @@ Search Indian news sites, including regional-language ones. Give full URLs. If y
   } else {
     notes.push(
       standingCount > 0
-        ? `${standingCount} publisher ${standingCount === 1 ? 'page collects' : 'pages collect'} this person’s coverage and will be read every morning — these keep updating, so they need finding only once.`
+        ? `${standingCount} publisher ${standingCount === 1 ? 'page collects' : 'pages collect'} this person’s coverage and will be read every morning. These keep updating, so they need finding only once.`
         : `${sources.length} ${sources.length === 1 ? 'page carries' : 'pages carry'} coverage and will be scanned.`,
     )
   }

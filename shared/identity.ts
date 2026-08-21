@@ -21,6 +21,8 @@
  * by-election, and the app has to be useful that morning.
  */
 
+import { stateCorroborated } from './places'
+
 /** How much weight a reader should put on one field. */
 export type Confidence = 'high' | 'medium' | 'low'
 
@@ -264,10 +266,30 @@ export function unverifiedFields(identity: Identity): string[] {
     state: 'state',
   }
 
+  /**
+   * A value the region registry corroborates is not worth a second look, even
+   * if the reading that produced it was unsure.
+   *
+   * Checked here rather than only at resolve time because confidence is
+   * STORED. A desk set up before the resolver learned to corroborate keeps its
+   * saved `low` for ever — nothing re-resolves an identity once it is on the
+   * device — so an MP for Mahabubnagar was told her state could not be
+   * confirmed every morning, by an app that could confirm it from its own
+   * tables in a millisecond.
+   *
+   * `stateCorroborated` is a genuine cross-check, not a spell-check: the
+   * district or seat has to map back to the same state. A stored "Kerala"
+   * against a Mahabubnagar seat stays flagged, which is the whole point of
+   * the prompt.
+   */
+  const corroborated = stateCorroborated(identity.state, identity.district, identity.constituency)
+
   return (Object.keys(labels) as IdentityField[])
     .filter((key) => {
       const value = (identity as unknown as Record<string, unknown>)[key]
-      return value != null && identity.confidence[key] === 'low'
+      if (value == null || identity.confidence[key] !== 'low') return false
+      if ((key === 'state' || key === 'district') && corroborated) return false
+      return true
     })
     .map((key) => labels[key]!)
 }

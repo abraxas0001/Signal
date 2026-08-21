@@ -616,7 +616,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
           if (!portal) return null
           const failure = text(raw['error'])
           const count = typeof raw['found'] === 'number' ? raw['found'] : 0
-          return failure ? `${portal} — ${failure}` : `${portal} ${count}`
+          return failure ? `${portal}: ${failure}` : `${portal} ${count}`
         })
         .filter(nonNull)
 
@@ -715,7 +715,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
       // story instead of relying on the link. Better a task that stands on its
       // own than a task pointing at something the other screen cannot open.
       linkedRecordIds: [mention.id],
-      description: `${rec.action} — ${person.name}: ${mention.headline}`,
+      description: `${rec.action} (${person.name}): ${mention.headline}`,
       department: null,
       owner: null,
       status: 'Planned',
@@ -837,7 +837,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
           </div>
           <p className="mt-2 text-xs text-ink-3">
             Separate spellings with commas. A name written in Telugu will never match an English
-            headline, and the papers here print both — without the second spelling a check finds
+            headline, and the papers here print both. Without the second spelling a check finds
             part of the coverage and presents it as all of it.
           </p>
           <div className="mt-3">
@@ -967,10 +967,10 @@ export function Persona({ onClose }: { onClose: () => void }) {
 function EmptyRoster({ subject }: { subject: string | null }) {
   const first = [
     subject
-      ? `${subject} — the member this office belongs to. Most of what needs answering is said about them.`
+      ? `${subject}, the member this office belongs to. Most of what needs answering is said about them.`
       : 'The member this office belongs to. Most of what needs answering is said about them.',
     'Whoever contests against them, because that is where the attacks start.',
-    'The officials your grievances keep naming — the collector, the executive engineer, the tahsildar whose department is in every second complaint.',
+    'The officials your grievances keep naming: the collector, the executive engineer, the tahsildar whose department is in every second complaint.',
     'Any local figure whose posts your associates keep forwarding to you.',
   ]
 
@@ -983,7 +983,7 @@ function EmptyRoster({ subject }: { subject: string | null }) {
           <p className="mt-1.5">
             A persona tracker follows one named person through the papers this desk already reads.
             It collects what was written about them, whether the story reads as supportive or
-            critical, and whether anything about it looks fabricated — so the office hears it here
+            critical, and whether anything about it looks fabricated, so the office hears it here
             rather than in a phone call at ten at night.
           </p>
           <p className="mt-3 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
@@ -1115,7 +1115,7 @@ function CheckSummary({ report, name }: { report: CheckReport; name: string }) {
       </p>
 
       {report.sources.length > 0 && (
-        <p className="mt-2 text-xs text-ink-3">Per paper — {report.sources.join(' · ')}.</p>
+        <p className="mt-2 text-xs text-ink-3">Per paper: {report.sources.join(' · ')}.</p>
       )}
 
       {report.notes.map((note) => (
@@ -1144,7 +1144,7 @@ function CheckSummary({ report, name }: { report: CheckReport; name: string }) {
                 >
                   <ExternalLink size={12} aria-hidden className="shrink-0" />
                   <span className="line-clamp-2">
-                    {candidate.title} — {candidate.portal}
+                    {candidate.title} ({candidate.portal})
                   </span>
                 </a>
               </li>
@@ -1417,7 +1417,7 @@ function MentionDetail({
                   <p className="mt-2 text-xs text-ink-3">
                     Adds a Planned task at {rec.priority.toLowerCase()} priority, due{' '}
                     {absoluteDate(dueIn(DUE_DAYS[rec.priority]))}, with the story attached. No
-                    department is set — the desk assigns that on the Actions sheet.
+                    department is set. The desk assigns that on the Actions sheet.
                   </p>
                 </>
               )}

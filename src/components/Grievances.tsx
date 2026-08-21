@@ -50,11 +50,13 @@ import {
   formatDeskDay,
   groupByDay,
   isToday,
+  recordDeskDay,
   recordsOnDay,
   shiftDay,
   todayDeskDay,
 } from '@/lib/desk-day'
-import { downloadGrievanceWorkbook } from '@/lib/grievance-export'
+import { downloadGrievanceCsv, downloadGrievanceWorkbook } from '@/lib/grievance-export'
+import { ExportButton } from '@/components/ExportButton'
 import { Mascot } from './Mascot'
 import type {
   ActionPriority,
@@ -81,9 +83,9 @@ import {
   TARGETS,
   TOPICS,
 } from '@shared/taxonomy'
-import { Bar, Button, Card, Chip, PageHeader, SectionTitle, type ChipTone } from './ui'
+import { Bar, Button, Card, Chip, PageHeader, SectionTitle, selectClass, type ChipTone } from './ui'
 import { LevelPips } from './charts'
-import { makeId, update, useStore } from '@/lib/store'
+import { makeId, readStore, update, useStore } from '@/lib/store'
 import { absoluteDate, cn, hostOf, isIndicScript, pluralise } from '@/lib/utils'
 import { fadeUp, haptic, listItem, listStaggerFast, spring } from '@/lib/motion'
 
@@ -311,7 +313,7 @@ const toIssues = (raw: unknown): IssueCluster[] =>
 const STOPPED = 'Stopped before this link was read. Read again to finish it.'
 
 const UNREADABLE =
-  'The service answered for this link, but the record was not in a shape this app can read. Read it again; if it keeps happening the grievance service needs looking at.'
+  "This link came back unreadable. Try it again."
 
 const networkMessage = (err: unknown): string =>
   err instanceof Error && err.message
@@ -334,7 +336,7 @@ async function explainResponse(res: Response): Promise<string> {
     case 401:
     case 403:
       fallback =
-        'The grievance service refused the request — its key is missing or wrong. Whoever set the app up needs to check it.'
+        'The grievance service refused the request. Its key is missing or wrong, and whoever set the app up needs to check it.'
       break
     case 413:
       fallback = 'That page was too big to send. Try the print version of the article.'
@@ -562,8 +564,24 @@ function mergeRecords(existing: GrievanceRecord[], incoming: GrievanceRecord[]):
     // has should correct that record, not file a second one beside it, and the
     // same story re-read tomorrow arrives with a different id.
     const at = next.findIndex((r) => r.id === record.id || r.sourceUrl === record.sourceUrl)
-    if (at >= 0) next[at] = record
-    else next.push(record)
+    if (at >= 0) {
+      /**
+       * Everything fresh EXCEPT when it was first seen.
+       *
+       * This replaced the record whole, `createdAt` included, and that is how
+       * yesterday's stories kept turning up under today. A story with no
+       * printed date is filed on the day it was read (see recordDeskDay), so
+       * one read yesterday sat in yesterday correctly. Re-read this morning,
+       * because it is still on the paper's front page, it came back with a
+       * new `createdAt` and walked forward a day. Every sync dragged the
+       * undated part of yesterday into today, and it would have done it again
+       * tomorrow.
+       *
+       * The classification is allowed to improve on a re-read. The date the
+       * office first saw it is a fact about the past and does not change.
+       */
+      next[at] = { ...record, createdAt: next[at]!.createdAt }
+    } else next.push(record)
   }
   return next
 }
@@ -965,6 +983,10 @@ export function Grievances({
     [store.grievances],
   )
 
+  /** The desk day being looked at. Declared here because the issue list
+      below is scoped to it, not only the record list further down. */
+  const [day, setDay] = useState(() => todayDeskDay())
+
   const issues = useMemo(
     () =>
       [...store.issues].sort(
@@ -987,10 +1009,31 @@ export function Grievances({
    */
   const [issueFilters, setIssueFilters] = useState<IssueFilters>(NO_ISSUE_FILTERS)
 
-  const visibleIssues = useMemo(
-    () => issues.filter((issue) => issueMatches(issue, issueFilters, byId)),
-    [issues, issueFilters, byId],
-  )
+  /**
+   * Issues on the day being looked at, then the filters.
+   *
+   * These were not day-scoped at all, and the comment above issueRank said so
+   * as though it were a decision. It was not survivable: the day stepper sits
+   * directly above this list, so a desk reading "Today, Friday 21 August"
+   * listed an issue whose only record was printed on the tenth. The office
+   * cannot tell that from a story that broke this morning.
+   *
+   * An issue belongs to a day when any record behind it does. One that ran
+   * across three days therefore shows on all three, which is right: it was
+   * live on all three, and the date line on the card says so.
+   *
+   * Records this device no longer holds cannot place an issue on any day. An
+   * issue whose backing has all been cleared is shown rather than hidden, so
+   * clearing a day cannot silently delete an issue from every view at once.
+   */
+  const visibleIssues = useMemo(() => {
+    const onDay = issues.filter((issue) => {
+      const held = issue.recordIds.map((id) => byId.get(id)).filter(Boolean) as GrievanceRecord[]
+      if (held.length === 0) return true
+      return held.some((r) => recordDeskDay(r) === day)
+    })
+    return onDay.filter((issue) => issueMatches(issue, issueFilters, byId))
+  }, [issues, issueFilters, byId, day])
 
   /**
    * Only the categories actually present.
@@ -1004,7 +1047,7 @@ export function Grievances({
     return [...present].sort((a, b) => topicOrder(a) - topicOrder(b))
   }, [issues])
 
-  /** Whether the flag filter would ever do anything on this desk. */
+   /** Whether the flag filter would ever do anything on this desk. */
   const anyFlagged = useMemo(
     () =>
       issues.some((issue) =>
@@ -1027,8 +1070,30 @@ export function Grievances({
    * Nothing is deleted when the day moves. A record filed on Monday is still
    * the evidence on Friday; it is simply not today's business.
    */
-  const [day, setDay] = useState(() => todayDeskDay())
   const dayRecords = useMemo(() => recordsOnDay(records, day), [records, day])
+
+  /**
+    * What an export would contain.
+    *
+    * This was `dayRecords` in both views, and in the issues view that is the
+    * wrong set twice over. An issue is a cluster of records filed across
+    * several days, so exporting "today" gave an office a file that did not
+    * contain the issue they were looking at — and on a morning when the scan
+    * had filed nothing yet, `dayRecords` was empty, the button was `disabled`,
+    * and pressing it did nothing whatsoever. That is the button that was
+    * reported broken.
+    *
+    * So: export what is on screen. In the issues view that means the records
+    * behind the issues that survived the filters — set a filter, and the sheet
+    * narrows with the list. In the records view it stays the day being read.
+    */
+   const exportRecords = useMemo(() => {
+     if (mode === 'records') return dayRecords
+     const wanted = new Set(visibleIssues.flatMap((i) => i.recordIds))
+     // Ordered by the issue list rather than by filing date, so the sheet reads
+     // in the same order as the screen it came from.
+     return [...wanted].map((id) => byId.get(id)).filter((r): r is GrievanceRecord => r !== undefined)
+   }, [mode, dayRecords, visibleIssues, byId])
   const otherDays = useMemo(
     () => groupByDay(records).filter((b) => b.day !== day).length,
     [records, day],
@@ -1095,6 +1160,15 @@ export function Grievances({
    * spending that.
    */
   const [scanning, setScanning] = useState(false)
+
+  /**
+   * Is there anything to scan? Same test the intake panel makes, hoisted so
+   * the desk toolbar can make it too. A scan with no papers chosen returns
+   * nothing and looks like a broken button.
+   */
+  const scanReady =
+    (store.profile?.portals?.length ?? 0) > 0 ||
+    (store.profile?.customPortalUrls ?? []).filter(Boolean).length > 0
   const [scanNote, setScanNote] = useState<string | null>(null)
 
   /**
@@ -1134,7 +1208,17 @@ export function Grievances({
     )
   }, [configKey])
 
-  const runScan = useCallback(async () => {
+  /**
+   * Returns the URLs it found, so a caller can go on and read them.
+   *
+   * It used to return nothing and simply fill the paste box. That was right
+   * for the intake panel, where somebody is choosing what to spend model
+   * calls on, and wrong for the Sync button, which promises today's news and
+   * delivered a box the office then had to notice, scroll to and press again.
+   * Pressed from the desk header it looked like it had done nothing at all:
+   * the screen still showed yesterday.
+   */
+  const runScan = useCallback(async (): Promise<string[]> => {
     const profile = store.profile
     const identity = store.identity
     const custom = (profile?.customPortalUrls ?? []).filter(Boolean)
@@ -1171,7 +1255,7 @@ export function Grievances({
       }
       if (!res.ok || data.error) {
         setScanNote(data.error ?? `The scan failed (HTTP ${res.status}).`)
-        return
+        return []
       }
       const found = data.candidates ?? []
       if (found.length === 0) {
@@ -1181,7 +1265,7 @@ export function Grievances({
             ? `Nothing matched. ${dead.map((d) => `${d.portal}: ${d.error}`).join(' ')}`
             : 'The papers had nothing carrying your words today. Try fewer words, or add a paper.',
         )
-        return
+        return []
       }
       // Take the previous scan's results out before putting these in, so the
       // box holds this scan plus whatever the operator pasted by hand — never
@@ -1201,9 +1285,10 @@ export function Grievances({
         .map((s) => `${s.portal} ${s.found}`)
         .join(' · ')
       setScanNote(
-        `Found ${found.length} ${pluralise(found.length, 'story', 'stories')} — ${perSource}. They are in the box below; read them when you are ready.` +
+        `Found ${found.length} ${pluralise(found.length, 'story', 'stories')}: ${perSource}.` +
           (data.notes?.length ? ` ${data.notes.join(' ')}` : ''),
       )
+      return fresh
     } catch (err) {
       setScanNote(
         `Could not reach the scanner: ${err instanceof Error ? err.message : String(err)}`,
@@ -1211,6 +1296,7 @@ export function Grievances({
     } finally {
       setScanning(false)
     }
+    return []
   }, [store.profile])
 
   const openRecord = useCallback((id: string) => {
@@ -1326,6 +1412,62 @@ export function Grievances({
     abortRef.current = null
   }, [])
 
+  /**
+   * Fetch today and read it, in one press.
+   *
+   * The two halves already existed and were deliberately kept apart: the scan
+   * is cheap and the reading costs two model calls per story, so the intake
+   * panel shows what was found and lets somebody choose. That is right there
+   * and wrong here. A button on the desk header labelled "Sync today" is a
+   * promise about the desk, and it was filling a box on a panel that is not
+   * even on screen in the issues view. The office pressed it, saw yesterday's
+   * records still sitting there, and concluded it was broken.
+   *
+   * So this one does the whole job. It is the only caller that chains them;
+   * the intake panel keeps its two-step flow untouched.
+   */
+  const syncToday = useCallback(async () => {
+    const found = await runScan()
+    if (found.length === 0) return
+
+    /**
+     * Skip what the desk already holds.
+     *
+     * A masthead's front page carries several days at once, so most of what
+     * a second sync finds is what the first one already read. Reading a story
+     * again costs two model calls and teaches the office nothing, and until
+     * the merge above was fixed it also dragged undated stories forward a day
+     * each time. Anything genuinely new still goes through.
+     */
+    const held = new Set(readStore().grievances.map((r) => r.sourceUrl))
+    const urls = found.filter((u) => !held.has(u))
+    const skipped = found.length - urls.length
+
+    if (urls.length === 0) {
+      setScanNote(
+        `Nothing new. All ${found.length} ${pluralise(found.length, 'story', 'stories')} on the front pages are already on the desk.`,
+      )
+      return
+    }
+    if (skipped > 0) {
+      setScanNote(
+        `Reading ${urls.length} new ${pluralise(urls.length, 'story', 'stories')}. ${skipped} already on the desk, left alone.`,
+      )
+    }
+
+    await readLinks(
+      urls.map((url) => {
+        let host = ''
+        try {
+          host = new URL(url).host.replace(/^www\./, '')
+        } catch {
+          /* the scanner returns absolute URLs; a malformed one just loses its publisher name */
+        }
+        return { url, host, publisher: publisherFor(host) }
+      }),
+    )
+  }, [runScan, readLinks])
+
   const failedLinks = useMemo(() => links.filter((l) => l.status === 'failed'), [links])
 
   return (
@@ -1399,6 +1541,51 @@ export function Grievances({
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/*
+            Fetch today now, rather than waiting for the morning.
+
+            The desk fills itself at 07:30 and there was no way to ask it
+            again. An office that arrives to a story breaking at eleven had to
+            either paste links by hand or wait until tomorrow, which is the
+            opposite of what a monitoring desk is for.
+
+            It runs the same scan the morning job runs, so nothing here is a
+            second code path that can drift from it: the found links land in
+            the intake box exactly as they do at 07:30, ready to be read. The
+            07:30 run is unaffected and still happens.
+
+            Only on today. Pressing it while looking at last Tuesday would
+            file this morning's news under a day the office is not looking at,
+            which reads as the button having done nothing.
+          */}
+          {/* What the sync did, said where the sync button is.
+              The links it finds go into the intake box, and that box is not on
+              screen in every view, so a press could look like nothing had
+              happened at all. */}
+          {isToday(day) && scanNote && !scanning && (
+            <span className="hidden max-w-[22rem] truncate text-xs text-ink-3 lg:inline" title={scanNote}>
+              {scanNote}
+            </span>
+          )}
+          {isToday(day) && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void syncToday()}
+              disabled={scanning || running || !scanReady}
+              title={
+                scanReady
+                  ? 'Look for today\u2019s news now, without waiting for the 07:30 scan'
+                  : 'Choose which papers to read first, under Sources.'
+              }
+            >
+              <RefreshCw
+                size={14}
+                className={scanning || running ? 'animate-spin motion-reduce:animate-none' : undefined}
+              />
+              {scanning ? 'Looking\u2026' : running ? 'Reading\u2026' : 'Sync today'}
+            </Button>
+          )}
           {otherDays > 0 && (
             <span className="hidden font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3 sm:inline">
               {otherDays} earlier {pluralise(otherDays, 'day')} kept
@@ -1435,19 +1622,19 @@ export function Grievances({
             <Trash2 size={14} />
             Clear
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={dayRecords.length === 0}
-            // The banded workbook, not the flat CSV — the same sheet the link
-            // analysis produces, with its lettered colour bands and its widths.
-            // The button keeps saying CSV because that is what the office calls
-            // a spreadsheet, and it is what the other export in this app says.
-            onClick={() => void downloadGrievanceWorkbook(dayRecords, day)}
-          >
-            <Download size={14} />
-            CSV
-          </Button>
+          {/* Excel first — it is the banded sheet with the fake-check tab,
+              which is what this office actually files. CSV beside it, because
+              that is the format the button used to claim and never produced. */}
+          <ExportButton
+            count={exportRecords.length}
+            noun="record"
+            run={(format) => {
+              const label = mode === 'records' ? day : 'issues'
+              return format === 'csv'
+                ? downloadGrievanceCsv(exportRecords, label)
+                : downloadGrievanceWorkbook(exportRecords, label)
+            }}
+          />
         </div>
       </m.div>
 
@@ -1507,7 +1694,11 @@ export function Grievances({
                       constituency: '',
                       // A different state means different papers and different
                       // place words; carrying either over would scan the wrong
-                      // patch and look like it had worked.
+                      // patch and look like it had worked. The district goes
+                      // with them, and is cleared by name rather than by being
+                      // left off the list — so this reads as a decision rather
+                      // than as the omission it looks identical to.
+                      district: undefined,
                       watchTerms: [],
                       state: next,
                       portals: [],
@@ -1521,6 +1712,11 @@ export function Grievances({
                     return {
                       ...s,
                       profile: {
+                        // Spread first, as the custom-URL handler below already
+                        // does. Without it, toggling one masthead dropped
+                        // `district` and quietly widened the news scan from the
+                        // district edition to the whole state.
+                        ...(s.profile ?? {}),
                         subject: s.profile?.subject ?? 'This office',
                         constituency: s.profile?.constituency ?? '',
                         watchTerms: s.profile?.watchTerms ?? [],
@@ -1694,7 +1890,7 @@ export function Grievances({
                 <div>
                   <p className="text-sm font-medium">No issues yet</p>
                   <p className="mt-1 text-sm text-ink-3">
-                    An issue is several records about the same thing — nine complaints about one
+                    An issue is several records about the same thing: nine complaints about one
                     water line, not nine separate stories. They appear once enough links have been
                     read for the desk to group them.
                   </p>
@@ -1735,7 +1931,7 @@ export function Grievances({
               initial={reduced ? false : 'hidden'}
               animate="show"
             >
-              {visibleIssues.map((issue) => (
+              {visibleIssues.map((issue, at) => (
                 <m.li
                   key={issue.id}
                   variants={listItem}
@@ -1748,6 +1944,7 @@ export function Grievances({
                 >
                   <IssueCard
                     issue={issue}
+                    position={at + 1}
                     records={issue.recordIds.flatMap((id) => {
                       const record = byId.get(id)
                       return record ? [record] : []
@@ -1873,7 +2070,7 @@ function DeskSetup({
                   tags.join(', ')
                 ) : (
                   <span className="text-ink-3">
-                    None — the scan will bring back everything the papers carry
+                    None set, so the scan will bring back everything the papers carry
                   </span>
                 )}
               </dd>
@@ -1932,7 +2129,7 @@ function DeskSetup({
         <div className="mt-4">
           <span className="kicker">Step 2 · Papers to scan</span>
           <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
-            Signal reads these for you — tick as many as you want. Nothing opens in
+            Signal reads these for you. Tick as many as you want. Nothing opens in
             another tab.
             {DISTRICT_PAGES_ARE_GEO_GATED && (
               <>
@@ -1999,7 +2196,7 @@ function DeskSetup({
           <span className="kicker">Step 3 · Words that make a story yours</span>
           <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
             Tapped words are kept and used to flag which filed stories are about this
-            segment. Add your own mandal names — no list shipped from outside knows them.
+            segment. Add your own mandal names, because no list shipped from outside knows them.
           </p>
           <div className="mt-2 space-y-2">
             {(
@@ -2153,7 +2350,7 @@ function PortalInput({ onAdd, existing }: { onAdd: (url: string) => void; existi
   return (
     <div className="mt-3">
       <label className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
-        Add a paper — its address, or the section you read
+        Add a paper: its address, or the section you read
       </label>
       <div className="mt-1.5 flex gap-2">
         <input
@@ -2207,7 +2404,7 @@ function TagInput({ onAdd, existing }: { onAdd: (tag: string) => void; existing:
   return (
     <div className="mt-3">
       <label className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
-        Add your own — a mandal, a scheme, an officer
+        Add your own: a mandal, a scheme, an officer
       </label>
       <div className="mt-1.5 flex gap-2">
         <input
@@ -2292,7 +2489,7 @@ function RegionPicker({
         <div className="mt-3">
           <span className="kicker">
             {region?.complete ? 'District' : 'City'}
-            {city ? '' : ' — choose one'}
+            {city ? '' : ' (choose one)'}
           </span>
 
           {city ? (
@@ -2328,7 +2525,7 @@ function RegionPicker({
                 {shown.length === 0 ? (
                   <p className="px-3 py-3 text-xs leading-relaxed text-ink-2">
                     Nothing matches “{typed}”. This list is a starting point, not the
-                    register — use what you typed.
+                    register, so use what you typed.
                   </p>
                 ) : (
                   shown.map((c) => (
@@ -2352,7 +2549,7 @@ function RegionPicker({
               {!region?.complete && (
                 <p className="mt-1.5 text-xs text-ink-3">
                   Major cities only for {state}. The two Telugu states carry every district;
-                  everywhere else is a starting list — type your own if it is missing.
+                  everywhere else is a starting list, so type your own if it is missing.
                 </p>
               )}
 
@@ -2446,7 +2643,7 @@ function IntakePanel({
           <div className="min-w-0">
             <h2 className="text-lg font-semibold tracking-[-0.011em]">Add news links</h2>
             <p className="mt-0.5 text-xs text-ink-3">
-              One per line. Paste the whole list from the group at once — each link is reported on
+              One per line. Paste the whole list from the group at once. Each link is reported on
               its own, so a dead one costs you that link and nothing else.
             </p>
           </div>
@@ -2510,7 +2707,7 @@ function IntakePanel({
           <p className="mt-2 flex items-start gap-1.5 text-xs text-[var(--warn)]">
             <CircleAlert size={13} className="mt-0.5 shrink-0" />
             <span>
-              Skipped {unusable.length} {pluralise(unusable.length, 'line')} — not a web address:{' '}
+              Skipped {unusable.length} {pluralise(unusable.length, 'line')}. Not a web address:{' '}
               {unusable.slice(0, 3).join(', ')}
               {unusable.length > 3 && ` and ${unusable.length - 3} more`}. A link has to start with
               http:// or https://.
@@ -2522,7 +2719,7 @@ function IntakePanel({
           <Button onClick={onRead} disabled={running || links.length === 0}>
             <RefreshCw size={15} className={running ? 'animate-spin' : ''} />
             {running
-              ? `Reading — ${settled} of ${progress.length} done`
+              ? `Reading: ${settled} of ${progress.length} done`
               : links.length === 0
                 ? 'Read links'
                 : `Read ${links.length} ${pluralise(links.length, 'link')}`}
@@ -2602,7 +2799,7 @@ function EmptyDesk() {
               fabricated, and what the office can say back.
             </p>
             <p className="mt-2 text-sm leading-relaxed text-ink-2">
-              Paste the links from the office group into the box above — the whole list at once. You
+              Paste the links from the office group into the box above, the whole list at once. You
               can then pull out only the ones you need, such as everything about water in Nuzvid, or
               every story naming one officer.
             </p>
@@ -2733,7 +2930,7 @@ function IssueFilterBar({
             value={filters.category}
             onChange={(e) => set({ category: e.target.value })}
             aria-label="Category"
-            className={selectClass}
+            className={cn(selectClass, filters.category && 'select-active')}
           >
             <option value="">Any category</option>
             {categories.map((c) => (
@@ -2776,9 +2973,6 @@ function IssueFilterBar({
     </div>
   )
 }
-
-const selectClass =
-  'min-h-11 shrink-0 rounded-[--radius-md] border border-[var(--border-interactive)] bg-[var(--surface)] px-3 text-sm text-ink outline-none focus:border-[var(--accent)]'
 
 function FilterBar({
   filters,
@@ -2827,7 +3021,7 @@ function FilterBar({
           value={filters.constituency}
           onChange={(e) => set({ constituency: e.target.value })}
           aria-label="Constituency"
-          className={selectClass}
+          className={cn(selectClass, filters.constituency && 'select-active')}
         >
           <option value="">Any constituency</option>
           {options.constituencies.map((c) => (
@@ -2841,7 +3035,7 @@ function FilterBar({
           value={filters.topic}
           onChange={(e) => set({ topic: e.target.value })}
           aria-label="Topic"
-          className={selectClass}
+          className={cn(selectClass, filters.topic && 'select-active')}
         >
           <option value="">Any topic</option>
           {options.topics.map((t) => (
@@ -2855,7 +3049,7 @@ function FilterBar({
           value={filters.severity}
           onChange={(e) => set({ severity: e.target.value })}
           aria-label="Severity"
-          className={selectClass}
+          className={cn(selectClass, filters.severity && 'select-active')}
         >
           <option value="">Any severity</option>
           {SEVERITIES.map((s) => (
@@ -2869,7 +3063,7 @@ function FilterBar({
           value={filters.person}
           onChange={(e) => set({ person: e.target.value })}
           aria-label="Person named"
-          className={selectClass}
+          className={cn(selectClass, filters.person && 'select-active')}
           disabled={options.persons.length === 0}
         >
           {/* A disabled control that still says "Anyone named" looks broken.
@@ -2888,7 +3082,7 @@ function FilterBar({
           value={filters.hashtag}
           onChange={(e) => set({ hashtag: e.target.value })}
           aria-label="Hashtag"
-          className={selectClass}
+          className={cn(selectClass, filters.hashtag && 'select-active')}
           disabled={options.tags.length === 0}
         >
           <option value="">
@@ -3076,7 +3270,7 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
                 <Users size={14} className="mt-1 shrink-0 text-ink-3" />
                 <span>
                   <span className="font-medium">{person.name}</span>
-                  <span className="text-ink-3"> — {person.role ?? 'role not given'}</span>
+                  <span className="text-ink-3">, {person.role ?? 'role not given'}</span>
                 </span>
               </li>
             ))}
@@ -3176,7 +3370,7 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
         </p>
         {recommendation.talkingPoints.length === 0 ? (
           <p className="mt-1 text-sm text-ink-3">
-            No lines were drafted for this one — it is marked {recommendation.action.toLowerCase()}.
+            No lines were drafted for this one, because it is marked {recommendation.action.toLowerCase()}.
           </p>
         ) : (
           <TalkingPoints points={recommendation.talkingPoints} />
@@ -3236,10 +3430,13 @@ function TalkingPoints({ points }: { points: string[] }) {
 
 function IssueCard({
   issue,
+  position,
   records,
   onOpenRecord,
 }: {
   issue: IssueCluster
+  /** Where this card sits in the list on screen, from 1. */
+  position: number
   records: GrievanceRecord[]
   onOpenRecord: (id: string) => void
 }) {
@@ -3248,19 +3445,48 @@ function IssueCard({
   const backing = issue.recordIds.length
   const missing = backing - records.length
 
+  /**
+   * When the records behind this issue are from.
+   *
+   * One day when they all share it, a span when they do not. Only the records
+   * this device actually holds can be dated, so a cluster whose backing is
+   * partly missing dates what it has rather than claiming a range it cannot
+   * see.
+   */
+  const issueDates = ((): string | null => {
+    const days: string[] = [...new Set(records.map((r) => recordDeskDay(r)))].filter((d): d is string => Boolean(d)).sort()
+    if (days.length === 0) return null
+    const first = days[0]!
+    const last = days[days.length - 1]!
+    return first === last ? formatDeskDay(first) : formatDeskDay(first) + ' to ' + formatDeskDay(last)
+  })()
+
   return (
     <Card className="h-full">
       <div className="flex items-start gap-3">
+        {/*
+          Position in this list, not the number the server gave it.
+
+          `issue.rank` is assigned per batch, so every batch numbers its own
+          issues from one. A desk holding three batches showed two 4s and two
+          5s side by side, which reads as a bug because it is one. The rank
+          still decides the ORDER, up in the issues memo; what is drawn here
+          is simply where the card sits.
+        */}
         <span className="num grid size-9 shrink-0 place-items-center rounded-[--radius-md] bg-[var(--surface-2)] text-sm text-ink-2">
-          {issue.rank > 0 ? issue.rank : '—'}
+          {position}
         </span>
         <div className="min-w-0">
           <h3 className={cn('font-semibold leading-snug', isIndicScript(issue.title) && 'te')}>
             {issue.title}
           </h3>
           <p className="mt-1 text-xs text-ink-3">
+            {/* When, not just how many. An issue card carried a count and a
+                place and nothing about time, so a cluster built from last
+                week read exactly like one built this morning. */}
             {metaLine(
               `${backing} ${pluralise(backing, 'record')} behind it`,
+              issueDates,
               issue.constituency ?? 'Constituency not named',
             )}
           </p>

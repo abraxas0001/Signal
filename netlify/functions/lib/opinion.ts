@@ -1,5 +1,6 @@
 import { complete } from './openai-compat'
 import { resolveProviders } from './provider'
+import { HOUSE_STYLE } from './house-style'
 
 /**
  * What the public thinks, when nobody's comments are readable.
@@ -49,6 +50,17 @@ export interface OpinionTheme {
 export interface OpinionSurvey {
   /** −100 … 100. Null when the record is too thin to average. */
   score: number | null
+  /**
+   * The two magnitudes the score is the difference of, 0–100 each.
+   *
+   * Carried through rather than discarded because the score alone cannot tell
+   * two opposite situations apart: loudly praised AND loudly attacked comes to
+   * zero, and so does nobody saying anything at all. A member told "0" learns
+   * nothing; told "praise 75, criticism 75" they learn they are in a fight,
+   * and told "praise 0, criticism 0" they learn they are invisible.
+   */
+  favourable: number | null
+  hostile: number | null
   /** One sentence a member could read and act on. */
   verdict: string
   praise: OpinionTheme[]
@@ -158,10 +170,33 @@ const THEME = {
 const SCHEMA: Record<string, unknown> = {
   type: 'object',
   properties: {
-    score: {
-      type: ['integer', 'null'],
+    /**
+     * Two independent magnitudes rather than one signed score.
+     *
+     * Asked for separately, and combined in code, because a single -100..+100
+     * field has a midpoint that doubles as "I did not decide" — and on mixed
+     * coverage the model took it every time. Measured on the real notes behind
+     * this screen: the anchored signed scale returned 0, then -1, while its own
+     * verdict field said "Negative". Two unipolar judgements have no such
+     * refuge; "how loud is the praise" and "how loud is the attack" are
+     * questions with no safe middle, and the lean falls out of the subtraction.
+     */
+    favourable: {
+      type: 'integer',
       description:
-        '-100 (uniformly hostile coverage) to 100 (uniformly favourable). Null when the text says coverage is too thin to judge.',
+        'How LOUD the favourable coverage is, 0-100, judged on prominence not count. ' +
+        '0 nobody is defending them. 20 mild or generic praise ("experienced", "hardworking") — what is said about everybody. ' +
+        '50 substantial, specific praise from named supporters. 80+ the favourable line dominates the coverage. ' +
+        'Judge this on its own, WITHOUT reference to the criticism.',
+    },
+    hostile: {
+      type: 'integer',
+      description:
+        'How LOUD the hostile coverage is, 0-100, judged on prominence not count. ' +
+        '0 nobody is attacking them. 20 passing or unattributed grumbling. ' +
+        '50 specific, attributed criticism repeated across outlets. 80+ the attack dominates the coverage. ' +
+        'A named, checkable allegation from a named opponent scores far higher than vague disapproval. ' +
+        'Judge this on its own, WITHOUT reference to the praise.',
     },
     verdict: {
       type: 'string',
@@ -182,7 +217,16 @@ const SCHEMA: Record<string, unknown> = {
       description: 'Anything a reader must know before trusting this.',
     },
   },
-  required: ['score', 'verdict', 'praise', 'criticism', 'controversies', 'confidence', 'caveats'],
+  required: [
+    'favourable',
+    'hostile',
+    'verdict',
+    'praise',
+    'criticism',
+    'controversies',
+    'confidence',
+    'caveats',
+  ],
   additionalProperties: false,
 }
 
@@ -194,7 +238,29 @@ You are a formatter here, not a researcher. An invented theme is indistinguishab
 
 Weight: "dominant" only when the notes present it as the main thing being said. Most themes are "occasional".
 
-Caveats: always include at least one. This reading comes from published coverage, not from a survey of constituents, and whoever reads it must be told that.`
+SCORING. Do NOT try to produce a single balanced verdict number. Answer two separate questions, each on its own, and let the arithmetic downstream find the lean:
+
+  favourable — how loud is the praise?
+  hostile    — how loud is the attack?
+
+Judge each WITHOUT looking at the other. A figure can be loudly praised and loudly attacked at once (both high), or barely mentioned either way (both low) — those are completely different situations and a single mixed score cannot tell them apart.
+
+- USE THE WHOLE 0-100 RANGE. Calibrate against these, they are not decoration:
+    0-10   near silence on that side. Reserve it for genuine absence.
+    15-30  present but generic or passing. "Experienced", "hardworking", one unattributed grumble.
+    40-60  specific and attributed. A named opponent making a checkable allegation; a named official confirming delivered work.
+    70-90  that side dominates the coverage — front pages, repeated across outlets, the main thing being said.
+  A named allegation repeated across several papers is 50-70 hostile. It is not 8. Generic praise is 15-25. It is not 2.
+- PROMINENCE, not count. One criticism the notes call dominant outbids three occasional compliments.
+- SPECIFIC beats generic. A named, checkable allegation from a named opponent is loud. "Has extensive experience" is what coverage says about everybody, and is quiet.
+- Do not round the two towards each other to seem fair. If the attack is specific and repeated and the praise is generic, the gap between the numbers should show it.
+- Both numbers LOW means nobody is saying much either way. Both numbers HIGH means a fight — loudly praised and loudly attacked at once. These are opposite situations, so do not collapse either into the middle.
+- Too thin to judge at all: set confidence "thin" and give both magnitudes honestly low, rather than inventing volume on either side.
+
+Caveats: always include at least one. This reading comes from published coverage, not from a survey of constituents, and whoever reads it must be told that.
+
+${HOUSE_STYLE}
+`
 
 export async function structureNotes(
   notes: string,
@@ -255,14 +321,57 @@ export interface SurveyInput {
  * exceeds it — the whole thing died at exactly 30.00s having done all the work
  * and returned none of it.
  */
+/**
+ * The lean, from the two magnitudes the model judged separately.
+ *
+ * Subtraction rather than a model-produced signed score, for the reason set
+ * out on the schema fields: asked for one number on -100..+100 the model
+ * parked on the midpoint whatever the evidence said. Asked how loud each side
+ * is, it discriminates — and the arithmetic cannot hedge.
+ *
+ * `null` only when the model gave neither magnitude, which means the schema
+ * was not honoured at all. Both-zero is NOT null: it is the real and useful
+ * finding that nobody is saying much either way, and the screen distinguishes
+ * "nobody is talking about you" from "we could not tell".
+ *
+ * The legacy `score` field is still read as a fallback so a cached survey
+ * written before this change keeps working.
+ */
+function deriveScore(parsed: Record<string, unknown>): {
+  score: number | null
+  favourable: number | null
+  hostile: number | null
+} {
+  const mag = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null
+
+  const favourable = mag(parsed['favourable'])
+  const hostile = mag(parsed['hostile'])
+
+  if (favourable !== null || hostile !== null) {
+    return {
+      score: Math.max(-100, Math.min(100, (favourable ?? 0) - (hostile ?? 0))),
+      favourable,
+      hostile,
+    }
+  }
+
+  const legacy = parsed['score']
+  return {
+    score:
+      typeof legacy === 'number' && Number.isFinite(legacy)
+        ? Math.max(-100, Math.min(100, Math.round(legacy)))
+        : null,
+    favourable: null,
+    hostile: null,
+  }
+}
+
 export function assembleSurvey(
   parsed: Record<string, unknown>,
   sources: { title: string; url: string | null }[],
 ): OpinionSurvey {
-  const score =
-    typeof parsed['score'] === 'number' && Number.isFinite(parsed['score'])
-      ? Math.max(-100, Math.min(100, Math.round(parsed['score'])))
-      : null
+  const { score, favourable, hostile } = deriveScore(parsed)
 
   const caveats = (Array.isArray(parsed['caveats']) ? parsed['caveats'] : []).filter(
     (c): c is string => typeof c === 'string' && c.trim().length > 0,
@@ -270,6 +379,8 @@ export function assembleSurvey(
 
   return {
     score,
+    favourable,
+    hostile,
     verdict: typeof parsed['verdict'] === 'string' ? parsed['verdict'] : '',
     praise: themes(parsed['praise']),
     criticism: themes(parsed['criticism']),
@@ -280,7 +391,7 @@ export function assembleSurvey(
         ? parsed['confidence']
         : 'thin',
     caveats: [
-      'Read from published coverage, not from a survey. It reflects what journalists, opponents and commentators have written — not a sample of your constituents.',
+      'Read from published coverage, not from a survey. It reflects what journalists, opponents and commentators have written, not a sample of your constituents.',
       ...caveats.filter((c) => !/survey|poll/i.test(c)),
     ].slice(0, 4),
     searched: true,
@@ -303,6 +414,8 @@ export function describeSubject(input: SurveyInput): string {
 export async function surveyOpinion(input: SurveyInput): Promise<OpinionSurvey> {
   const empty = (caveat: string): OpinionSurvey => ({
     score: null,
+    favourable: null,
+    hostile: null,
     verdict: '',
     praise: [],
     criticism: [],
@@ -343,16 +456,17 @@ export async function surveyOpinion(input: SurveyInput): Promise<OpinionSurvey> 
     }
   }
 
-  const score =
-    typeof parsed['score'] === 'number' && Number.isFinite(parsed['score'])
-      ? Math.max(-100, Math.min(100, Math.round(parsed['score'])))
-      : null
+  // Same derivation as the split path above — one place decides what the
+  // number means, so the two entry points cannot drift apart.
+  const { score, favourable, hostile } = deriveScore(parsed)
 
   const caveats = (Array.isArray(parsed['caveats']) ? parsed['caveats'] : [])
     .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
 
   return {
     score,
+    favourable,
+    hostile,
     verdict: typeof parsed['verdict'] === 'string' ? parsed['verdict'] : '',
     praise: themes(parsed['praise']),
     criticism: themes(parsed['criticism']),
@@ -367,7 +481,7 @@ export async function surveyOpinion(input: SurveyInput): Promise<OpinionSurvey> 
     // most needs, and a model that forgets it once would ship a poll that was
     // never taken.
     caveats: [
-      'Read from published coverage, not from a survey. It reflects what journalists, opponents and commentators have written — not a sample of your constituents.',
+      'Read from published coverage, not from a survey. It reflects what journalists, opponents and commentators have written, not a sample of your constituents.',
       ...caveats.filter((c) => !/survey|poll/i.test(c)),
     ].slice(0, 4),
     searched: true,

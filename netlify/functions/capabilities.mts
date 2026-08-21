@@ -73,7 +73,7 @@ export default async function handler(_req: Request, _context: Context): Promise
       ? `Connected to ${metaReport.page?.name || 'a page'}${
           metaReport.page?.followers ? ` (${metaReport.page.followers.toLocaleString('en-IN')} followers)` : ''
         }${meta.igUserId ? ', with Instagram linked' : ''}.${
-          metaReport.expiresAt ? ' This token expires — see below.' : ' This token does not expire.'
+          metaReport.expiresAt ? ' This token expires. See below.' : ' This token does not expire.'
         }`
       : // The FIRST problem, not a generic failure. Each one names a different
         // mistake with a different fix, and "Meta refused it" names none of them.
@@ -118,7 +118,7 @@ export default async function handler(_req: Request, _context: Context): Promise
       needs: groundedSearchAvailable() ? [] : ['GEMINI_API_KEY'],
       cost: 'free-key',
       steps: [
-        'Get a key at aistudio.google.com/apikey — free, no card.',
+        'Get a key at aistudio.google.com/apikey. It is free and needs no card.',
         'Add it as GEMINI_API_KEY.',
       ],
       status: groundedSearchAvailable() ? 'Working. Every address found is opened to check it.' : null,
@@ -139,7 +139,7 @@ export default async function handler(_req: Request, _context: Context): Promise
       id: 'meta',
       label: 'Facebook and Instagram comments',
       unlocks:
-        'The comments under YOUR OWN posts — which is the only place "what people are saying" can come from for most offices, because this is where constituents actually reply.',
+        'The comments under YOUR OWN posts, the only place "what people are saying" can come from for most offices, because this is where constituents actually reply.',
       on: metaWorking,
       needs: meta ? [] : ['META_PAGE_TOKEN', 'META_IG_USER_ID (optional)'],
       cost: 'free-with-setup',
@@ -147,9 +147,9 @@ export default async function handler(_req: Request, _context: Context): Promise
         'Facebook and Instagram publish NOTHING about an account to a server without a token. This is theirs, not ours, and no key from anywhere else changes it.',
         'You must be an admin of the Page. Create an app at developers.facebook.com, add the "Facebook Login" product, then open Graph API Explorer.',
         'Select your app, choose "Get Page Access Token", pick the Page, and grant pages_read_engagement and pages_show_list.',
-        'Exchange it for a long-lived token — a short one expires in about an hour. developers.facebook.com/tools/debug/accesstoken has the extender.',
+        'Exchange it for a long-lived token, because a short one expires in about an hour. developers.facebook.com/tools/debug/accesstoken has the extender.',
         'Add it as META_PAGE_TOKEN. For Instagram, add the linked business account id as META_IG_USER_ID.',
-        'Free. The app needs review only to read OTHER people’s pages — your own needs no review at all.',
+        'Free. The app needs review only to read OTHER people’s pages. Your own needs no review at all.',
       ],
       status: metaStatus,
       /** Everything wrong with the token, so a half-right one is diagnosable. */
@@ -169,13 +169,13 @@ export default async function handler(_req: Request, _context: Context): Promise
       id: 'provider',
       label: 'Pages you do not administer',
       unlocks:
-        'Posts and comments from a rival’s Facebook or Instagram — the pages no token here will ever authorise, because they are not yours.',
+        'Posts and comments from a rival’s Facebook or Instagram: the pages no token here will ever authorise, because they are not yours.',
       on: providerStatus().configured,
       needs: providerStatus().needs,
       cost: 'paid',
       steps: [
-        'Meta authorises a token for ONE page: the one you administer. There is no key, free or paid, that reads a page you do not own — that is Meta’s boundary, not this app’s.',
-        'The legitimate route is a data provider that already holds it and licenses access: Apify, Bright Data and Phyllo all sell this, roughly $30–100 a month.',
+        'Meta authorises a token for ONE page: the one you administer. There is no key, free or paid, that reads a page you do not own. That is Meta’s boundary, not this app’s.',
+        'The legitimate route is a data provider that already holds it and licenses access: Apify, Bright Data and Phyllo all sell this, roughly $30 to $100 a month.',
         'They must answer a small contract: POST with { kind, platform, url } and return { comments: [...] } or { posts: [...] }. Any vendor becomes a short shim in front of that.',
         'Set SOCIAL_PROVIDER_URL and SOCIAL_PROVIDER_KEY. Anything it supplies is labelled as third-party data wherever it appears, and never blended with what the platform itself told us.',
         'Scraping these pages through a logged-in throwaway account is the other way it is done, and is not supported here: it violates the platform terms, has been litigated successfully by Meta, and breaks whenever an internal identifier rotates.',

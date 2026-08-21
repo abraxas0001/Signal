@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as m from 'motion/react-m'
-import { AnimatePresence } from 'motion/react'
+import { AnimatePresence, useReducedMotion } from 'motion/react'
 import { Download, Trash2, X } from 'lucide-react'
 import type { HistoryEntry } from '@/hooks/useHistory'
 import { Button, Chip, type ChipTone } from './ui'
@@ -8,7 +8,8 @@ import { SENTIMENT_TONE } from '@shared/taxonomy'
 import type { Sentiment } from '@shared/taxonomy'
 import { ease, listItem, listStagger, spring } from '@/lib/motion'
 import { relativeTime } from '@/lib/utils'
-import { downloadWorkbook } from '@/lib/export'
+import { downloadCsv, downloadWorkbook } from '@/lib/export'
+import { ExportButton } from '@/components/ExportButton'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 const TONE_TO_CHIP: Record<string, ChipTone> = {
@@ -35,6 +36,7 @@ export function HistoryPanel({
   onClear: () => void
 }) {
   const panelRef = useRef<HTMLElement>(null)
+  const reduced = useReducedMotion() === true
 
   // aria-modal promises the rest of the page is inert; this makes that true.
   useFocusTrap(panelRef, open)
@@ -66,16 +68,33 @@ export function HistoryPanel({
             aria-modal="true"
             aria-label="History"
             className="fixed inset-x-0 bottom-0 z-50 max-h-[86svh] overflow-y-auto rounded-t-[--radius-2xl] border-t border-[var(--border)] bg-[var(--surface)] scroller"
-            initial={{ y: '100%' }}
+            initial={reduced ? false : { y: '100%' }}
             animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={spring.settle}
-            drag="y"
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0, bottom: 0.4 }}
-            onDragEnd={(_, info) => {
-              if (info.offset.y > 120 || info.velocity.y > 500) onClose()
-            }}
+            exit={reduced ? { opacity: 0 } : { y: '100%' }}
+            /**
+             * Gated here, not in CSS.
+             *
+             * index.css's `prefers-reduced-motion` block sets
+             * `animation-duration` and `transition-duration`, which are CSS
+             * properties — they do nothing to a JavaScript spring driving `y`.
+             * So this panel slid up at full travel for a reader who had asked
+             * the system for less motion, and the app looked like it ignored
+             * the setting. It did.
+             */
+            transition={reduced ? { duration: 0 } : spring.settle}
+            /**
+             * NO `drag` props.
+             *
+             * There were four here — `drag="y"`, `dragConstraints`,
+             * `dragElastic` and `onDragEnd` — and not one of them ever fired.
+             * The app mounts `<LazyMotion features={domAnimation}>`, and the
+             * package builds that bundle as `animations + gestureAnimations`;
+             * `drag` ships only in `domMax`. So this read as a
+             * swipe-to-dismiss sheet in the source and was a plain sheet on the
+             * device. Removed rather than fixed: pulling in `domMax` would put
+             * the drag and projection bundles on a mid-range Android to buy one
+             * gesture that the scrim, the close button and Escape already cover.
+             */
           >
             <div className="sticky top-0 z-10 flex justify-center bg-[var(--surface)] pb-1 pt-3">
               <div className="h-1 w-9 rounded-full bg-[var(--text-3)]/40" />
@@ -157,14 +176,16 @@ export function HistoryPanel({
                   {/* Exporting the whole history is the one that matters: it
                       turns a session of one-off lookups into the weekly sheet
                       this team already files. */}
-                  <Button
-                    variant="outline"
-                    onClick={() => void downloadWorkbook(entries.map((e) => e.report))}
-                    className="w-full"
-                  >
-                    <Download size={15} />
-                    Export all {entries.length} as CSV
-                  </Button>
+                  <ExportButton
+                    className="w-full [&>div]:w-full [&>div>button]:flex-1"
+                    size="md"
+                    count={entries.length}
+                    noun="post"
+                    run={(format) => {
+                      const reports = entries.map((e) => e.report)
+                      return format === 'csv' ? downloadCsv(reports) : downloadWorkbook(reports)
+                    }}
+                  />
                   <Button variant="ghost" onClick={onClear} className="w-full">
                     Clear all
                   </Button>

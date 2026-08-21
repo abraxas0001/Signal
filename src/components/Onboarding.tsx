@@ -26,6 +26,7 @@ import {
   skipOnboarding,
   type PersonCandidate,
 } from '@/lib/identity'
+import { useStore } from '@/lib/store'
 import { Avatar, Button, Card, Chip, Shell, SignalGlyph } from './ui'
 import { IdentityRows } from './IdentityEditor'
 import { applyDeskPlan, describePlan, planDesk } from '@/lib/autoconfig'
@@ -70,6 +71,16 @@ type Step = 'choose' | 'working' | 'review'
 
 
 export function Onboarding({ onDone }: { onDone: () => void }) {
+  /**
+   * The desk already on the device, if there is one.
+   *
+   * Distinguishes the two ways this screen is reached: a genuine first run,
+   * where there is nothing to go back to, and "edit my details" from the
+   * dashboard or Settings, which clears the onboarding stamp to get here and
+   * leaves the saved identity untouched. Only the second gets a way out.
+   */
+  const existing = useStore().identity
+
   const reduce = useReducedMotion() === true
 
   const [step, setStep] = useState<Step>('choose')
@@ -232,11 +243,28 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       <Shell className="page-end pt-[max(1.5rem,var(--sat))]">
         {/* The masthead, so this screen belongs to the same product as the one
             behind it. It was a bare form, which reads as a survey. */}
-        <div className="flex items-center gap-2.5">
-          <span className="text-[var(--accent)]">
-            <SignalGlyph size={26} />
-          </span>
-          <span className="hed text-[1.4rem] leading-none tracking-[-0.005em]">Signal</span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="text-[var(--accent)]">
+              <SignalGlyph size={26} />
+            </span>
+            <span className="hed text-[1.4rem] leading-none tracking-[-0.005em]">Signal</span>
+          </div>
+
+          {/* The way out, for somebody who already has a desk.
+              This screen is reached two ways: first run, and "edit my
+              details" — which clears the onboarding stamp to get here. On the
+              second path the only exit was a link reading "Skip for now — I
+              just want to read a link", which is first-run wording and reads
+              as though leaving would abandon the desk. It does not:
+              `skipOnboarding` re-stamps the date and never touches the saved
+              identity. So when there is a desk to go back to, say so. */}
+          {existing && (
+            <Button variant="ghost" size="sm" onClick={skip}>
+              <ArrowLeft size={15} aria-hidden />
+              Back
+            </Button>
+          )}
         </div>
 
         {step === 'review' && draft ? (
@@ -285,14 +313,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                   <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--pos)]" aria-hidden />
                   <span>
                     Everything stays on this device. Setting this up reads public pages on your
-                    behalf — it does not create an account anywhere, and nothing is uploaded.
+                    behalf. It does not create an account anywhere, and nothing is uploaded.
                   </span>
                 </p>
                 <button
                   onClick={skip}
                   className="mt-4 text-sm font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
                 >
-                  Skip for now — I just want to read a link
+                  {existing
+                    ? `Leave it as it is: keep ${existing.name}`
+                    : 'Skip for now. I just want to read a link'}
                 </button>
               </div>
             </m.header>
@@ -352,7 +382,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                         </label>
                         <p className="mt-1 text-sm leading-relaxed text-ink-2">
                           Type a name. Add the seat or the office if the name alone is
-                          common — “aruna mahabubnagar” finds what “aruna” cannot. A link to
+                          common: “aruna mahabubnagar” finds what “aruna” cannot. A link to
                           a public profile works too.
                         </p>
 
@@ -415,7 +445,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                               {results.length === 0 ? (
                                 <p className="px-4 py-3.5 text-sm leading-relaxed text-ink-2">
                                   Nobody by that name was found. Many sitting members have no
-                                  encyclopaedia article — press Enter to set the desk up under
+                                  encyclopaedia article, so press Enter to set the desk up under
                                   the name you typed.
                                 </p>
                               ) : (
@@ -579,7 +609,7 @@ function Review({
           Is this right?
         </h1>
         <p className="mt-4 max-w-[56ch] text-[15px] leading-relaxed text-ink-2">
-          Correct anything that is wrong — tap a value to edit it. What you type is treated
+          Correct anything that is wrong. Tap a value to edit it. What you type is treated
           as certain; what we read is not.
         </p>
       </m.header>
@@ -664,7 +694,7 @@ function Review({
 
       <m.div variants={fadeUp} className="flex flex-wrap items-center gap-2 border-t border-[var(--rule)] pt-5">
         <Button onClick={onConfirm} size="lg">
-          Looks right — open my dashboard
+          Looks right: open my dashboard
           <ArrowRight size={17} />
         </Button>
         <Button onClick={onBack} variant="ghost" size="lg">

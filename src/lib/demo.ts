@@ -157,7 +157,7 @@ export const DEMO_REPORT: Report = {
       severity: 'High',
       riskToGovernment: 'High',
       riskRationale:
-        'A named sitting minister, a women’s-safety angle, and a state-wide outlet carrying it — this compounds quickly if it goes unanswered.',
+        'A named sitting minister, a women’s-safety angle, and a state-wide outlet carrying it. This compounds quickly if it goes unanswered.',
       narrativeCategory: 'Emerging Trend',
       governmentResponse: { status: 'No', respondent: null, adequacy: null },
       suggestedAction:
@@ -173,7 +173,7 @@ export const DEMO_REPORT: Report = {
       suggestedChannels: ['Local press', 'Official X handle'],
       priorityTag: 'Escalate',
       counterNarrative:
-        'Answer the specific case with a verifiable fact — a complaint number and its status — rather than disputing the framing. A general denial reads as confirmation.',
+        'Answer the specific case with a verifiable fact, such as a complaint number and its status, rather than disputing the framing. A general denial reads as confirmation.',
     },
     observations: [
       'The 3.6% engagement rate is high for this account, so it is travelling further than its usual reach.',

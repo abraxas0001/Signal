@@ -236,7 +236,7 @@ const COLUMNS: Column[] = [
  */
 function internalNotes(r: GrievanceRecord): string {
   const lines: string[] = []
-  const source = [r.publisher, r.sourceUrl].filter(Boolean).join(' — ')
+  const source = [r.publisher, r.sourceUrl].filter(Boolean).join(' · ')
   if (source) lines.push(`Source: ${source}`)
   if (r.language) lines.push(`Language: ${r.language}`)
   if (r.places.length) lines.push(`Places named: ${r.places.join(JOIN)}`)
