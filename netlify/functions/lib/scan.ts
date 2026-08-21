@@ -402,13 +402,13 @@ export async function scanPortals(input: ScanInput): Promise<ScanResult> {
       const u = new URL(trimmed)
       targets.push({ label: u.hostname.replace(/^www\./, ''), url: u.toString(), isFeed: false })
     } catch {
-      notes.push(`Skipped "${trimmed.slice(0, 60)}" — that is not a web address.`)
+      notes.push(`Skipped "${trimmed.slice(0, 60)}". That is not a web address.`)
     }
   }
 
   if (targets.length > MAX_SOURCES) {
     notes.push(
-      `Read the first ${MAX_SOURCES} of ${targets.length} sources. The rest were not read at all — run the scan again with the others selected.`,
+      `Read the first ${MAX_SOURCES} of ${targets.length} sources. The rest were not read at all. Run the scan again with the others selected.`,
     )
   }
   const capped = targets.slice(0, MAX_SOURCES)
@@ -442,7 +442,7 @@ export async function scanPortals(input: ScanInput): Promise<ScanResult> {
   }
   if (input.tags.length === 0) {
     notes.push(
-      'No words were given, so this is everything the mastheads are carrying — not just your patch.',
+      'No words were given, so this is everything the mastheads are carrying, not just your patch.',
     )
   }
 

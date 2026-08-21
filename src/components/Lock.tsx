@@ -31,6 +31,8 @@ import {
   hasAccounts,
   importBackup,
   isLocked,
+  isRestoring,
+  restoreSession,
   lastWriteError,
   listAccounts,
   nameProblem,
@@ -91,6 +93,8 @@ export interface VaultState {
   accounts: AccountSummary[]
   /** Who is signed in, or null. */
   account: AccountSummary | null
+  /** A stored tab session is being checked; hold the screen until it settles. */
+  restoring: boolean
 }
 
 export function useVaultState(): VaultState {
@@ -99,6 +103,9 @@ export function useVaultState(): VaultState {
     const rerender = (): void => bump((n) => n + 1)
     const unsubscribe = subscribeVault(rerender)
     holders.add(rerender)
+    // Put this tab's session back after a reload. Safe to call from every
+    // mount: it returns immediately once the check has been made.
+    void restoreSession()
     return () => {
       unsubscribe()
       holders.delete(rerender)
@@ -110,6 +117,11 @@ export function useVaultState(): VaultState {
     exists: accounts.length > 0,
     accounts,
     account: activeAccount(),
+    // True only while a tab's stored session is being checked on load. The app
+    // waits on it rather than painting a lock screen at somebody who is about
+    // to be signed straight back in — a flash of "enter your passphrase" that
+    // vanishes is worse than a moment of nothing.
+    restoring: isRestoring(),
   }
 }
 
@@ -501,7 +513,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
                       Signal can see that this device has accounts on it but cannot read the list of
-                      them, so it will not change anything — writing over it could hide records that
+                      them, so it will not change anything. Writing over it could hide records that
                       are still here.
                     </p>
                   </div>
@@ -686,7 +698,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                     lost the thing the warning is about. */}
                 <div className="mt-5">
                   <Notice tone="warn">
-                    There is no reset. Nobody — not this office, not us — can recover a forgotten
+                    There is no reset. Nobody, including this office, can recover a forgotten
                     passphrase, and this account's records go with it. Write it down before you
                     continue.
                   </Notice>
@@ -701,7 +713,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                       setName(v)
                       if (error) setError(null)
                     }}
-                    hint="Whoever picks up this device sees this name before signing in. A first name is enough — do not describe what is inside."
+                    hint="Whoever picks up this device sees this name before signing in. A first name is enough. Do not describe what is inside."
                     autoFocus
                   />
                   <PassphraseField
@@ -794,7 +806,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
                       Phones get lost, dropped and replaced. This file is the only other copy of
-                      this account's records, and it is encrypted with the same passphrase — put it
+                      this account's records, and it is encrypted with the same passphrase. Put it
                       somewhere the office controls.
                     </p>
                   </div>
@@ -1017,7 +1029,7 @@ export function LockButton({ className }: { className?: string }) {
           setOpen(true)
         }}
         aria-label={
-          account ? `Account and sign out — signed in as ${account.name}` : 'Sign in or create an account'
+          account ? `Account and sign out, signed in as ${account.name}` : 'Sign in or create an account'
         }
         title={account ? `Signed in as ${account.name}` : 'Sign in or create an account'}
         className={
@@ -1297,7 +1309,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                         onChange={setNext}
                         onEnter={() => void doChange()}
                         autoComplete="new-password"
-                        hint={`At least ${VAULT_PARAMS.minPassphrase} characters. This changes only your account — nobody else on this device is affected.`}
+                        hint={`At least ${VAULT_PARAMS.minPassphrase} characters. This changes only your account. Nobody else on this device is affected.`}
                       />
                       <Button
                         className="w-full"
@@ -1352,7 +1364,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                         Keep this account
                       </Button>
                       <p className="text-xs leading-relaxed text-ink-3">
-                        If the passphrase for an account is lost, it cannot be deleted from here —
+                        If the passphrase for an account is lost, it cannot be deleted from here,
                         and its records are already unreadable to everyone, including us. The entry
                         stays in the list doing nothing.
                       </p>

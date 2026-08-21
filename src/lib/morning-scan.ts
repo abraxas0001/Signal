@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { readStore, update, useStore } from '@/lib/store'
 import { planDesk, applyDeskPlan, planTerms } from '@/lib/autoconfig'
 import { resolvePlace } from '@shared/places'
+import { pruneMentions } from '@shared/grievance'
 
 /**
  * The scan that runs without being asked.
@@ -33,8 +34,44 @@ import { resolvePlace } from '@shared/places'
  * without being asked.
  */
 
-/** How long a scan stays fresh. A morning paper does not change by lunchtime. */
-const FRESH_FOR_MS = 6 * 60 * 60 * 1000
+/**
+ * When the day's papers are considered out: 07:30, local time.
+ *
+ * This replaced a rolling six-hour window, which was the wrong shape for the
+ * job. A rolling window drifts: scan at 21:00 and the next automatic read is
+ * due at 03:00, so a desk opened at 07:00 was shown last night's stories under
+ * today's date. Nobody reads a morning briefing on a schedule set by when they
+ * last happened to open the app.
+ *
+ * A boundary does not drift. Everything before 07:30 belongs to yesterday's
+ * reading; the first open after it gets a fresh one, and every open after that
+ * reuses it until tomorrow.
+ */
+const SCAN_HOUR = 7
+const SCAN_MINUTE = 30
+
+/**
+ * The most recent 07:30 that has already passed.
+ *
+ * Local time on purpose. The office reads the Telugu papers over breakfast in
+ * Mahabubnagar, and a UTC boundary would fire that reading at one in the
+ * afternoon.
+ */
+export function lastScanBoundary(now: Date = new Date()): Date {
+  const boundary = new Date(now)
+  boundary.setHours(SCAN_HOUR, SCAN_MINUTE, 0, 0)
+  // Before this morning's boundary, the one that governs is yesterday's.
+  if (boundary.getTime() > now.getTime()) boundary.setDate(boundary.getDate() - 1)
+  return boundary
+}
+
+/** Whether a scan taken at `iso` is still today's reading. */
+export function scanIsCurrent(iso: string | null, now: Date = new Date()): boolean {
+  if (!iso) return false
+  const at = Date.parse(iso)
+  if (!Number.isFinite(at)) return false
+  return at >= lastScanBoundary(now).getTime()
+}
 
 /** Bound on what is kept, so the store cannot grow without limit. */
 const MAX_CANDIDATES = 60
@@ -138,8 +175,8 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
       const custom = desk.customPortalUrls ?? []
       if (portals.length === 0 && custom.length === 0) return
 
-      const since = current.lastScanAt ? Date.parse(current.lastScanAt) : 0
-      if (!force && Number.isFinite(since) && Date.now() - since < FRESH_FOR_MS) return
+      // Today's reading already exists unless we are past a boundary it predates.
+      if (!force && scanIsCurrent(current.lastScanAt ?? null)) return
 
       running.current = true
       setBusy(true)
@@ -420,23 +457,33 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
 
     void (async () => {
       try {
+        // The person and their patch. The party is left out for the same
+        // reason the news scan leaves it out: it matches the national wire and
+        // buries anything that is actually about this member.
+        const watchTerms = planTerms(
+          person,
+          resolvePlace({
+            state: current.profile?.state,
+            district: current.profile?.district,
+            constituency: current.profile?.constituency,
+          }),
+        ).persona
+
+        /**
+         * Did the server judge these, or just list them?
+         *
+         * Mirrors the server's own test — it drops terms under two characters
+         * and reads unfiltered when none survive. A thin identity can produce
+         * no usable terms, and this scan runs on its own without anybody asking
+         * for it, so an unjudged reply arriving here must not be allowed to
+         * overwrite what a model already worked out.
+         */
+        const judged = watchTerms.filter((t) => t.trim().length >= 2).length > 0
+
         const res = await fetch('/api/influencers', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            influencers: roster,
-            // The person and their patch. The party is left out for the same
-            // reason the news scan leaves it out: it matches the national wire
-            // and buries anything that is actually about this member.
-            watchTerms: planTerms(
-              person,
-              resolvePlace({
-                state: current.profile?.state,
-                district: current.profile?.district,
-                constituency: current.profile?.constituency,
-              }),
-            ).persona,
-          }),
+          body: JSON.stringify({ influencers: roster, watchTerms }),
         })
 
         const payload = (await res.json().catch(() => null)) as
@@ -457,11 +504,15 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
             const row = raw as unknown as (typeof prev.mentions)[number]
             if (!row || typeof row.postUrl !== 'string') continue
             const existing = byUrl.get(row.postUrl)
+            // The richer record wins: an unjudged listing must never downgrade
+            // a post a model already read. Same rule as the manual check in
+            // components/Influencers.tsx.
+            if (existing && !judged) continue
             byUrl.set(row.postUrl, existing ? { ...row, acknowledged: existing.acknowledged } : row)
           }
           return {
             ...prev,
-            mentions: [...byUrl.values()],
+            mentions: pruneMentions([...byUrl.values()]),
             influencersReadAt: new Date().toISOString(),
           }
         })
@@ -494,6 +545,31 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
     run()
     seedInfluencers()
     readInfluencers()
+
+    /**
+     * And again when the next 07:30 arrives, for a desk that is left open.
+     *
+     * The office computer is not closed overnight. Without this it would still
+     * be showing yesterday's papers at nine in the morning, having crossed the
+     * boundary at 07:30 with nobody there to reload it — and the one number on
+     * screen that says how current this is would be a lie by omission.
+     *
+     * One timeout, not an interval: it fires once, the scan re-runs, and the
+     * effect that scheduled it is not re-entered. A desk left open for several
+     * days therefore refreshes on the first morning and then waits to be
+     * touched, which is the honest limit of what a page can promise about a
+     * clock it does not own.
+     */
+    const nextBoundary = new Date(lastScanBoundary())
+    nextBoundary.setDate(nextBoundary.getDate() + 1)
+    const wait = nextBoundary.getTime() - Date.now()
+    // setTimeout overflows past ~24.8 days; a day is comfortably inside it.
+    const timer = window.setTimeout(() => {
+      seedNewsSources()
+      run()
+      readInfluencers()
+    }, Math.max(1000, wait))
+    return () => window.clearTimeout(timer)
     // `run` and `seedInfluencers` are stable and read the store themselves;
     // depending on the store here would re-fire the effect on every write the
     // scan itself makes.

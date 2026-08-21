@@ -197,13 +197,25 @@ function baseName(reports: Report[]): string {
   const stamp = new Date().toISOString().slice(0, 10)
   const first = reports[0]
   if (reports.length === 1 && first) {
-    const platform = first.snapshot.platform.toLowerCase().replace(/[^a-z]/g, '')
-    const who = (first.snapshot.author.handle ?? first.snapshot.author.name ?? 'post')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .slice(0, 24)
-      .replace(/^-|-$/g, '')
-    return `signal-${platform}-${who || 'post'}-${stamp}`
+    // Every field here is read defensively even though the types say it cannot
+    // be missing. These reports come back out of localStorage, where a row
+    // written by an older build has whatever shape that build wrote — and the
+    // failure mode was the worst kind: `.toLowerCase()` on undefined threw
+    // inside the click handler, the promise rejected into nothing, and the
+    // button did nothing at all with no error anywhere the office could see.
+    const slug = (value: unknown, fallback: string): string => {
+      const text = typeof value === 'string' ? value : ''
+      const cleaned = text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .slice(0, 24)
+        .replace(/^-|-$/g, '')
+      return cleaned || fallback
+    }
+
+    const platform = slug(first.snapshot?.platform, 'post')
+    const who = slug(first.snapshot?.author?.handle ?? first.snapshot?.author?.name, 'post')
+    return `signal-${platform}-${who}-${stamp}`
   }
   return `signal-${reports.length}-posts-${stamp}`
 }

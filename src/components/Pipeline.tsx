@@ -59,7 +59,7 @@ export function Pipeline({
             exit={{ opacity: 0, y: -8 }}
             transition={ease.out}
           >
-            {overrun ? 'Almost there — this one’s dense' : (active?.activeLabel ?? 'Finishing up')}
+            {overrun ? 'Almost there. This one’s dense' : (active?.activeLabel ?? 'Finishing up')}
           </m.p>
         </AnimatePresence>
         <AnimatePresence>

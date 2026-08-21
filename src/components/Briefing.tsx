@@ -82,9 +82,20 @@ type Destination =
 export function Briefing({
   onNavigate,
   onEditIdentity,
+  onRead,
 }: {
   /** The second argument names an issue to open on arrival. */
   onNavigate: (to: Destination, issueId?: string) => void
+  /**
+   * Run the full analysis on one post, in the app.
+   *
+   * Every post on this screen used to be a link straight out to YouTube or
+   * Facebook. That hands the reader back to the platform to do the reading
+   * themselves — which is the work this desk exists to have already done — and
+   * the office loses the translation, the sentiment, the comment reading and
+   * the fake-news check on the way out of the door.
+   */
+  onRead: (postUrl: string) => void
   /**
    * Reopens the setup screen.
    *
@@ -140,9 +151,19 @@ export function Briefing({
                 : undefined
             }
             action={
-              b.mood.commentsRead > 0 ? (
-                <LinkOut label="Per account" onClick={go('accounts')} />
-              ) : undefined
+              /* "Against a rival" is unconditional, and that is the point: the
+                 compare screen lives in the desktop sidebar, and the sidebar
+                 is `lg:` and up. On the mid-range Android this product is
+                 actually used on there was no route to it from anywhere —
+                 the tab bar has five slots and none of them is Compare, and
+                 nothing else on this screen linked it. A feature reachable
+                 only on a laptop is a feature this office does not have. */
+              <span className="flex items-center gap-3">
+                {b.mood.commentsRead > 0 && (
+                  <LinkOut label="Per account" onClick={go('accounts')} />
+                )}
+                <LinkOut label="Against a rival" onClick={go('compare')} />
+              </span>
             }
           />
           {/* Two readings, never averaged. Comments are the public in its own
@@ -159,6 +180,8 @@ export function Briefing({
           ) : opinion.survey || opinion.busy ? (
             <OpinionPanel
               survey={opinion.survey}
+              person={b.identity}
+              onOpenActions={go('actions')}
               busy={opinion.busy}
               stage={opinion.stage}
               error={opinion.error}
@@ -199,7 +222,8 @@ export function Briefing({
           <VoicePanel
             voice={b.voice}
             busy={scan.influencersBusy}
-            onOpenInfluencers={go('influencers')}
+            onOpenInfluencers={go("influencers")}
+            onRead={onRead}
           />
         </m.section>
 
@@ -232,7 +256,7 @@ export function Briefing({
               <ul className="grid gap-3 lg:grid-cols-2">
                 {b.news.map((item) => (
                   <li key={item.mention.id}>
-                    <NewsCard item={item} />
+                    <NewsCard item={item} onRead={onRead} />
                   </li>
                 ))}
               </ul>
@@ -267,7 +291,7 @@ export function Briefing({
               }
               hint={
                 b.issues[0]?.tallied
-                  ? 'Counted by topic — these have not been grouped into issues yet, so a count is a count of items, not of people.'
+                  ? 'Counted by topic. These have not been grouped into issues yet, so a count is a count of items, not of people.'
                   : 'Ranked by severity first, then by how many items each one covers.'
               }
               action={<LinkOut label="Grievance desk" onClick={go('grievances')} />}
@@ -295,7 +319,7 @@ export function Briefing({
             <Heading
               id="lines-heading"
               title="Lines you could use today"
-              hint="Word for word, as written against the story named under each one. Nothing here is stitched together."
+              hint="Word for word, against the story named under each."
             />
             <Card>
               <ol className="space-y-4">
@@ -333,7 +357,7 @@ export function Briefing({
             <Heading
               id="do-heading"
               title="What to do about it"
-              hint="Suggested by the reader that went through the coverage. Nothing here has been actioned until you say so."
+              hint="Nothing is actioned until you add it."
               action={<LinkOut label="Action list" onClick={go('actions')} />}
             />
             <ul className="stack-tight">
@@ -387,8 +411,7 @@ function Greeting({
             {greeting}.
           </h1>
           <p className="mt-2 max-w-[56ch] text-sm leading-relaxed text-ink-2">
-            This desk has not been told whose it is, so the news scan has nothing to search
-            on and this screen cannot say what is being said about you.
+            "Nobody has been set up yet, so there is nothing to scan for."
           </p>
         </div>
         <Button onClick={onSetUp} className="shrink-0">
@@ -420,15 +443,25 @@ function Greeting({
               {firstName ? `, ${firstName}` : ''}.
             </h1>
 
+            {/* Pills, not a rule-separated run.
+                Each fact used to carry its own LEADING divider, so the moment
+                the row wrapped, a stray vertical rule started the next line
+                with nothing before it. On a phone this line always wraps: role,
+                seat, party and age do not fit on 390px. Giving each fact its
+                own container removes the possibility rather than tuning the
+                breakpoint, and reads as a set of facts rather than as one
+                sentence that has been chopped up. */}
             {facts.length > 0 && (
-              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-2">
-                {facts.map((fact, i) => (
-                  <span key={fact} className="flex items-center gap-2">
-                    {i > 0 && <span aria-hidden className="h-3 w-px bg-[var(--rule)]" />}
+              <ul className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {facts.map((fact) => (
+                  <li
+                    key={fact}
+                    className="rounded-[--radius-pill] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1 text-xs text-ink-2"
+                  >
                     {fact}
-                  </span>
+                  </li>
                 ))}
-              </p>
+              </ul>
             )}
           </div>
         </div>
@@ -441,7 +474,7 @@ function Greeting({
                   href={handle.url}
                   target="_blank"
                   rel="noreferrer noopener"
-                  title={`${handle.platform} — @${handle.handle}`}
+                  title={`${handle.platform}: @${handle.handle}`}
                   className="inline-flex min-h-9 items-center gap-1.5 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 text-xs text-ink-2 transition-colors hover:text-ink"
                 >
                   {handle.connected && <BadgeCheck size={13} className="text-[var(--pos)]" aria-hidden />}
@@ -545,7 +578,7 @@ function MoodPanel({ mood, onOpenAccounts }: { mood: Mood; onOpenAccounts: () =>
       <Empty
         icon={<UserRound size={18} aria-hidden />}
         title="No account of yours is being read"
-        body="This is measured from the comments people leave under your own posts. Add your handles on the Accounts screen and mark them as yours — connecting one properly reads more than a public page shows."
+        body="Add your handles on the Accounts screen and mark them as yours."
         action={
           <Button size="sm" onClick={onOpenAccounts}>
             <Plus size={15} />
@@ -571,7 +604,7 @@ function MoodPanel({ mood, onOpenAccounts }: { mood: Mood; onOpenAccounts: () =>
       <Empty
         icon={<Lock size={18} aria-hidden />}
         title={`Your ${platforms.join(' and ')} ${mood.gated.length === 1 ? 'account is added but cannot be read' : 'accounts are added but cannot be read'}`}
-        body={`${platforms.join(' and ')} show a server nothing at all about an account — no posts and no comments — until the account itself authorises it. Adding the handle is not enough, and nothing you do on this screen will change that. It needs connecting on the Settings screen, which needs an app registered with the platform.`}
+        body={`${platforms.join(' and ')} show a server nothing at all about an account, not posts and not comments, until the account itself authorises it. Adding the handle is not enough, and nothing you do on this screen will change that. It needs connecting on the Settings screen, which needs an app registered with the platform.`}
         action={
           <Button size="sm" variant="outline" onClick={onOpenAccounts}>
             <Plus size={15} />
@@ -587,7 +620,7 @@ function MoodPanel({ mood, onOpenAccounts }: { mood: Mood; onOpenAccounts: () =>
       <Empty
         icon={<MessageSquare size={18} aria-hidden />}
         title={`${mood.unmeasured.length} of your ${mood.unmeasured.length === 1 ? 'account is' : 'accounts are'} not read yet`}
-        body="Reading the comments is the most expensive thing this app does — several live fetches and a model call per account — so it runs when you ask for it rather than on its own."
+        body="Comment reading runs when you ask for it, not on its own."
         action={
           <Button size="sm" onClick={onOpenAccounts}>
             <RefreshCw size={15} />
@@ -725,7 +758,7 @@ function MoodPanel({ mood, onOpenAccounts }: { mood: Mood; onOpenAccounts: () =>
       {mood.gated.length > 0 && (
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
           Your {[...new Set(mood.gated.map((h) => h.platform))].join(' and ')}{' '}
-          {mood.gated.length === 1 ? 'account is' : 'accounts are'} not included — those
+          {mood.gated.length === 1 ? 'account is' : 'accounts are'} not included, because those
           platforms publish no comments to a server until the account authorises it.
         </p>
       )}
@@ -788,8 +821,7 @@ function ScanPanel({
           <div className="min-w-0">
             <p className="text-[15px] font-semibold">Reading this morning&rsquo;s papers…</p>
             <p className="mt-0.5 text-sm text-ink-2">
-              Checking each masthead&rsquo;s front page for your name. No model is being
-              called, so this costs nothing.
+              "Checking each front page for your name."
             </p>
           </div>
         </div>
@@ -830,7 +862,7 @@ function ScanPanel({
         scan.lastAt
           ? `${scan.sources.length} mastheads were read ${relativeTime(scan.lastAt)}${
               dead.length > 0
-                ? `, though ${dead.length} of them did not answer — so this is not a complete picture.`
+                ? `, though ${dead.length} of them did not answer, so this is not a complete picture.`
                 : '. That is a real quiet morning, not a broken scan.'
             }`
           : 'The papers have not been read yet this morning.'
@@ -870,7 +902,7 @@ function FoundToday({
           </p>
           <p className="mt-1 text-sm leading-relaxed text-ink-2">
             Found by matching your name and seat against each masthead&rsquo;s front page.
-            Nobody has read them yet — what they actually say, whether any of it is
+            Nobody has read them yet. What they actually say, whether any of it is
             questionable, and what to do about it all come from reading them.
           </p>
         </div>
@@ -911,7 +943,7 @@ function PerceptionPanel({
       <Empty
         icon={<UserRound size={18} aria-hidden />}
         title="Nothing has been read about you yet"
-        body="This reads two things: the comments under your own posts, and how the press is covering you. Neither has anything in it yet — add your accounts, or read the stories the morning scan finds."
+        body="Add your accounts, or read the stories the morning scan finds."
         action={
           <Button size="sm" onClick={onOpenAccounts}>
             <Plus size={15} />
@@ -988,7 +1020,7 @@ function PerceptionPanel({
           <ScanEye size={15} className="mt-0.5 shrink-0" aria-hidden />
           <span>
             {perception.suspect} of these {perception.suspect === 1 ? 'was' : 'were'} flagged as
-            questionable — worth a person checking before anything is answered.
+            questionable, and worth a person checking before anything is answered.
           </span>
         </p>
       )}
@@ -1014,7 +1046,7 @@ function PerceptionPanel({
 
       {perception.thin && (
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
-          Only {perception.total} {perception.total === 1 ? 'story' : 'stories'} — a handful of
+          Only {perception.total} {perception.total === 1 ? 'story' : 'stories'}: a handful of
           headlines, not a climate.
         </p>
       )}
@@ -1047,10 +1079,12 @@ function VoicePanel({
   voice,
   busy,
   onOpenInfluencers,
+  onRead,
 }: {
   voice: InfluencerVoice
   busy: boolean
   onOpenInfluencers: () => void
+  onRead: (postUrl: string) => void
 }) {
   if (busy) {
     return (
@@ -1079,7 +1113,7 @@ function VoicePanel({
         }
         body={
           voice.neverRun
-            ? 'The accounts with an audience in your seat are on the roster. Reading what they have posted about you takes a model call per account, so it runs once a day rather than on every visit.'
+            ? 'The accounts in your seat are on the roster. Reading them runs once a day.'
             : 'The accounts being watched have posted nothing that names you in the last week. That is a real quiet week, not a broken check.'
         }
         action={
@@ -1144,16 +1178,16 @@ function VoicePanel({
           can answer; a fabricated claim is a different problem with a clock on
           it. */}
       {voice.suspect.map((v) => (
-        <VoiceCard key={`${v.postUrl}-suspect`} voice={v} tone="suspect" />
+        <VoiceCard key={`${v.postUrl}-suspect`} voice={v} tone="suspect" onRead={onRead} />
       ))}
 
       {voice.critical.slice(0, 3).map((v) =>
-        v.suspect ? null : <VoiceCard key={v.postUrl} voice={v} tone="critical" />,
+        v.suspect ? null : <VoiceCard key={v.postUrl} voice={v} tone="critical" onRead={onRead} />,
       )}
 
       {voice.critical.length === 0 &&
         voice.supportive.slice(0, 2).map((v) => (
-          <VoiceCard key={v.postUrl} voice={v} tone="supportive" />
+          <VoiceCard key={v.postUrl} voice={v} tone="supportive" onRead={onRead} />
         ))}
 
       {/* About the seat rather than the member. Kept apart and labelled, never
@@ -1180,14 +1214,36 @@ function VoicePanel({
                   {v.followers ? <span>· {full(v.followers)} followers</span> : null}
                   {v.postedAt ? <span>· {relativeTime(v.postedAt)}</span> : null}
                 </p>
-                <a
-                  href={v.postUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="mt-1 block text-sm leading-relaxed text-ink-2 underline decoration-[var(--rule)] underline-offset-4 hover:decoration-[var(--accent)]"
+                {/* The headline reads it here; the small link beside it still
+                    goes to the platform, because sometimes the original is
+                    what you want. The default is the one that keeps the
+                    reading in the app. */}
+                <button
+                  type="button"
+                  onClick={() => onRead(v.postUrl)}
+                  className="mt-1 block w-full text-left text-sm leading-relaxed text-ink-2 underline decoration-[var(--rule)] underline-offset-4 hover:decoration-[var(--accent)] hover:text-ink"
                 >
                   {v.excerpt}
-                </a>
+                </button>
+                <span className="mt-1 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onRead(v.postUrl)}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
+                  >
+                    <ScanEye size={12} aria-hidden />
+                    Read it fully
+                  </button>
+                  <a
+                    href={v.postUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
+                  >
+                    <ExternalLink size={11} aria-hidden />
+                    open
+                  </a>
+                </span>
               </li>
             ))}
           </ul>
@@ -1200,9 +1256,11 @@ function VoicePanel({
 function VoiceCard({
   voice,
   tone,
+  onRead,
 }: {
   voice: VoiceOf
   tone: 'suspect' | 'critical' | 'supportive'
+  onRead: (postUrl: string) => void
 }) {
   return (
     <Card
@@ -1242,15 +1300,34 @@ function VoiceCard({
       </div>
 
       <p className="mt-2.5 text-sm leading-relaxed text-ink-2">
+        <button
+          type="button"
+          onClick={() => onRead(voice.postUrl)}
+          className="text-left underline decoration-[var(--rule)] underline-offset-4 hover:text-ink hover:decoration-[var(--accent)]"
+        >
+          {voice.excerpt}
+        </button>
+      </p>
+
+      <span className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onRead(voice.postUrl)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
+        >
+          <ScanEye size={12} aria-hidden />
+          Read it fully
+        </button>
         <a
           href={voice.postUrl}
           target="_blank"
           rel="noreferrer noopener"
-          className="underline decoration-[var(--rule)] underline-offset-4 hover:decoration-[var(--accent)]"
+          className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
         >
-          {voice.excerpt}
+          <ExternalLink size={11} aria-hidden />
+          open
         </a>
-      </p>
+      </span>
 
       {voice.suspect && voice.fakeNote && (
         <p className="mt-3 border-t border-[var(--rule)] pt-3 text-sm leading-relaxed text-ink-2">
@@ -1278,7 +1355,7 @@ const STANCE_LABEL: Record<string, string> = {
   unclear: 'Stance unclear',
 }
 
-function NewsCard({ item }: { item: NewsItem }) {
+function NewsCard({ item, onRead }: { item: NewsItem; onRead: (postUrl: string) => void }) {
   const { mention, suspect } = item
   const when = mention.publishedAt ?? mention.seenAt
 
@@ -1308,15 +1385,38 @@ function NewsCard({ item }: { item: NewsItem }) {
       </div>
 
       <h3 className="mt-2.5 text-[15px] font-semibold leading-snug">
+        <button
+          type="button"
+          onClick={() => onRead(mention.url)}
+          className="text-left underline decoration-[var(--rule)] underline-offset-4 hover:decoration-[var(--accent)]"
+        >
+          {mention.headline}
+        </button>
+      </h3>
+
+      {/* The full reading here, the original a tap away. A headline that only
+          ever led out to the publisher meant the office did its own reading on
+          the publisher's site — losing the translation, the stance and the
+          fake-news check this card is announcing. */}
+      <span className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onRead(mention.url)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
+        >
+          <ScanEye size={12} aria-hidden />
+          Read it fully
+        </button>
         <a
           href={mention.url}
           target="_blank"
           rel="noreferrer noopener"
-          className="underline decoration-[var(--rule)] underline-offset-4 hover:decoration-[var(--accent)]"
+          className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
         >
-          {mention.headline}
+          <ExternalLink size={11} aria-hidden />
+          open
         </a>
-      </h3>
+      </span>
 
       {mention.summary && (
         <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-ink-2">{mention.summary}</p>

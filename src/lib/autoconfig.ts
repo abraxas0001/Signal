@@ -253,7 +253,7 @@ export function planDesk(identity: Identity): DeskPlan {
     )
   } else if (portals.length === 0) {
     notes.push(
-      `No mastheads are on file for ${place.state} yet. The desk still works — add the papers you read by address on the grievance desk.`,
+      `No mastheads are on file for ${place.state} yet. The desk still works. Add the papers you read by address on the grievance desk.`,
     )
   } else {
     const district = portals.filter((p) => p.reach === 'district').length
@@ -270,7 +270,7 @@ export function planDesk(identity: Identity): DeskPlan {
 
   if (identity.handles.length === 0) {
     notes.push(
-      'No social accounts were found on the profile page. Add them on the Accounts screen and mark them as yours — the comments under your own posts are where "what people are saying" comes from.',
+      'No social accounts were found on the profile page. Add them on the Accounts screen and mark them as yours. The comments under your own posts are where "what people are saying" comes from.',
     )
   }
 

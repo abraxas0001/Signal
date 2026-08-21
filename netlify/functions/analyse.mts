@@ -84,7 +84,7 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
 
   // A screenshot arrives as a data URI and is easily the biggest field.
   if (body.screenshot && body.screenshot.length > 7_000_000) {
-    return Response.json({ error: 'That screenshot is too large — keep it under 5 MB' }, { status: 413 })
+    return Response.json({ error: 'That screenshot is too large. Keep it under 5 MB' }, { status: 413 })
   }
 
   // Pasted text goes verbatim into the prompt, so it is billed per character.
@@ -92,7 +92,7 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
   // keeps a paste from becoming an open-ended bill.
   if (body.manualText && body.manualText.length > 20_000) {
     return Response.json(
-      { error: 'That text is too long — paste up to about 20,000 characters.' },
+      { error: 'That text is too long. Paste up to about 20,000 characters.' },
       { status: 413 },
     )
   }

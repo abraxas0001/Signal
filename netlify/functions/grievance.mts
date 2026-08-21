@@ -117,7 +117,7 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
   const urls = candidates.slice(0, MAX_BATCH)
   const truncated = candidates.length - urls.length
   const note = truncated
-    ? `Only the first ${MAX_BATCH} links were read. The other ${truncated} were not — send them as a second batch.`
+    ? `Only the first ${MAX_BATCH} links were read. The other ${truncated} were not. Send them as a second batch.`
     : null
 
   const wantsStream =

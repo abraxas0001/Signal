@@ -300,7 +300,7 @@ export function useAnalysis() {
               durationMs: 0,
               heuristicOnly: false,
               incomplete:
-                'The figures below were measured from the post. The written analysis did not finish in time, so it is left out rather than guessed at — you can run it again for the interpretation.',
+                'The figures below were measured from the post. The written analysis did not finish in time, so it is left out rather than guessed at. You can run it again for the interpretation.',
             },
           },
         }

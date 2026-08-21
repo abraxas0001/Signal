@@ -9,7 +9,7 @@ import {
 import { infoboxFor, tidyOffice, type InfoboxFacts } from './infobox'
 import { discoverHandlesGrounded, groundedSearchAvailable } from './grounded'
 import { tidyParty, partyAbbreviation } from '../../../shared/identity'
-import { resolvePlace } from '../../../shared/places'
+import { resolvePlace, stateCorroborated } from '../../../shared/places'
 import { parseMetadata } from './metadata'
 import { complete } from './openai-compat'
 import { resolveProviders } from './provider'
@@ -543,7 +543,7 @@ export async function resolveIdentity(input: ResolveInput): Promise<ResolveResul
       facts = await wikidataFacts(qid)
       if (facts?.hasOnlyFormer && !box?.current) {
         notes.push(
-          'The public record lists only offices this person has left, so their current role and seat were read from the article instead. Worth confirming — an election usually explains this, and the news scan is keyed on the seat.',
+          'The public record lists only offices this person has left, so their current role and seat were read from the article instead. Worth confirming: an election usually explains this, and the news scan is keyed on the seat.',
         )
       }
       if (facts?.dateOfDeath) {
@@ -840,11 +840,27 @@ export async function resolveIdentity(input: ResolveInput): Promise<ResolveResul
 
   const finalState = place.state ?? state
   const finalDistrict = place.district ?? district
-  if (place.state && place.state !== state) {
+  /**
+   * An exact hit in the region registry is confirmation, whether or not it
+   * changed the value.
+   *
+   * These two conditions used to be `place.state !== state`, so confidence was
+   * raised only when the registry CORRECTED the guess. When it agreed with it,
+   * nothing happened and a perfectly good value stayed marked low — which is
+   * how an MP for Mahabubnagar was told on the dashboard that her state "could
+   * not be confirmed" while the registry was sitting there with an exact match
+   * for it. Agreement between two independent sources is not weaker evidence
+   * than a correction by one of them; it is stronger.
+   */
+  if (
+    place.state &&
+    (place.state !== state ||
+      stateCorroborated(place.state, place.district ?? district, finalConstituency))
+  ) {
     confidence.state = 'high'
     origin.state = origin.state === 'stated' ? 'stated' : 'profile-page'
   }
-  if (place.district && place.district !== district) {
+  if (place.district && place.districtMatch?.confidence === 'exact') {
     confidence.district = 'high'
     origin.district = origin.district === 'stated' ? 'stated' : 'profile-page'
   }

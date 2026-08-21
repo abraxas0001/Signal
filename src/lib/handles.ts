@@ -318,7 +318,23 @@ export function saveRivals(handleId: string, cache: RivalCache): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface Standing {
-  score: number
+  /**
+   * −100 to +100, or null when no score was produced.
+   *
+   * Null and zero are different claims and must stay apart: zero says the
+   * coverage read is genuinely balanced, null says nothing was scored.
+   */
+  score: number | null
+  /**
+   * The two magnitudes the score is the difference of, 0–100 each.
+   *
+   * Without them a zero is unreadable: loudly praised AND loudly attacked
+   * comes to zero, and so does nobody mentioning you at all. Those are
+   * opposite findings and an office needs to know which one it is looking at.
+   * Null on readings taken before these were recorded.
+   */
+  favourable?: number | null
+  hostile?: number | null
   label: string
   positive: number
   negative: number
@@ -329,6 +345,115 @@ export interface Standing {
   commentsRead: number
   postsRead: number
   readAt: string
+  /**
+   * Where the reading came from, and it has to be on the record because the two
+   * are not the same claim.
+   *
+   * 'comments' means people's own words under this account's posts. 'record'
+   * means published coverage about the person — editorials, reporting,
+   * opposition statements — which is what the grounded survey reads when no
+   * comments are reachable, and that is the usual case: Facebook, Instagram and
+   * LinkedIn hand a server nothing without a page token the office rarely has.
+   *
+   * A record reading is not a sample of constituents and must never be shown as
+   * one. Older cached entries have no field; they were all comment readings, so
+   * an absent value reads as 'comments'.
+   */
+  source?: 'comments' | 'record'
+  /** Publishers the record reading rested on. Empty for a comment reading. */
+  sources?: { title: string; url: string | null }[]
+  /** What the reader has to be told before trusting it. */
+  caveats?: string[]
+}
+
+/**
+ * Turn a grounded opinion survey into a Standing.
+ *
+ * The two readings answer the same question from different evidence, so they
+ * share a shape and the screen renders one component. What they do NOT share is
+ * a positive/neutral/negative split: that comes from counting comments, and a
+ * reading of published coverage has nothing to count. Those three fields are
+ * therefore left at zero and the UI draws no bar for a record reading — rather
+ * than deriving a plausible-looking 60/25/15 from the score, which would be a
+ * number nobody measured, presented in the one place on this screen that looks
+ * most like a measurement.
+ */
+export function standingFromSurvey(survey: Record<string, unknown>): Standing {
+  const themes = (raw: unknown): string[] =>
+    (Array.isArray(raw) ? raw : [])
+      .filter((t): t is Record<string, unknown> => typeof t === 'object' && t !== null)
+      .map((t) => {
+        const label = typeof t['label'] === 'string' ? t['label'] : ''
+        const who = typeof t['who'] === 'string' && t['who'].trim() ? t['who'].trim() : ''
+        return who ? `${label} (${who})` : label
+      })
+      .filter(Boolean)
+
+  /**
+   * Null when the survey returned no score at all — NOT zero.
+   *
+   * Zero on this scale is a real finding: it means the coverage read is
+   * genuinely balanced between praise and criticism. Falling back to it when
+   * the model returned nothing made those two states identical on screen, and
+   * the app then labelled a missing reading "Coverage divided" — a verdict
+   * nobody reached, in the one place on the card that looks most like a
+   * measurement.
+   */
+  const score =
+    typeof survey['score'] === 'number' && Number.isFinite(survey['score'])
+      ? Math.max(-100, Math.min(100, Math.round(survey['score'])))
+      : null
+
+  const mag = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null
+  const favourable = mag(survey['favourable'])
+  const hostile = mag(survey['hostile'])
+
+  /**
+   * "Divided" and "barely covered" both land near zero and are opposite
+   * findings, so the label distinguishes them from the magnitudes rather than
+   * from the score. Below 15 on both sides nobody is saying much at all, and
+   * calling that "divided" credits the coverage with a balance it never had.
+   */
+  const quiet = favourable !== null && hostile !== null && favourable < 15 && hostile < 15
+
+  return {
+    score,
+    favourable,
+    hostile,
+    // Named for coverage, not for a crowd. "Mostly warm" is a claim about what
+    // has been written; "Mostly positive" would be read as a claim about voters.
+    label:
+      score === null
+        ? 'Not scored'
+        : quiet
+          ? 'Barely covered'
+          : score > 25
+            ? 'Coverage mostly warm'
+            : score < -25
+              ? 'Coverage mostly hostile'
+              : 'Coverage divided',
+    positive: 0,
+    neutral: 0,
+    negative: 0,
+    praise: themes(survey['praise']),
+    criticism: [...themes(survey['criticism']), ...themes(survey['controversies'])],
+    summary: typeof survey['verdict'] === 'string' ? survey['verdict'] : '',
+    commentsRead: 0,
+    postsRead: 0,
+    readAt: new Date().toISOString(),
+    source: 'record',
+    sources: (Array.isArray(survey['sources']) ? survey['sources'] : [])
+      .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+      .map((x) => ({
+        title: typeof x['title'] === 'string' ? x['title'] : '',
+        url: typeof x['url'] === 'string' ? x['url'] : null,
+      }))
+      .filter((x) => x.title),
+    caveats: (Array.isArray(survey['caveats']) ? survey['caveats'] : []).filter(
+      (c): c is string => typeof c === 'string' && c.trim().length > 0,
+    ),
+  }
 }
 
 const STANDING_KEY = (): string => scopedKey('signal.standing.v1')

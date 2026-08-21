@@ -23,7 +23,8 @@ import { CommentsPanel } from './CommentsPanel'
 import { CivicPanel } from './CivicPanel'
 import { ExtractionNotice } from './ExtractionNotice'
 import { compact, cn } from '@/lib/utils'
-import { downloadWorkbook } from '@/lib/export'
+import { downloadCsv, downloadWorkbook } from '@/lib/export'
+import { ExportButton } from '@/components/ExportButton'
 import { fadeUp, listItem, listStagger, spring, haptic } from '@/lib/motion'
 
 /**
@@ -437,15 +438,12 @@ export function ReportView({
           </Button>
           {/* The product replaces a spreadsheet, so getting a row back out of
               it is not a nice-to-have — it is how this fits their process. */}
-          <Button
-            variant="outline"
-            onClick={() => void downloadWorkbook([report])}
-            aria-label="Download this report as a spreadsheet"
-            className="shrink-0 px-4"
-          >
-            <Download size={16} />
-            CSV
-          </Button>
+          <ExportButton
+            className="shrink-0"
+            count={1}
+            noun="post"
+            run={(format) => (format === 'csv' ? downloadCsv([report]) : downloadWorkbook([report]))}
+          />
         </div>
       </div>
     </m.div>

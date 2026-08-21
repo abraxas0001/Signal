@@ -8,6 +8,7 @@ import { stateOfCity } from '../../../shared/regions'
 import type { FakeAssessment, Influencer, InfluencerMention } from '../../../shared/grievance'
 import { FAKE_NEWS_TYPES, FAKE_SUSPICION, SENTIMENTS } from '../../../shared/taxonomy'
 import type { FakeNewsType, FakeSuspicion, Platform } from '../../../shared/taxonomy'
+import { HOUSE_STYLE } from './house-style'
 
 /**
  * The influencer watch: who moves opinion in a constituency, and what they have
@@ -291,6 +292,53 @@ function handleFromPath(path: string | null): string | null {
  * subject this month, which is how a district bureau or a state news channel
  * that never says "Eluru" in its title still ends up on the list.
  */
+/**
+ * Channels YouTube itself returns for a person's name.
+ *
+ * Exported for the account search box, which needs the one thing Wikidata
+ * cannot give it. Wikidata records a politician's social accounts only when
+ * somebody has added them, and for most sitting members nobody has — D. K.
+ * Aruna resolves with a Facebook page and nothing else, which reads on screen
+ * as "she is not on YouTube" when the truth is "nobody typed it into Wikidata".
+ *
+ * YouTube is the one gated-looking platform that answers a keyless search from
+ * a server, so this closes that gap with evidence rather than recall: every
+ * channel returned is a channel YouTube listed for the query and therefore
+ * exists. What it does NOT establish is that the channel is the person's —
+ * a name search returns fan channels, news channels covering them, and
+ * impersonators alongside the real one. The caller must present these as
+ * candidates to check, never as "their account", which is why this returns
+ * what YouTube said rather than a verdict.
+ *
+ * Deliberately does not fetch each channel to verify it: that is a ~300KB
+ * InnerTube call per candidate, and the name and handle are what a person
+ * needs in order to choose. Real figures arrive when the account is added and
+ * refreshed, through the same path every other tracked account uses.
+ */
+export async function searchYouTubeChannels(
+  query: string,
+  limit = 6,
+): Promise<{ channelId: string; handle: string | null; name: string | null }[]> {
+  const q = sanitise(query, 120)
+  if (q.length < 3) return []
+  try {
+    const found = await searchYouTube(q, 'channels')
+    const seen = new Set<string>()
+    const out: { channelId: string; handle: string | null; name: string | null }[] = []
+    for (const s of found) {
+      if (seen.has(s.channelId)) continue
+      seen.add(s.channelId)
+      out.push({ channelId: s.channelId, handle: s.handle, name: s.name })
+      if (out.length >= limit) break
+    }
+    return out
+  } catch {
+    // A search that will not answer must not take the name lookup down with
+    // it: whatever the public record gave is still worth showing.
+    return []
+  }
+}
+
 async function searchYouTube(query: string, mode: 'channels' | 'videos'): Promise<Sighting[]> {
   const res = await fetchJson<unknown>(SEARCH_URL, {
     timeout: 10_000,
@@ -1021,7 +1069,10 @@ Rules that matter:
 - Telugu, Hindi and English count exactly the same. Read them.
 - These are short listings — a video title, or the opening of a post. Judge only what is in front of you. When it is too short to tell, stance is "unclear".
 - fakeSuspicion: "No" unless the post makes a checkable factual claim that looks fabricated, doctored, recycled or impersonated. Most posts are "No". You are flagging something for a person to look at, not returning a verdict.
-- fakeNote: one line naming what would need checking. Empty when fakeSuspicion is "No".`
+- fakeNote: one line naming what would need checking. Empty when fakeSuspicion is "No".
+
+${HOUSE_STYLE}
+`
 
 const SCORE_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -1116,24 +1167,49 @@ export async function scanMentions(
     // A single character matches most Telugu posts by accident.
     .filter((t) => t.length >= 2)
     .slice(0, MAX_TERMS)
-  if (!terms.length) {
-    throw new Error(
-      'No watch terms are set, so there is nothing to match a post against. Add the names and spellings that mean "this is about us" to the office profile, then check again.',
-    )
-  }
+  /**
+   * No search words is a real state, not an error.
+   *
+   * This used to throw, and the screen told the office to go and add a word
+   * before it would read anything at all. That was the wrong call. Reading an
+   * account and matching words against it are two separate jobs, and only the
+   * second one needs the words. An office that has just added its channels
+   * wants to see what those channels are posting — that is how it works out
+   * which words are worth watching in the first place. Refusing to fetch until
+   * the office has already guessed the right words puts the answer before the
+   * question.
+   *
+   * So with no words set, everything read comes back, and it is labelled as
+   * unfiltered rather than dressed up as a match. Nothing is scored: judging
+   * whether a post is FOR or AGAINST somebody needs to know who that somebody
+   * is, and with no words there is nobody named. Listing does not need that;
+   * judging does. The model is skipped entirely, which also makes this path
+   * free and fast.
+   */
+  const unfiltered = terms.length === 0
   if (watchTerms.length > MAX_TERMS) {
-    capped.push(`Matched on the first ${MAX_TERMS} watch terms of ${watchTerms.length}.`)
+    // Deliberately does not state a total. The endpoint has already truncated
+    // the array to its own, larger MAX_TERMS before this sees it, so
+    // watchTerms.length here is not the number the office actually typed —
+    // quoting it would report "you have 40" to somebody who set sixty.
+    capped.push(`We only used your first ${MAX_TERMS} search words.`)
   }
 
   const targets = influencers.slice(0, MAX_HANDLES)
   if (influencers.length > MAX_HANDLES) {
+    // "Check again" is honest advice only because the client now rotates the
+    // roster before sending it (see influencerScanOffset in src/lib/store.ts).
+    // Until it did, the next check re-read these same accounts and the rest of
+    // the list was unreachable, so promising the rest would have been a lie.
     capped.push(
-      `Read the first ${MAX_HANDLES} accounts of ${influencers.length}. The other ${influencers.length - MAX_HANDLES} were not checked at all.`,
+      `We got through ${MAX_HANDLES} of your ${influencers.length} accounts this time. Check again and we will pick up the next ${Math.min(MAX_HANDLES, influencers.length - MAX_HANDLES)}.`,
     )
   }
-  capped.push(`Read at most the ${POSTS_PER_HANDLE} most recent posts per account.`)
+  capped.push(`We looked at each account's ${POSTS_PER_HANDLE} most recent posts, not its whole history.`)
   capped.push(
-    'Matched on what the platform lists — a video title on YouTube, the opening of a post on Bluesky and Mastodon. A term further down a long post will not be found.',
+    unfiltered
+      ? 'We can only see what the platform puts in its public listing: the video title on YouTube, and the opening lines of a post on Bluesky and Mastodon. We are not reading the full text.'
+      : 'We can only search what the platform puts in its public listing: the video title on YouTube, and the opening lines of a post on Bluesky and Mastodon. If your name sits further down a long post, we will miss it.',
   )
 
   const reads = await Promise.all(
@@ -1183,7 +1259,9 @@ export async function scanMentions(
       if (!text) continue
       const haystack = text.toLowerCase()
       const hits = terms.filter((t) => haystack.includes(t.toLowerCase()))
-      if (!hits.length) continue
+      // With no search words there is nothing to fail to match, so every post
+      // read is kept. `hits` stays empty and the mention says so.
+      if (!unfiltered && !hits.length) continue
       matched++
       candidates.push({
         influencer: inf,
@@ -1206,9 +1284,58 @@ export async function scanMentions(
   }
 
   const ordered = [...candidates].sort(newestFirst)
+
+  /**
+   * Unfiltered: hand back what was read, unjudged.
+   *
+   * No slice to MAX_SCORED here, because MAX_SCORED exists to bound what the
+   * model is asked to read and no model is called on this path. What comes back
+   * is already bounded by the account and per-account caps above.
+   */
+  if (unfiltered) {
+    // Two different ways to end up here, and telling somebody who DID type a
+    // word that they have not set any would read as the app ignoring them.
+    // A single character is dropped upstream because it matches most Telugu
+    // posts by accident, so that case gets its own sentence.
+    const tooShort = watchTerms.some((t) => t.trim().length > 0)
+    capped.unshift(
+      tooShort
+        ? 'We did not filter any of this. Your search words are all too short to use: one character matches almost every post by accident, so we need at least two. This is everything these accounts posted recently, not just the posts about you.'
+        : 'We did not filter any of this. You have not set any search words yet, so this is everything these accounts posted recently, not just the posts about you. Add a word above and check again to narrow it down.',
+    )
+    return {
+      mentions: ordered.map((c) => ({
+        id: mentionId(c.influencer.id, c.url),
+        influencerId: c.influencer.id,
+        postUrl: c.url,
+        postedAt: c.postedAt,
+        excerpt: c.text,
+        // Nothing was matched and nothing was read by a model, so no claim is
+        // made that this is about the office. The screen shows these under
+        // "everything" rather than under "about you", and the two stay
+        // distinguishable in the store forever after.
+        mentionsSubject: false,
+        // Nothing read this, so nothing decided any of the three below. The
+        // flag is what stops the screen rendering these defaults as findings.
+        judged: false,
+        stance: 'unclear' as const,
+        sentiment: 'Neutral' as const,
+        fake: null,
+        seenAt: checkedAt,
+        acknowledged: false,
+      })),
+      coverage,
+      capped,
+      postsScanned,
+      checkedAt,
+    }
+  }
+
   const scoring = ordered.slice(0, MAX_SCORED)
   if (ordered.length > MAX_SCORED) {
-    capped.push(`Scored the ${MAX_SCORED} most recent of ${ordered.length} matching posts.`)
+    capped.push(
+      `${ordered.length} posts matched. We read the ${MAX_SCORED} most recent of them properly; the older ones are not listed.`,
+    )
   }
   if (!scoring.length) {
     return { mentions: [], coverage, capped, postsScanned, checkedAt }
@@ -1300,6 +1427,7 @@ export async function scanMentions(
       // A missing flag counts as "about us". In this office a false alarm costs
       // one read; a miss costs an attack nobody saw.
       mentionsSubject: row.mentionsSubject !== false,
+      judged: true,
       stance: oneOf(row.stance, STANCES, 'unclear'),
       sentiment: oneOf(row.sentiment, SENTIMENTS, 'Neutral'),
       fake: fakeAssessment(suspicion, oneOf(row.fakeType, FAKE_NEWS_TYPES, 'Not Applicable'), note),
@@ -1309,7 +1437,7 @@ export async function scanMentions(
   }
   if (mentions.length < scoring.length) {
     capped.push(
-      `The model returned a reading for ${mentions.length} of the ${scoring.length} matching posts; the rest are not listed.`,
+      `We got a reading back for ${mentions.length} of the ${scoring.length} matching posts. The rest are not listed.`,
     )
   }
 

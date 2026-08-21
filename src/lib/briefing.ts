@@ -171,7 +171,26 @@ export function moodOf(): Mood {
     negative: Math.round(weighted((s) => s.negative)),
     commentsRead,
     postsRead: measured.reduce((n, m) => n + m.standing.postsRead, 0),
-    score: weighted((s) => s.score),
+    /**
+     * Averaged over the accounts that actually produced a score.
+     *
+     * An unscored account must not be folded in as a zero: zero is the
+     * midpoint of this scale, so counting one would drag a hostile or warm
+     * average towards "balanced" on the strength of a reading nobody made.
+     * With no scored account at all the answer is null, which the briefing
+     * already handles — it checks `score !== null` before drawing on it.
+     */
+    score: (() => {
+      const scored = measured.filter((m) => m.standing.score !== null)
+      if (scored.length === 0) return null
+      const w = scored.reduce((sum, m) => sum + Math.max(m.standing.commentsRead, 1), 0)
+      return (
+        scored.reduce(
+          (sum, m) => sum + m.standing.score! * Math.max(m.standing.commentsRead, 1),
+          0,
+        ) / w
+      )
+    })(),
     // Deduplicated across accounts: the same complaint raised under a YouTube
     // video and a Facebook post is one grievance, not two.
     praise: [...new Set(measured.flatMap((m) => m.standing.praise))].slice(0, 4),
@@ -353,6 +372,19 @@ export function influencerVoiceOf(store: Store, since: number): InfluencerVoice 
 
   for (const mention of store.mentions) {
     if ((at(mention.seenAt) ?? 0) < since) continue
+    /**
+     * A post nobody read cannot be briefed on.
+     *
+     * A check with no search words returns everything an account published,
+     * unmatched and unscored. Those rows carry `mentionsSubject: false` like
+     * any other, so they used to fall into the "about your constituency"
+     * bucket and the dashboard announced "94 more posts are about your
+     * constituency" — a claim nothing had checked, over posts that may be
+     * about cinema. They are still waiting on the influencer screen, and the
+     * navigation badge still counts them; a briefing is the one place that
+     * must not summarise what it has not read.
+     */
+    if (mention.judged === false) continue
 
     const account = byId.get(mention.influencerId)
     voices.push({
@@ -703,7 +735,7 @@ export function leadOf(input: {
         suspect.length === 1
           ? 'One story about you looks questionable.'
           : `${suspect.length} stories about you look questionable.`,
-      detail: `${first.publisher ?? 'A publisher'} — “${first.headline}”. Flagged for a person to check, not judged.`,
+      detail: `${first.publisher ?? 'A publisher'}: “${first.headline}”. Flagged for a person to check, not judged.`,
       cta: 'Look at what was flagged',
       to: 'personas',
     }
@@ -714,7 +746,7 @@ export function leadOf(input: {
       tone: 'warning',
       line: `${overdue.length} ${overdue.length === 1 ? 'task is' : 'tasks are'} past the date you promised.`,
       detail: overdue[0]?.description ?? null,
-      cta: 'Open the action list',
+      cta: 'Open the task list',
       to: 'actions',
     }
   }
@@ -766,7 +798,7 @@ export function leadOf(input: {
       line: 'The coverage has turned against you.',
       detail: `${input.perception.critical} of ${input.perception.total} stories read this week are critical${
         input.perception.publishers.length > 0
-          ? ` — ${input.perception.publishers.slice(0, 3).join(', ')}`
+          ? `, in ${input.perception.publishers.slice(0, 3).join(', ')}`
           : ''
       }.`,
       cta: 'Read what they said',
@@ -801,9 +833,9 @@ export function leadOf(input: {
     line: 'Nothing is overdue and nothing new is flagged.',
     detail:
       openActions.length > 0
-        ? `${openActions.length} ${openActions.length === 1 ? 'action' : 'actions'} still open, none of them late.`
+        ? `${openActions.length} ${openActions.length === 1 ? 'task' : 'tasks'} still open, none of them late.`
         : 'No open actions either.',
-    cta: openActions.length > 0 ? 'Open the action list' : 'Read a link',
+    cta: openActions.length > 0 ? 'Open the task list' : 'Read a link',
     to: openActions.length > 0 ? 'actions' : 'analyse',
   }
 }

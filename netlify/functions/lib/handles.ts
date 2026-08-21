@@ -3,6 +3,14 @@ import { fetchText, fetchJson } from './fetcher'
 import { decodeEntities, decodeJsonString, collectKey } from './extract/json-scan'
 import { parseHandleUrl } from '../../../shared/handle-url'
 import { metaCredentials, whoAmI, facebookPagePosts, instagramMedia } from './meta-graph'
+// Value import, not type-only: social-source.ts imports HandlePost from here as
+// a TYPE, which erases at build, so this creates no runtime cycle.
+import {
+  postsForHandle,
+  licensedProviderAvailable,
+  GATED_PLATFORMS,
+  type SourceRoute,
+} from './social-source'
 import { youtubeFreshToken, youtubeIdentityMatches, youtubeOwnUploads } from './youtube-oauth'
 import { linkedinFreshIdentity } from './linkedin-oauth'
 import { xFreshIdentity } from './x-oauth'
@@ -72,8 +80,14 @@ export interface HandleSummary {
    * How the post list was obtained, or why there isn't one. Shown to the user
    * verbatim — a dashboard that silently shows nothing for Instagram would read
    * as "this account is quiet", which is a different and false claim.
+   *
+   * `route` says WHICH of the four ways produced it. A post list read from the
+   * platform's own API for a page the office administers and one bought from a
+   * reseller are not the same evidence, and a screen that renders them
+   * identically is lying by omission. `'none'` is the honest fourth value: no
+   * route worked, and the note says which were tried.
    */
-  listing: { available: boolean; note: string }
+  listing: { available: boolean; note: string; route?: SourceRoute }
 }
 
 
@@ -218,7 +232,10 @@ async function readYouTubeOwn(handle: string): Promise<HandleSummary | null> {
       posts,
       listing: {
         available: posts.length > 0,
-        note: `${posts.length} uploads through the YouTube Data API, with exact like and comment counts — the InnerTube fallback below carries views but no likes at all.`,
+        // Read with the office's own OAuth token, so it is first-party — not
+        // the 'public' the default at the bottom of readHandle would stamp it.
+        route: 'owned',
+        note: `${posts.length} uploads through the YouTube Data API, with exact like and comment counts. The InnerTube fallback below carries views but no likes at all.`,
       },
     }
   } catch {
@@ -340,7 +357,7 @@ async function readYouTube(handle: string): Promise<HandleSummary> {
       note: !posts.length
         ? 'The channel feed returned no recent uploads.'
         : viaFallback
-          ? `${posts.length} recent uploads. YouTube's feed was empty from here, so these came from its browse API — which publishes view counts but no likes, so engagement cannot be worked out for this channel.`
+          ? `${posts.length} recent uploads. YouTube's feed was empty from here, so these came from its browse API, which publishes view counts but no likes, so engagement cannot be worked out for this channel.`
           : `${posts.length} recent uploads from the channel feed, with views and likes.`,
     },
   }
@@ -493,6 +510,10 @@ async function readFacebook(handle: string): Promise<HandleSummary> {
           posts,
           listing: {
             available: posts.length > 0,
+            // The office's own Page token. First-party, and authoritative even
+            // when it returns nothing: a quiet week on a page we administer is
+            // a real answer, and must not be replaced by a reseller's copy.
+            route: 'owned',
             note: `${posts.length} posts through the Graph API, with shares and reel plays the public page does not publish.`,
           },
         }
@@ -571,6 +592,7 @@ async function readInstagram(handle: string): Promise<HandleSummary> {
           posts,
           listing: {
             available: true,
+            route: 'owned',
             note: `${posts.length} posts through the Graph API, including reel plays. The public path gives none of this.`,
           },
         }
@@ -608,7 +630,7 @@ async function readInstagram(handle: string): Promise<HandleSummary> {
     listing: {
       available: false,
       note: followers
-        ? 'Instagram publishes this account’s follower count but not its posts — the timeline needs a login. Analyse individual reels and posts and they will appear here.'
+        ? 'Instagram publishes this account’s follower count but not its posts, because the timeline needs a login. Analyse individual reels and posts and they will appear here.'
         : 'Instagram refused this profile. Analyse individual reels and posts and they will appear here.',
     },
   }
@@ -650,7 +672,7 @@ async function readLinkedIn(handle: string): Promise<HandleSummary> {
   const profileUrl = `https://www.linkedin.com/company/${handle}/`
   const identity = await linkedinFreshIdentity().catch(() => null)
   const note = identity
-    ? `LinkedIn puts a page’s activity behind a login. Your office’s LinkedIn identity is connected as ${identity.name ?? identity.memberId} — company-page reads will activate automatically once LinkedIn approves this app for post access. Analyse individual posts and they will appear here.`
+    ? `LinkedIn puts a page’s activity behind a login. Your office’s LinkedIn identity is connected as ${identity.name ?? identity.memberId}. Company-page reads will activate automatically once LinkedIn approves this app for post access. Analyse individual posts and they will appear here.`
     : 'LinkedIn puts a page’s activity behind a login. Analyse individual posts and they will appear here.'
   return blank('LinkedIn', handle, profileUrl, note)
 }
@@ -674,7 +696,7 @@ async function readX(handle: string): Promise<HandleSummary> {
   const identity = await xFreshIdentity().catch(() => null)
   const mine = identity?.username.toLowerCase() === clean.toLowerCase()
   const note = mine
-    ? `Connected as @${identity!.username}. Reading engagement needs a paid X API tier, which is not enabled on this deployment yet — analyse individual posts and they will appear here.`
+    ? `Connected as @${identity!.username}. Reading engagement needs a paid X API tier, which is not enabled on this deployment yet. Analyse individual posts and they will appear here.`
     : 'Automatic tracking is not available for this platform. Analyse individual posts and they will appear here.'
   return blank('Twitter/X', clean, profileUrl, note)
 }
@@ -705,7 +727,8 @@ function parseAbbrev(raw: string | null): number | null {
   return Math.round(n * (mult[(m[2] ?? '').toLowerCase()] ?? 1))
 }
 
-export async function readHandle(ref: HandleRef): Promise<HandleSummary> {
+/** The per-platform readers: owned credentials first, then whatever is public. */
+async function readByPlatform(ref: HandleRef): Promise<HandleSummary> {
   switch (ref.platform) {
     case 'YouTube':
       return readYouTube(ref.handle)
@@ -728,6 +751,100 @@ export async function readHandle(ref: HandleRef): Promise<HandleSummary> {
         '',
         'Automatic tracking is not available for this platform. Analyse individual posts and they will appear here.',
       )
+  }
+}
+
+/**
+ * Read an account by whichever route can actually reach it.
+ *
+ * `readByPlatform` above already covers two of the three routes in
+ * social-source.ts: the OWNED one, where a token proves it belongs to the
+ * handle being asked about, and the PUBLIC one. This adds the third.
+ *
+ * The gap it fills is the one the whole gated half of this product runs into.
+ * Facebook returns zero post permalinks to a server under every crawler
+ * identity tried; Instagram answers 429; X answers 503; LinkedIn shows an
+ * authwall. Those accounts are not private — a person with a browser sees them
+ * — but no amount of scraping gets them from a server, so for a rival's page,
+ * which no token here will ever authorise, a licensed provider is the only
+ * remaining lawful route.
+ *
+ * Order matters and is deliberate: a real read always wins. The provider is
+ * asked ONLY when the platform gated us out entirely, so configuring one never
+ * changes an answer that was already obtainable, never spends a paid request on
+ * a YouTube channel, and cannot quietly replace first-party data with a
+ * reseller's copy of it.
+ *
+ * `postsForHandle` costs nothing when unconfigured — it returns before any
+ * network call — so this is free for every office that never buys a provider,
+ * and those offices get its `note` instead: a sentence naming why the account
+ * is empty, rather than a zero that reads as "they have not posted".
+ */
+export async function readHandle(
+  ref: HandleRef,
+  opts: { licensed?: boolean } = {},
+): Promise<HandleSummary> {
+  const summary = await readByPlatform(ref)
+
+  // Something was already read. Whether that came from the office's own token
+  // or from the open platform, it is first-party and beats a reseller.
+  if (summary.posts.length > 0) {
+    return { ...summary, listing: { ...summary.listing, route: summary.listing.route ?? 'public' } }
+  }
+
+  /**
+   * A credentialed reader that answered with nothing is a REAL answer.
+   *
+   * The office's own Page token reporting an empty week is the definitive
+   * word on a page it administers. Falling through to the provider there would
+   * pay a reseller to contradict the platform's own API about the office's own
+   * account, and could show posts it has since deleted.
+   */
+  if (summary.listing.route === 'owned') return summary
+
+  // Callers that only want to know an account resolves — the add-account
+  // confirmation step — opt out, so adding a handle never waits on a provider.
+  if (opts.licensed === false || !GATED_PLATFORMS.has(ref.platform)) {
+    return { ...summary, listing: { ...summary.listing, route: summary.listing.route ?? 'none' } }
+  }
+
+  const licensed = await postsForHandle({ handle: summary.handle, platform: ref.platform })
+  if (licensed.data.length === 0) {
+    /**
+     * Compose the two notes; do not let the provider's overwrite the reader's.
+     *
+     * Each gated reader writes a note that its own attempt earned — Instagram
+     * saying it was refused this profile, LinkedIn naming the account the
+     * office has connected, X saying reads need a paid tier. Replacing all of
+     * them with one sentence about data providers reported a transient refusal
+     * as a permanent property of the platform, and threw away the result of a
+     * network call that had just been paid for in latency.
+     *
+     * With no provider configured the reader's note stands alone, because the
+     * provider's line would then be an advertisement rather than a finding.
+     */
+    return {
+      ...summary,
+      listing: {
+        ...summary.listing,
+        route: 'none',
+        note: licensedProviderAvailable()
+          ? [summary.listing.note, licensed.note].filter(Boolean).join(' ').trim()
+          : summary.listing.note,
+      },
+    }
+  }
+
+  return {
+    ...summary,
+    posts: licensed.data,
+    listing: {
+      available: true,
+      route: 'licensed',
+      note:
+        licensed.note ??
+        `${licensed.data.length} posts through a licensed data provider. ${ref.platform} publishes none of this to a server directly.`,
+    },
   }
 }
 

@@ -126,7 +126,7 @@ export function Settings({
       setNotice(`Connected. Reading real data for this account now.`)
       if (key) load(key)
     }
-    if (failed) setError(`Could not connect ${failed}. The attempt may have expired — try again.`)
+    if (failed) setError(`Could not connect ${failed}. The attempt may have expired. Try again.`)
     if (params.has('settings')) window.history.replaceState({}, '', window.location.pathname)
     // Runs once, on mount, to consume the redirect's query string exactly once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -307,7 +307,7 @@ export function Settings({
                 whether they were supposed to have one. */}
             <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
               {refused
-                ? 'It is not your account password — it is a shared value set on the server when this deployment was created.'
+                ? 'It is not your account password. It is a shared value set on the server when this deployment was created.'
                 : 'Everything else on this screen works without one.'}{' '}
               Connecting a real YouTube, LinkedIn or X account grants this deployment
               long-lived access to that account, so it is held behind a value only whoever
@@ -388,7 +388,7 @@ export function Settings({
                     </div>
                     <p className="truncate text-xs text-ink-3">
                       {conn?.lastError
-                        ? `Reconnect — the last refresh failed: ${conn.lastError}`
+                        ? `Reconnect. The last refresh failed: ${conn.lastError}`
                         : conn
                           ? (conn.ownerName ?? conn.ownerId)
                           : 'No account connected yet.'}
@@ -428,7 +428,7 @@ export function Settings({
                     ? `${status.meta.page ?? 'Page connected'}${status.meta.instagramLinked ? ' · Instagram linked' : ''}`
                     : status?.meta.why
                       ? status.meta.why
-                      : 'Set META_PAGE_TOKEN on the server to connect — see README.'}
+                      : 'Set META_PAGE_TOKEN on the server to connect. See README.'}
                 </p>
               </div>
             </div>

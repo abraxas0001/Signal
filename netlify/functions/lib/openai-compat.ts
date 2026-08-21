@@ -261,7 +261,7 @@ function providerError(provider: Provider, status: number, body: string): string
   }
   if (status === 429) {
     const wait = /try again in ([\d.]+\s*\w+)/i.exec(body)?.[1]
-    return `${provider.label} rate-limited this request${wait ? ` — retry in ${wait}` : ''}. Free tiers cap tokens per minute and requests per day.`
+    return `${provider.label} rate-limited this request${wait ? `. Retry in ${wait}` : ''}. Free tiers cap tokens per minute and requests per day.`
   }
   if (status === 404) {
     return `${provider.label} does not have a model called "${provider.model}". Set LLM_MODEL to one it offers.`

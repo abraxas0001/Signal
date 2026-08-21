@@ -180,11 +180,17 @@ export async function commentsForPost(input: {
     }
   }
 
-  /* 2. a licensed provider, for pages nobody here administers */
-  const licensed = await askProvider<unknown>(
-    { kind: 'comments', platform: input.platform, url: input.url, limit: 100 },
-    'comments',
-  )
+  /* 2. a licensed provider, for pages nobody here administers.
+     Gated platforms only — the same guard `postsForHandle` has below. Without
+     it every YouTube, Bluesky and Mastodon post was sent to the paid provider
+     FIRST, before the free public read beneath it was even attempted: a billed
+     request for comments the platform hands to anyone. */
+  const licensed = GATED_PLATFORMS.has(input.platform)
+    ? await askProvider<unknown>(
+        { kind: 'comments', platform: input.platform, url: input.url, limit: 100 },
+        'comments',
+      )
+    : null
   if (licensed && licensed.length > 0) {
     return {
       data: toComments(licensed),
@@ -226,13 +232,33 @@ export async function postsForHandle(input: {
     { kind: 'posts', platform: input.platform, handle: input.handle },
     'posts',
   )
-  if (!rows || rows.length === 0) {
+  /**
+   * Three outcomes, not two. `askProvider` returns null when it never got an
+   * answer — unconfigured, unreachable, 401, rate-limited, timed out — and []
+   * when the provider answered and genuinely holds nothing for this handle.
+   *
+   * Collapsing them told the office "the data provider returned no posts for
+   * DKAruna.TG", which reads as a fact about the rival: the provider works and
+   * simply has not got them. When the truth is an expired key or an outage,
+   * that is an absence rendered as a measurement — the one failure this
+   * codebase treats as unforgivable — and it also hides the billing problem
+   * behind a sentence about somebody else's Facebook page.
+   */
+  if (rows === null) {
     return {
       data: [],
       route: 'none',
       note: licensedProviderAvailable()
-        ? `The data provider returned no posts for ${input.handle}.`
-        : `${input.platform} does not publish this account's posts to anyone without a login. Reading a page you do not administer needs a licensed data provider — see Settings.`,
+        ? `The data provider could not be reached for ${input.handle}, so this account was not read at all. That is an outage, an expired key or a rate limit, not a reading of an empty account.`
+        : `${input.platform} does not publish this account's posts to anyone without a login. Reading a page you do not administer needs a licensed data provider. See Settings.`,
+    }
+  }
+
+  if (rows.length === 0) {
+    return {
+      data: [],
+      route: 'none',
+      note: `The data provider was reached and holds no posts for ${input.handle}.`,
     }
   }
 
@@ -252,6 +278,25 @@ export async function postsForHandle(input: {
       shares: num(r['shares']),
     }))
     .filter((p) => p.url.length > 0)
+
+  /**
+   * Rows arrived but none survived the coercion, which means the vendor shim
+   * is putting the permalink somewhere this does not read. Returning
+   * `route: 'licensed'` with an empty array would hang a provenance claim on
+   * nothing — the screen would say a reseller supplied this and then show
+   * nothing, and the operator would get no signal that their adapter is
+   * misconfigured rather than the rival being quiet.
+   */
+  if (posts.length === 0) {
+    console.log(
+      `[signal] provider returned ${rows.length} rows for ${input.handle} with no usable post url`,
+    )
+    return {
+      data: [],
+      route: 'none',
+      note: `The data provider answered for ${input.handle} but none of its rows carried a post link. The vendor adapter needs checking. This is not a reading of an empty account.`,
+    }
+  }
 
   return {
     data: posts,

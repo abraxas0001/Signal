@@ -48,6 +48,7 @@ import type {
   IssueCluster,
   NamedPerson,
 } from '../../../shared/grievance'
+import { HOUSE_STYLE } from './house-style'
 
 /**
  * The grievance desk, server side.
@@ -481,7 +482,10 @@ Every record says where it is set, whoever is reading it. A story set in Varanas
 - talkingPoints are spoken lines, two to four of them. Someone reads one aloud at a press gaggle without rewriting it. No bureaucratic prose.
 - rationale is one sentence on why that action, at that priority.
 
-Fill every field. Use an empty string rather than omitting anything, and never invent a detail the article does not contain.`
+Fill every field. Use an empty string rather than omitting anything, and never invent a detail the article does not contain.
+
+${HOUSE_STYLE}
+`
 
 const CLASSIFY_SCHEMA: Record<string, unknown> = obj({
   languageCode: str('BCP-47 code of the language the article is written in, e.g. "te", "hi", "en".'),
@@ -572,7 +576,7 @@ export async function classifyArticle(
   const raw = (meta.articleText ?? meta.description ?? '').trim()
   const junk = detectJunk(raw)
   if (junk) {
-    throw new Error(`Could not read that article — ${junk}. Try the story on another outlet.`)
+    throw new Error(`Could not read that article: ${junk}. Try the story on another outlet.`)
   }
 
   const headline = meta.title?.trim() ?? ''
@@ -793,7 +797,10 @@ The rule that matters most: you can only read text. State what the text shows, a
 - Always emit a consistency signal and a recirculation signal. Both are observable in every article, and "the sequence of dates holds together and matches the publication date" is a finding a reviewer can act on. Add a corroboration signal when the text says where its information came from.
 - Never more than four signals. Three honest ones beat four padded ones.
 
-Set suspicion to "No" unless one of the real signals above actually fired. Most news articles are ordinary journalism and come back "No", with a type of "Not Applicable".`
+Set suspicion to "No" unless one of the real signals above actually fired. Most news articles are ordinary journalism and come back "No", with a type of "Not Applicable".
+
+${HOUSE_STYLE}
+`
 
 const FAKE_SCHEMA: Record<string, unknown> = obj({
   suspicion: enumOf(FAKE_SUSPICION, 'Whether this looks fabricated. Default "No".'),
@@ -850,7 +857,7 @@ export async function assessFake(
     signals.push({
       kind: 'provenance',
       finding:
-        'This story rests on a video clip. Nothing here has seen the clip, and no automated check can tell a filmed video from a generated or re-edited one — least of all after the re-compression a forwarded clip goes through. Someone has to watch it and find where it first appeared.',
+        'This story rests on a video clip. Nothing here has seen the clip, and no automated check can tell a filmed video from a generated or re-edited one, least of all after the re-compression a forwarded clip goes through. Someone has to watch it and find where it first appeared.',
       confidence: 'low',
       supports: 'inconclusive',
     })
@@ -969,7 +976,7 @@ function sourceSignal(url: string, publisher: string | null): FakeSignal {
   if (known) {
     return {
       kind: 'source',
-      finding: `Served by ${known.label} (${host}), an outlet already on the desk's list. Weak evidence of authenticity — established outlets carry wrong stories too — but this is not an anonymous repost.`,
+      finding: `Served by ${known.label} (${host}), an outlet already on the desk's list. Weak evidence of authenticity, since established outlets carry wrong stories too, but this is not an anonymous repost.`,
       confidence: 'high',
       supports: 'authentic',
     }

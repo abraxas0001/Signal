@@ -164,6 +164,22 @@ export interface Store {
   /** When the local accounts were last read for mentions of this person. */
   influencersReadAt: string | null
   /**
+   * Where the next check should start in the roster.
+   *
+   * A check reads at most eight accounts, and it used to always read the first
+   * eight of them. On a roster of eighteen that meant accounts nine to eighteen
+   * were never read — not "read later", never. The screen said so plainly ("the
+   * other 10 were not checked at all") and the advice it implied, run it again,
+   * would have re-read the same eight forever.
+   *
+   * The cursor lives here rather than on the server because there is no
+   * database behind /api/influencers and no scheduled job holding state; the
+   * client is the only thing with a memory. Each check rotates the roster by
+   * this much before sending, then advances it, so consecutive checks walk the
+   * whole list.
+   */
+  influencerScanOffset: number
+  /**
    * When the web was searched for publisher pages dedicated to this person.
    *
    * Stamped even on a miss. A person no publisher maintains a tag page for is a
@@ -201,6 +217,7 @@ export const emptyStore = (): Store => ({
   lastScanAt: null,
   influencersSeededAt: null,
   influencersReadAt: null,
+  influencerScanOffset: 0,
   newsSourcesSeededAt: null,
   opinion: null,
   lastSeenAt: null,
@@ -251,6 +268,10 @@ function migrate(raw: unknown): Store {
       typeof data.influencersSeededAt === 'string' ? data.influencersSeededAt : null,
     influencersReadAt:
       typeof data.influencersReadAt === 'string' ? data.influencersReadAt : null,
+    influencerScanOffset:
+      typeof data.influencerScanOffset === 'number' && Number.isFinite(data.influencerScanOffset)
+        ? Math.max(0, Math.floor(data.influencerScanOffset))
+        : 0,
     newsSourcesSeededAt:
       typeof data.newsSourcesSeededAt === 'string' ? data.newsSourcesSeededAt : null,
     opinion: (data.opinion as OpinionSurvey | null) ?? null,

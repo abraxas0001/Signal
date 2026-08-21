@@ -182,7 +182,7 @@ async function analyse(body: Body, persona: string, aliases: string[]): Promise<
     capped.push(
       `Read the first ${MAX_ANALYSE} of ${requested.length} links. The other ${
         requested.length - urls.length
-      } were not read at all — send them as a second batch.`,
+      } were not read at all. Send them as a second batch.`,
     )
   }
 

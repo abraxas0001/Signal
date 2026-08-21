@@ -70,7 +70,7 @@ export async function resolveIdentity(input: ResolveInput): Promise<ResolveOutco
       return {
         identity: null,
         error:
-          'Reading that profile took too long. Try again, or type the details in — it is quicker and the result is more accurate.',
+          'Reading that profile took too long. Try again, or type the details in. That is quicker and the result is more accurate.',
       }
     }
     return {

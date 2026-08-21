@@ -88,7 +88,7 @@ export function DataSources() {
       <Card>
         <p className="text-sm text-ink-2">
           The server could not say what it is able to read. This screen needs the site&rsquo;s
-          functions running — on a plain <code>vite</code> server there are none.
+          functions running. On a plain <code>vite</code> server there are none.
         </p>
       </Card>
     )
@@ -112,7 +112,7 @@ export function DataSources() {
           <span className="font-semibold text-ink">
             {summary.on} of {summary.total} sources are switched on.
           </span>{' '}
-          Everything below that is off is a real limit, not a bug — each one says what it would
+          Everything below that is off is a real limit, not a bug. Each one says what it would
           take.
         </p>
       )}
@@ -225,7 +225,7 @@ export function DataSources() {
                   <div className="border-t border-[var(--rule)] bg-[var(--warn-soft)] px-4 py-3">
                     <p className="text-sm leading-relaxed text-[var(--warn)]">
                       This token can also change things: {cap.token.writeScopes.join(', ')}. Signal
-                      only ever reads, so you can safely remove those in the app dashboard — a
+                      only ever reads, so you can safely remove those in the app dashboard. A
                       monitoring tool should not be able to delete a constituent&rsquo;s comment.
                     </p>
                   </div>

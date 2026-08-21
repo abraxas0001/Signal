@@ -74,12 +74,17 @@
   /* Machine-stated labels: mono, uppercase, widely tracked. */
   --tracking-kicker: 0.16em;
 
-  --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-2xl: 28px;
+  /* Scaled up one step across the board. The old scale topped out where the
+     new one starts, which is what made every panel read as a table cell rather
+     than as a card. A data desk should stay a shade tighter than a marketing
+     page, so the card sits at 14px where the reference uses 20px. */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius-pill: 999px;
 }
 
 :root {
@@ -88,12 +93,44 @@
      this is read outdoors in daylight, where a pure #fff surface glares and a
      cream one washes out. Cool blue-gray was the previous value and it is what
      made every screen read as a generic dashboard regardless of the type. */
-  --bg: #efeee9;
-  --surface: #f7f6f2;
-  --surface-2: #e7e5de;
-  --surface-3: #dedcd3;
-  --border: #d7d4ca;
-  --border-strong: #b9b5a8;
+  /**
+   * Paper on cream, not grey on grey.
+   *
+   * The ground and the card were #efeee9 and #f7f6f2: two greys eight points
+   * apart. At that distance a card does not read as a thing lying on a page,
+   * it reads as a slightly lighter rectangle, and every panel on a screen has
+   * to be found by reading it rather than seen. That is most of what "I cannot
+   * tell what is what" means.
+   *
+   * The ground is warmer now and the card is white. The step between them is
+   * what separates the panels, so the borders can drop back to a hairline and
+   * stop competing with the type inside them. Warm rather than blue-grey
+   * because this is read outdoors in daylight, where a cool ground goes
+   * flat and a cream one holds.
+   */
+  --bg: #f1ede4;
+  --surface: #ffffff;
+  --surface-2: #f6f2e9;
+  --surface-3: #ece7db;
+  /**
+   * The first surface, under the name four components already ask for.
+   *
+   * `--surface-2` and `--surface-3` exist, so `--surface-1` reads as though it
+   * must too — and TabBar, DataReport and the account search box all reached
+   * for it. It was never defined, so `bg-[var(--surface-1)]` resolved to
+   * nothing and those surfaces rendered TRANSPARENT: the bottom bar and the
+   * name-search dropdown both had the page's own text showing through them.
+   * SideNav is the only caller that noticed, and it works around it inline
+   * with `var(--surface-1, var(--surface))`.
+   *
+   * Defined once here rather than by editing the callers, because the name is
+   * reasonable and the next component to assume it exists should be right.
+   * Aliased rather than duplicated so the dark blocks below, which redefine
+   * `--surface` on this same `:root`, carry it automatically.
+   */
+  --surface-1: var(--surface);
+  --border: #e2dccd;
+  --border-strong: #c4bda9;
   /* The boundary of a control the user can operate. WCAG 1.4.11 asks for 3:1
      on those, which --border-strong does not meet (1.44:1 on white) — fine for
      a decorative rule, not fine for the outline of the app's main input. Kept
@@ -101,7 +138,7 @@
   --border-interactive: #83868f;
   /* Hairline divider. Purely decorative, so it is exempt from the 3:1 floor —
      it never outlines a control and never carries meaning alone. */
-  --rule: #cfcbbf;
+  --rule: #e5dfd0;
 
   --text: #13140f;
   --text-2: #4a4b42;
@@ -135,6 +172,19 @@
      ground. The drifting pastel blobs they used to paint were the single most
      dated thing on the screen, and they cost a compositor layer on a phone
      that has none to spare. */
+  /* Head-to-head comparison: two people, two hues, fixed by person and never
+     by who is ahead. Colouring by rank would repaint the chart every time a bar
+     moved and the reader would learn nothing from the colour at all.
+
+     Not --pos/--neg: status is reserved, and green-against-red here would say
+     the subject is good and the opponent bad, which is not what is measured.
+
+     Run through the palette validator against this surface (#f7f6f2), not
+     eyeballed: dE 28.0 normal, 23.0 protanopia, 25.5 tritanopia, both inside
+     the lightness band and over the chroma floor, both clearing 3:1. */
+  --vs-subject: #2b6cb0;
+  --vs-rival: #c07214;
+
   --aurora-1: #cfcbbf;
   --aurora-2: #b9b5a8;
   --aurora-3: #d7d4ca;
@@ -193,6 +243,13 @@
     --info: #4cc2ff;
     --info-soft: #0d2233;
 
+    /* The dark pair is chosen for this surface, not brightened from the light
+       one — the dark lightness band is lower, not higher, so the obvious
+       lightened copy fails it. Validated against #1a1a16: dE 25.0 normal,
+       23.3 protanopia, 22.8 tritanopia. */
+    --vs-subject: #4d89cc;
+    --vs-rival: #bb7d1a;
+
     --aurora-1: #35342d;
     --aurora-2: #2f2f29;
     --aurora-3: #454439;
@@ -237,6 +294,13 @@
   --neg-soft: #2c1416;
   --info: #4cc2ff;
   --info-soft: #0d2233;
+    /* The dark pair is chosen for this surface, not brightened from the light
+       one — the dark lightness band is lower, not higher, so the obvious
+       lightened copy fails it. Validated against #1a1a16: dE 25.0 normal,
+       23.3 protanopia, 22.8 tritanopia. */
+    --vs-subject: #4d89cc;
+    --vs-rival: #bb7d1a;
+
   --aurora-1: #35342d;
   --aurora-2: #2f2f29;
   --aurora-3: #454439;
@@ -329,6 +393,39 @@ h4 {
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: -0.022em;
+  /* Rebalances the line breaks so a heading never leaves one orphaned word on
+     its own line. This is most of what made headings look "clustered": a
+     three-line heading with a single trailing word reads as a block of text
+     that ran out of room, not as a title. */
+  text-wrap: balance;
+}
+
+/**
+ * Paragraphs get the softer version of the same treatment.
+ *
+ * `pretty` only fixes the last line, so it never reflows a whole paragraph the
+ * way `balance` would, and it costs nothing. Combined with the measure cap
+ * below it is the difference between copy that has been set and copy that has
+ * been poured in.
+ */
+p {
+  text-wrap: pretty;
+}
+
+/**
+ * Nothing readable should run wider than about 68 characters.
+ *
+ * The screens complained about are the ones where a paragraph spans the full
+ * width of a 1440px window. The eye loses its place returning to the start of
+ * the next line, and the result reads as a wall regardless of the type or the
+ * spacing around it. Applied to the helper text and description slots rather
+ * than globally, so tables and data rows keep the width they need.
+ */
+.measure {
+  max-width: 68ch;
+}
+.measure-tight {
+  max-width: 52ch;
 }
 
 ::selection {
@@ -705,23 +802,162 @@ body {
 }
 
 /**
- * A block, not a floating panel.
+ * A panel that sits ON the page rather than being ruled out of it.
  *
- * These used to be white rounded rectangles with a drop shadow, stacked one
- * after another down every screen. That pattern gives each block the same
- * weight, so a page of eight cards has no hierarchy at all — and a shadow is
- * a paint cost on a phone that is already spending everything it has on
- * Telugu text shaping.
+ * The previous version was a flat rectangle: 8px corners, a hard hairline
+ * border, no elevation. The reasoning was that shadows cost paint on a cheap
+ * phone, and per-card shadows flatten hierarchy when every block has the same
+ * one. Both points are true, and both were solved the wrong way. Removing
+ * elevation entirely left a screen of identical bordered rectangles, which is
+ * the thing it was trying to avoid, only greyer.
  *
- * A hairline rule does the same job of separating. Hierarchy then has to come
- * from type and spacing, which is where it belonged.
+ * What comes back is deliberately cheap: two static shadow layers, no blur
+ * filter, no per-frame work. A tight contact shadow and one wide ambient one
+ * is the whole recipe, and it is what separates a card that is lying on the
+ * page from a box that has been drawn on it.
+ *
+ * The border becomes a ring at low alpha rather than a hard rule. A 1px solid
+ * line at full strength competes with the type inside it; at 8% it reads as
+ * the edge of a surface instead of as a drawn boundary.
+ *
+ * Hierarchy still does not come from elevation. It comes from type, spacing
+ * and the `.card-lift` and `.card-quiet` variants below, so a screen can say
+ * which of its panels matters.
  */
 .card {
   background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-sm);
-  box-shadow: none;
+  border: 1px solid color-mix(in oklab, var(--border) 62%, transparent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--e1);
   contain: layout paint;
+}
+
+/** The one panel on a screen that should be looked at first. */
+.card-lift {
+  box-shadow: var(--e2);
+}
+
+/** Supporting detail. Present, but not asking to be read before the rest. */
+.card-quiet {
+  background: transparent;
+  border-color: color-mix(in oklab, var(--border) 48%, transparent);
+  box-shadow: none;
+}
+
+/* ===========================================================================
+   Controls
+
+   Every <select> in the app was a bare native control: the browser drew the
+   arrow, at whatever size and position the platform chose, hard against the
+   right edge with no room around it. On Windows that is a small grey triangle
+   in a lighter grey well; next to the app's own buttons it reads as a
+   different product. It also could not be themed, so in dark mode the arrow
+   stayed dark on a dark field.
+
+   Fixed on the ELEMENT rather than through a class, because there are fifteen
+   selects across five screens and only two of them shared a class constant.
+   Styling the element corrects all fifteen at once and makes the sixteenth
+   correct the day it is written, which a class cannot: `appearance: none` takes
+   the platform arrow away, and the chevron comes back as a background image
+   with real padding reserved for it. Two rules rather than `currentColor`,
+   because a data URI cannot read the cascade — the dark override is below.
+   =========================================================================== */
+
+select:not([multiple]):not([size]),
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234a4b42' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  /* Inset from the edge by the same amount as the text on the other side, so
+     the control looks padded rather than pinched. */
+  background-position: right 0.75rem center;
+  background-size: 16px 16px;
+  padding-inline-end: 2.25rem;
+  cursor: pointer;
+}
+
+:root:not([data-theme='light']) select:not([multiple]):not([size]),
+:root:not([data-theme='light']) .select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23bdbcb1' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) select:not([multiple]):not([size]),
+  :root:not([data-theme='dark']) .select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234a4b42' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+}
+[data-theme='dark'] select:not([multiple]):not([size]),
+[data-theme='dark'] .select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23bdbcb1' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* The list itself is drawn by the OS and cannot be styled, but the colours it
+   picks come from here, so at least it is not white-on-white in dark mode. */
+select option,
+.select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/**
+ * A filter that is doing something should look different from one that is not.
+ *
+ * A row of identical dropdowns gives the reader no way to tell, at a glance,
+ * which of them is currently narrowing the list. That is most of why filters
+ * "feel poor": the state is real but invisible, so people re-read every
+ * control to find the one they set.
+ */
+.select-active {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ===========================================================================
+   Section rhythm
+
+   A screen is a sequence of sections, and a reader needs to see where one ends
+   before they can take in the next. Headings sat the same distance from the
+   block above them as from their own content, so everything ran together into
+   the single column of text the owner is describing.
+   =========================================================================== */
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.875rem;
+}
+
+/* Small-caps label above a section or a field. The reference calls this an
+   eyebrow and uses it as the main structural signpost; here it replaces the
+   run of bold sentence-case labels that all looked like body text. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* A rule that fades out at both ends, so a divider reads as a seam in the page
+   rather than as a line someone drew across it. */
+.rule-fade {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--rule) 12%,
+    var(--rule) 88%,
+    transparent
+  );
 }
 
 /* Numbers must never jitter as they count up. */

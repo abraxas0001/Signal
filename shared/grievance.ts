@@ -415,12 +415,73 @@ export interface InfluencerMention {
   excerpt: string
   /** Whether it is actually about the subject, or merely nearby. */
   mentionsSubject: boolean
+  /**
+   * Did a model read this post, or is it just a listing?
+   *
+   * `false` means the check ran with no usable search words, so every post an
+   * account published came back unread: nothing matched it, nothing scored it,
+   * and `mentionsSubject`, `stance` and `sentiment` below carry no judgement —
+   * they hold their defaults because the fields exist, not because anything was
+   * decided. A screen that renders those defaults as findings invents a verdict
+   * nobody reached.
+   *
+   * Optional because records written before unfiltered reads existed have no
+   * such field, and every one of those came from the scored path. Absent means
+   * judged; only an explicit `false` means otherwise.
+   */
+  judged?: boolean
   stance: 'supportive' | 'critical' | 'neutral' | 'unclear'
   sentiment: Sentiment
   fake: FakeAssessment | null
   seenAt: string
   /** Cleared by a person, so it stops appearing in the digest. */
   acknowledged: boolean
+}
+
+/**
+ * Is this mention still waiting for a person?
+ *
+ * Exported and shared rather than written twice, because it is written twice
+ * TODAY — once for the navigation badge in App.tsx and once for the count on
+ * the influencer screen — and the two drifting apart is a bug this app has
+ * already had once. The badge said 8, the screen said 2, and the six missing
+ * ones could not be found or cleared anywhere. One definition, two callers.
+ *
+ * An unjudged post counts. It came back because the office asked to see what
+ * these accounts are posting, and until somebody clears it, it is waiting. It
+ * cannot be filtered on `mentionsSubject`, because nothing ever decided that
+ * for an unjudged row.
+ */
+export function isWaiting(mention: InfluencerMention): boolean {
+  if (mention.acknowledged) return false
+  return mention.judged === false || mention.mentionsSubject
+}
+
+/**
+ * The most posts worth keeping on a device.
+ *
+ * An unfiltered check can return every post from eight accounts at once, where
+ * a filtered one returned at most twelve matches — so the roster fills the
+ * store far faster than it used to, and nothing ever removed anything. The
+ * store falls back to memory-only when localStorage refuses a write, and it
+ * does so silently, so the failure would show up as records quietly not
+ * surviving a reload rather than as an error anybody could act on.
+ */
+const MAX_STORED_MENTIONS = 400
+
+/**
+ * Drop the least useful posts once there are too many to keep.
+ *
+ * Cleared posts go first — somebody has already dealt with them — and only then
+ * the oldest. Nothing still waiting is discarded while a cleared post survives,
+ * because the waiting ones are the entire point of the screen.
+ */
+export function pruneMentions(rows: InfluencerMention[]): InfluencerMention[] {
+  if (rows.length <= MAX_STORED_MENTIONS) return rows
+  const seen = (x: InfluencerMention): number => Date.parse(x.seenAt) || 0
+  return [...rows]
+    .sort((a, b) => Number(a.acknowledged) - Number(b.acknowledged) || seen(b) - seen(a))
+    .slice(0, MAX_STORED_MENTIONS)
 }
 
 /** Who this installation is watching on behalf of. */

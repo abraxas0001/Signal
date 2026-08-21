@@ -121,7 +121,7 @@ export default async function handler(req: Request, _context: Context): Promise<
     const message = err instanceof Error ? err.message : String(err)
     // An abort is the deadline, and saying "aborted" to an office is useless.
     const readable = abort.signal.aborted
-      ? 'That profile took too long to read. Try again, or type the details in yourself — it takes a moment and the result is more accurate.'
+      ? 'That profile took too long to read. Try again, or type the details in yourself. It takes a moment and the result is more accurate.'
       : message
     return json({ identity: null, error: readable, ms: Date.now() - started }, 502)
   } finally {

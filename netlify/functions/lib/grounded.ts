@@ -391,7 +391,7 @@ Rules:
     }
     if (unconfirmed > 0) {
       notes.push(
-        `${unconfirmed} ${unconfirmed === 1 ? 'address' : 'addresses'} could not be opened — X and Instagram refuse automated readers, so this is normal and does not mean the account is wrong. Open them yourself before accepting.`,
+        `${unconfirmed} ${unconfirmed === 1 ? 'address' : 'addresses'} could not be opened. X and Instagram refuse automated readers, so this is normal and does not mean the account is wrong. Open them yourself before accepting.`,
       )
     }
   }

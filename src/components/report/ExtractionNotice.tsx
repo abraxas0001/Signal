@@ -133,7 +133,7 @@ function explanation(snapshot: PostSnapshot, missing: string[], userEntered: str
       return missing.length >= 4
         ? 'Facebook served us its logged-out page, which carries no engagement bar. The post text and author came through fine.'
         : missing.includes('shares')
-          ? 'Facebook publishes no share count on reels — not to us and not in its own interface.'
+          ? 'Facebook publishes no share count on reels, not to us and not in its own interface.'
           : 'Facebook reports reactions rather than likes, and only video posts carry a view count. Text posts have none to give.'
     case 'Instagram':
       return 'Instagram publishes likes and comments on public posts but not shares or views. Follower counts are available for most accounts, not all.'
@@ -144,11 +144,11 @@ function explanation(snapshot: PostSnapshot, missing: string[], userEntered: str
     case 'TikTok':
       return 'TikTok rounds every count above ten thousand before publishing it, so large figures here are the platform’s own approximations. It reports no share-of-voice or reach beyond the play count.'
     case 'Threads':
-      return 'Threads shows impression counts to nobody, including the author — there is no view figure to withhold.'
+      return 'Threads shows impression counts to nobody, including the author, so there is no view figure to withhold.'
     case 'Reddit':
       return 'Reddit publishes a post’s score and comment count to embeds, but the body text, subscriber counts and view counts need a logged-in read. The score is upvotes minus downvotes, not a like count.'
     case 'Pinterest':
-      return 'Pinterest counts saves and repins rather than likes — reactions are a newer, far less-used control, so a small number beside a large save count is real. It publishes no view count.'
+      return 'Pinterest counts saves and repins rather than likes. Reactions are a newer, far less-used control, so a small number beside a large save count is real. It publishes no view count.'
     case 'Snapchat':
       return 'Snapchat Spotlight reports views and comments but no likes, and its share count is not populated for organic snaps.'
     case 'Telegram':
@@ -156,12 +156,12 @@ function explanation(snapshot: PostSnapshot, missing: string[], userEntered: str
     case 'LinkedIn':
       return 'LinkedIn publishes reactions and comments on public posts, but not shares or views.'
     case 'Bluesky':
-      return 'Bluesky has no view counter at all — not for us, and not for the account owner either.'
+      return 'Bluesky has no view counter at all: not for us, and not for the account owner either.'
     case 'Mastodon':
       return 'Mastodon deliberately does not count impressions; no instance has that number.'
     case 'News Site':
     case 'Blog':
-      return 'Articles do not carry social engagement numbers — this is the published piece itself.'
+      return 'Articles do not carry social engagement numbers. This is the published piece itself.'
     default:
       return 'This platform does not publish those numbers to anyone but the account owner.'
   }

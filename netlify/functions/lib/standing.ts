@@ -5,6 +5,7 @@ import { metaCredentials, type MetaCredentials } from './meta-graph'
 import { commentsForPost } from './social-source'
 import { readHandle, type HandleRef, type HandleSummary } from './handles'
 import type { Comment } from '../../../shared/types'
+import { HOUSE_STYLE } from './house-style'
 
 /**
  * What the public actually thinks of an account.
@@ -55,7 +56,10 @@ Rules that matter:
 - "criticism" is the operative half for the office reading this. Be specific and concrete: name the grievance, not the mood.
 - If the comments are too few or too mixed to support a confident reading, say so in the summary and keep the score near zero.
 - score: -100 means uniformly hostile, +100 uniformly warm, 0 genuinely divided.
-- positive/negative/neutral are percentages of the comments read and must total 100.`
+- positive/negative/neutral are percentages of the comments read and must total 100.
+
+${HOUSE_STYLE}
+`
 
 const SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -173,7 +177,13 @@ export async function readStanding(ref: HandleRef): Promise<Standing> {
 
   // Resolved once rather than per post: it reads the environment and the answer
   // cannot change mid-account.
-  const creds = metaCredentials()
+  //
+  // Withheld entirely when the post list came from a reseller. Those rows carry
+  // the provider's ids, and a Graph endpoint addressed as `<post-id>/comments`
+  // will not accept one — so offering the office's own token here spends a
+  // failed round-trip per post, on the endpoint with the least budget, and
+  // sends the office's page id to a lookup that can never match.
+  const creds = summary.listing.route === 'licensed' ? null : metaCredentials()
 
   for (let i = 0; i < candidates.length; i += 2) {
     const batch = candidates.slice(i, i + 2)
@@ -206,7 +216,7 @@ async function scoreComments(
 
   if (comments.length < 5) {
     throw new Error(
-      `Only ${comments.length} comment${comments.length === 1 ? '' : 's'} across ${about.postsTried} post${about.postsTried === 1 ? '' : 's'} — too few to say anything honest about public opinion.`,
+      `Only ${comments.length} comment${comments.length === 1 ? '' : 's'} across ${about.postsTried} post${about.postsTried === 1 ? '' : 's'}, which is too few to say anything honest about public opinion.`,
     )
   }
 

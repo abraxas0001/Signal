@@ -228,7 +228,7 @@ export async function inspectToken(creds: MetaCredentials): Promise<TokenReport>
 
   if (debug.type && debug.type.toUpperCase() !== 'PAGE') {
     problems.push(
-      `This is a ${debug.type} token, not a Page token. Graph API Explorer gives you a User token by default — use its "Get Page Access Token" option and pick the page, or the comment calls will keep being refused.`,
+      `This is a ${debug.type} token, not a Page token. Graph API Explorer gives you a User token by default. Use its "Get Page Access Token" option and pick the page, or the comment calls will keep being refused.`,
     )
   }
 
@@ -242,7 +242,7 @@ export async function inspectToken(creds: MetaCredentials): Promise<TokenReport>
 
   if (expiringSoon && expiresAt) {
     problems.push(
-      `This token expires ${new Date(expiresAt).toUTCString()}. Short-lived tokens last about an hour — exchange it for a long-lived one at developers.facebook.com/tools/debug/accesstoken, or this stops working today.`,
+      `This token expires ${new Date(expiresAt).toUTCString()}. Short-lived tokens last about an hour, so exchange it for a long-lived one at developers.facebook.com/tools/debug/accesstoken, or this stops working today.`,
     )
   }
 

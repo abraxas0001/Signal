@@ -198,7 +198,7 @@ export function StatTile({
       // available on hover and to a screen reader, absent from the visual noise.
       title={
         metric.value != null
-          ? `${full(metric.value)} — ${provenanceTitle(metric.source)}`
+          ? `${full(metric.value)}: ${provenanceTitle(metric.source)}`
           : undefined
       }
     >
