@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Search, ShieldCheck, User, X } from 'lucide-react'
+import { Loader2, Plus, Search, ShieldCheck, X } from 'lucide-react'
 import type { Identity } from '@shared/identity'
-import { Button, Chip } from './ui'
+import { Avatar, Button, Chip } from './ui'
+import { PlatformBadge } from '@/components/kit'
 import { suggestionsFromIdentity, type AccountSuggestion } from './SuggestedAccounts'
 import { cn } from '@/lib/utils'
 
@@ -216,12 +217,15 @@ export function FindByName({
 
   return (
     <div>
-      <label className="text-xs uppercase tracking-wide text-ink-3" htmlFor="name-search">
+      <label
+        className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3"
+        htmlFor="name-search"
+      >
         Search by name
       </label>
 
       <div className="relative mt-2">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3">
+        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-3">
           {searching || resolving ? (
             <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden />
           ) : (
@@ -247,14 +251,14 @@ export function FindByName({
           aria-controls="name-results"
           aria-autocomplete="list"
           autoComplete="off"
-          className="min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] py-2 pl-9 pr-9 text-sm text-ink outline-none focus:border-[var(--accent)]"
+          className="min-h-12 w-full rounded-full border border-[var(--border-strong)] bg-[var(--surface)] py-2 pl-11 pr-11 text-sm text-ink shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)] placeholder:text-ink-3"
         />
         {query && (
           <button
             type="button"
             onClick={clear}
             aria-label="Clear the search"
-            className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface)] hover:text-ink"
+            className="absolute right-2 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-2)] hover:text-ink"
           >
             <X size={14} aria-hidden />
           </button>
@@ -262,30 +266,28 @@ export function FindByName({
 
         {/* ── The suggestions ─────────────────────────────────────────────
             A listbox rather than a div of buttons, so a screen reader is told
-            how many options there are and which one is focused. */}
+            how many options there are and which one is focused. Floats as its
+            own lifted card over whatever sits below. */}
         {open && candidates.length > 0 && (
           <ul
             id="name-results"
             role="listbox"
             aria-label="People matching that name"
-            className="absolute z-20 mt-1 max-h-80 w-full overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)] py-1 shadow-[var(--e2)]"
+            /* Capped against the small viewport, not just at 20rem: on a phone
+               with the keyboard up, a 320px list ran past the bottom edge and
+               its last options could never be scrolled into reach. */
+            className="absolute z-20 mt-2 max-h-[min(20rem,55svh)] w-full overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-1.5 shadow-[var(--e3)]"
           >
             {candidates.map((c) => (
               <li key={c.url} role="option" aria-selected={picked?.url === c.url}>
                 <button
                   type="button"
                   onClick={() => void pick(c)}
-                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[var(--surface-2)]"
+                  className="flex min-h-11 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
                 >
-                  <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--surface-2)]">
-                    {c.thumbnail ? (
-                      <img src={c.thumbnail} alt="" className="size-full object-cover" loading="lazy" />
-                    ) : (
-                      <User size={16} className="text-ink-3" aria-hidden />
-                    )}
-                  </span>
+                  <Avatar src={c.thumbnail} name={c.name} size={36} />
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-ink">{c.name}</span>
+                    <span className="block truncate text-sm font-semibold text-ink">{c.name}</span>
                     {c.description && (
                       <span className="block truncate text-xs text-ink-3">{c.description}</span>
                     )}
@@ -327,9 +329,9 @@ export function FindByName({
 
       {/* ── What was found ─────────────────────────────────────────────── */}
       {(identity || found.length > 0) && !resolving && (
-        <div className="mt-3 rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface-2)] p-3">
+        <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-3 sm:p-4">
           <div className="flex items-start justify-between gap-2">
-            <p className="min-w-0 text-sm font-semibold text-ink">
+            <p className="min-w-0 text-sm font-bold text-ink">
               {identity?.name ?? picked?.name}
               {identity?.role && (
                 <span className="ml-1.5 font-normal text-ink-3">{identity.role}</span>
@@ -338,7 +340,7 @@ export function FindByName({
             <button
               type="button"
               onClick={clear}
-              className="shrink-0 text-xs text-ink-3 underline decoration-dotted hover:text-ink"
+              className="inline-flex min-h-11 shrink-0 items-center text-xs text-ink-3 underline decoration-dotted hover:text-ink"
             >
               clear
             </button>
@@ -358,12 +360,17 @@ export function FindByName({
                 return (
                   <li
                     key={`${s.platform}:${s.handle}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-1)] p-2"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-2.5 shadow-[var(--e1)]"
                   >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <Chip tone="neutral">{s.platform}</Chip>
+                    {/* grow + a real basis: at 375px the handle kept the whole
+                        line and the Mine/Competitor pair wraps below it, instead
+                        of the handle truncating to a few letters. */}
+                    <span className="flex min-w-0 grow basis-48 items-center gap-2.5">
+                      <PlatformBadge platform={s.platform} size={32} />
                       <span className="min-w-0">
-                        <span className="block truncate text-sm text-ink">{s.handle}</span>
+                        <span className="block truncate text-sm font-semibold text-ink">
+                          {s.handle}
+                        </span>
                         <span className="block truncate text-xs text-ink-3">{s.source}</span>
                       </span>
                       {s.verified && (
@@ -409,12 +416,12 @@ export function FindByName({
                   return (
                     <li
                       key={`${f.platform}:${f.handle}`}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-1)] p-2"
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-2.5 shadow-[var(--e1)]"
                     >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <Chip tone="neutral">{f.platform}</Chip>
+                      <span className="flex min-w-0 grow basis-48 items-center gap-2.5">
+                        <PlatformBadge platform={f.platform} size={32} />
                         <span className="min-w-0">
-                          <span className="block truncate text-sm text-ink">
+                          <span className="block truncate text-sm font-semibold text-ink">
                             {f.displayName ?? f.handle}
                           </span>
                           <span className="block truncate text-xs text-ink-3">{f.handle}</span>
@@ -425,7 +432,7 @@ export function FindByName({
                           href={f.url}
                           target="_blank"
                           rel="noreferrer noopener"
-                          className="px-1 text-xs text-[var(--accent)] hover:underline"
+                          className="inline-flex min-h-11 items-center px-1.5 text-xs font-medium text-[var(--accent)] hover:underline"
                         >
                           open
                         </a>

@@ -38,16 +38,20 @@ export function Button({
       disabled={disabled}
       {...(disabled ? {} : pressable)}
       className={cn(
-        'relative inline-flex items-center justify-center gap-2 rounded-[--radius-md] font-medium',
+        // Pills, not rounded rects — every action in the reference shots
+        // ("Add Competitor +", "Export", "See More") is a full pill.
+        'relative inline-flex items-center justify-center gap-2 rounded-full font-semibold',
         'select-none disabled:cursor-not-allowed disabled:opacity-45',
         // 48px minimum on anything a thumb hits in motion.
-        size === 'sm' && 'min-h-11 px-3.5 text-sm',
-        size === 'md' && 'min-h-12 px-5 text-base',
-        size === 'lg' && 'min-h-14 px-6 text-lg',
-        variant === 'primary' && 'bg-[var(--accent)] text-[var(--accent-fg)] shadow-[var(--e2)]',
-        variant === 'outline' && 'border border-[var(--border-interactive)] bg-[var(--surface)] text-ink',
+        size === 'sm' && 'min-h-11 px-4 text-sm',
+        size === 'md' && 'min-h-12 px-6 text-base',
+        size === 'lg' && 'min-h-14 px-7 text-lg',
+        variant === 'primary' &&
+          'bg-[var(--accent)] text-[var(--accent-fg)] shadow-[0_1px_2px_rgb(16_24_40/0.1),0_8px_20px_-6px_color-mix(in_oklab,var(--accent)_55%,transparent)] hover:bg-[var(--accent-hover)]',
+        variant === 'outline' &&
+          'border border-[var(--border-strong)] bg-[var(--surface)] text-ink shadow-[var(--e1)] hover:border-[var(--border-interactive)]',
         variant === 'ghost' && 'text-ink-2 hover:bg-[var(--surface-2)]',
-        variant === 'danger' && 'bg-[var(--neg)] text-white',
+        variant === 'danger' && 'bg-[var(--neg)] text-white shadow-[var(--e1)]',
         className,
       )}
       {...rest}
@@ -69,19 +73,19 @@ export function Button({
  * which no custom dropdown here has matched.
  */
 export const selectClass =
-  'select min-h-11 shrink-0 rounded-[--radius-md] border border-[var(--border-interactive)] ' +
-  'bg-[var(--surface)] py-2 pl-3 text-sm text-ink outline-none transition-colors ' +
-  'hover:border-[var(--accent)] focus:border-[var(--accent)]'
+  'select min-h-11 shrink-0 rounded-full border border-[var(--border-strong)] ' +
+  'bg-[var(--surface)] py-2 pl-4 text-sm font-medium text-ink shadow-[var(--e1)] outline-none transition-colors ' +
+  'hover:border-[var(--border-interactive)] focus:border-[var(--accent)]'
 
 export type ChipTone = 'neutral' | 'accent' | 'positive' | 'warning' | 'negative' | 'info'
 
 const CHIP_TONES: Record<ChipTone, string> = {
-  neutral: 'bg-[var(--surface-2)] text-ink-2 border-[var(--border)]',
-  accent: 'bg-[var(--accent-soft)] text-[var(--accent)] border-[color-mix(in_oklab,var(--accent)_28%,transparent)]',
-  positive: 'bg-[var(--pos-soft)] text-[var(--pos)] border-[color-mix(in_oklab,var(--pos)_28%,transparent)]',
-  warning: 'bg-[var(--warn-soft)] text-[var(--warn)] border-[color-mix(in_oklab,var(--warn)_28%,transparent)]',
-  negative: 'bg-[var(--neg-soft)] text-[var(--neg)] border-[color-mix(in_oklab,var(--neg)_28%,transparent)]',
-  info: 'bg-[var(--info-soft)] text-[var(--info)] border-[color-mix(in_oklab,var(--info)_28%,transparent)]',
+  neutral: 'bg-[var(--surface-3)] text-ink-2',
+  accent: 'bg-[var(--accent-soft)] text-[var(--accent)]',
+  positive: 'bg-[var(--pos-soft)] text-[var(--pos)]',
+  warning: 'bg-[var(--warn-soft)] text-[var(--warn)]',
+  negative: 'bg-[var(--neg-soft)] text-[var(--neg)]',
+  info: 'bg-[var(--info-soft)] text-[var(--info)]',
 }
 
 export function Chip({
@@ -101,12 +105,11 @@ export function Chip({
     <span
       title={title}
       className={cn(
-        // Squared and set in mono, so a chip reads as a label filed against a
-        // record rather than a badge on a marketing page. The rounded pastel
-        // pill it replaced is the most over-used component on the web, and a
-        // row of six of them told the reader nothing about which mattered.
-        'inline-flex shrink-0 items-center gap-1.5 rounded-[3px] border px-2 py-[3px]',
-        'font-mono text-[10px] font-medium uppercase leading-none tracking-[0.07em] whitespace-nowrap',
+        // Soft-tinted pills — the vocabulary of every reference dashboard:
+        // "Active", "47.4% ↗", "Public", "All Activity". Sentence case, sans,
+        // no border weight fighting the tint.
+        'inline-flex shrink-0 items-center gap-1 rounded-full border border-transparent px-2.5 py-1',
+        'text-[11px] font-semibold leading-none whitespace-nowrap',
         CHIP_TONES[tone],
         className,
       )}
@@ -566,24 +569,29 @@ export function Empty({
   return (
     <div
       className={cn(
-        // A solid panel, not a dashed outline. The dashed border is the
-        // convention for a drop target or a placeholder that is about to be
-        // filled by the user, and these are neither: they are finished states
-        // that happen to be empty. On a screen with three of them it read as a
-        // page that had failed to load.
-        'flex flex-col items-center justify-center rounded-[--radius-md] border',
-        'border-[var(--border)] bg-[var(--surface-2)] px-5 py-8 text-center sm:py-10',
+        // A finished-but-empty state, dressed as a real panel rather than a
+        // flat grey rectangle: a white card lying on the page with a soft
+        // top-tinted wash and a proper icon badge, so an empty section reads
+        // as "nothing here yet" rather than "this failed to load".
+        'relative flex flex-col items-center justify-center overflow-hidden rounded-[var(--radius-lg)] border text-center',
+        'border-[color-mix(in_oklab,var(--border)_70%,transparent)] bg-[var(--surface)] px-5 py-9 shadow-[var(--e1)] sm:py-11',
         className,
       )}
     >
+      {/* A faint accent wash at the top edge, for depth. */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-24"
+        style={{ background: 'radial-gradient(80% 100% at 50% 0%, color-mix(in oklab, var(--accent) 8%, transparent) 0%, transparent 100%)' }}
+        aria-hidden
+      />
       {icon && (
-        <span className="mb-2.5 grid size-9 place-items-center rounded-full bg-[var(--surface-2)] text-ink-3">
+        <span className="relative mb-3 grid size-11 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] shadow-[var(--e1)]">
           {icon}
         </span>
       )}
-      <p className="text-[15px] font-semibold">{title}</p>
-      {body && <p className="mt-1 max-w-[52ch] text-sm leading-relaxed text-ink-2">{body}</p>}
-      {action && <div className="mt-3.5">{action}</div>}
+      <p className="relative text-[15px] font-semibold">{title}</p>
+      {body && <p className="relative mt-1 max-w-[52ch] text-sm leading-relaxed text-ink-2">{body}</p>}
+      {action && <div className="relative mt-4">{action}</div>}
     </div>
   )
 }

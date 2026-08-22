@@ -1,13 +1,14 @@
 import { useEffect, useRef } from 'react'
 import * as m from 'motion/react-m'
 import { AnimatePresence, useReducedMotion } from 'motion/react'
-import { Download, Trash2, X } from 'lucide-react'
+import { Clock, Eye, Heart, MessageCircle, Trash2, X } from 'lucide-react'
 import type { HistoryEntry } from '@/hooks/useHistory'
-import { Button, Chip, type ChipTone } from './ui'
+import { Button, Chip, Provenance, type ChipTone } from './ui'
+import { PlatformBadge, youtubeThumb } from '@/components/kit'
 import { SENTIMENT_TONE } from '@shared/taxonomy'
 import type { Sentiment } from '@shared/taxonomy'
 import { ease, listItem, listStagger, spring } from '@/lib/motion'
-import { relativeTime } from '@/lib/utils'
+import { compact, relativeTime } from '@/lib/utils'
 import { downloadCsv, downloadWorkbook } from '@/lib/export'
 import { ExportButton } from '@/components/ExportButton'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -67,7 +68,7 @@ export function HistoryPanel({
             role="dialog"
             aria-modal="true"
             aria-label="History"
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[86svh] overflow-y-auto rounded-t-[--radius-2xl] border-t border-[var(--border)] bg-[var(--surface)] scroller"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[86svh] overflow-y-auto rounded-t-[var(--radius-2xl)] border-t border-[var(--border)] bg-[var(--surface)] scroller"
             initial={reduced ? false : { y: '100%' }}
             animate={{ y: 0 }}
             exit={reduced ? { opacity: 0 } : { y: '100%' }}
@@ -121,38 +122,94 @@ export function HistoryPanel({
                 Stored on this device only. Opening one re-runs it, because engagement counts move.
               </p>
 
+              {/* An empty sheet used to be just the header over blank space,
+                  which read as a loading failure. One quiet, honest row. */}
+              {entries.length === 0 && (
+                <div className="mt-4 flex items-center gap-3 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-4">
+                  <span
+                    className="icon-badge-sm"
+                    style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+                  >
+                    <Clock size={15} aria-hidden />
+                  </span>
+                  <p className="text-sm leading-relaxed text-ink-2">
+                    Nothing analysed yet. Reports land here as you run them.
+                  </p>
+                </div>
+              )}
+
               <m.ul className="mt-4 space-y-2" variants={listStagger} initial="hidden" animate="show">
                 {entries.map((e) => {
                   const tone =
                     TONE_TO_CHIP[SENTIMENT_TONE[e.sentiment as Sentiment] ?? 'neutral'] ?? 'neutral'
+                  // Stored posts carry no imagery except what the snapshot
+                  // kept — but a YouTube URL names its own thumbnail, so a
+                  // row is never a grey square when the platform hands us a
+                  // still for free.
+                  const thumb = e.thumbnail ?? youtubeThumb(e.url)
+                  const eng = e.report.snapshot.engagement
+                  // Carry each metric whole, not just its value: `source` is
+                  // what keeps a measured like count from reading like an
+                  // estimated one. Provenance stays silent for the measured
+                  // majority and speaks only on the figures a reader must not
+                  // mistake for exact.
+                  const minis = [
+                    { key: 'likes', Icon: Heart, metric: eng.likes },
+                    { key: 'comments', Icon: MessageCircle, metric: eng.comments },
+                    { key: 'views', Icon: Eye, metric: eng.views },
+                  ].filter((f) => f.metric.value != null)
                   return (
                     <m.li key={e.id} variants={listItem}>
-                      <div className="flex items-center gap-3 rounded-[--radius-md] bg-[var(--surface-2)] p-2.5">
+                      <div className="flex items-center gap-3 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-2.5">
                         <button
                           onClick={() => onOpen(e)}
                           className="flex min-w-0 flex-1 items-center gap-3 text-left"
                         >
-                          {e.thumbnail ? (
-                            <img
-                              src={e.thumbnail}
-                              alt=""
-                              loading="lazy"
-                              className="size-11 shrink-0 rounded-[--radius-sm] object-cover"
-                            />
-                          ) : (
-                            <span className="grid size-11 shrink-0 place-items-center rounded-[--radius-sm] bg-[var(--surface-3)] text-xs text-ink-3">
-                              {e.platform.slice(0, 2)}
-                            </span>
-                          )}
+                          <span className="relative shrink-0">
+                            {thumb ? (
+                              <img
+                                src={thumb}
+                                alt=""
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="size-14 rounded-[var(--radius-md)] object-cover"
+                              />
+                            ) : (
+                              <span className="grid size-14 place-items-center rounded-[var(--radius-md)] bg-[var(--surface-3)]">
+                                <PlatformBadge platform={e.platform} size={24} />
+                              </span>
+                            )}
+                            {thumb && (
+                              <span className="absolute -bottom-1 -right-1">
+                                <PlatformBadge
+                                  platform={e.platform}
+                                  size={16}
+                                  className="ring-2 ring-[var(--surface-2)]"
+                                />
+                              </span>
+                            )}
+                          </span>
 
                           <span className="min-w-0 flex-1">
-                            <span className="line-clamp-2 block text-sm font-medium leading-snug">
+                            <span
+                              className="line-clamp-2 block text-sm font-semibold leading-snug"
+                              lang={e.report.snapshot.content.languageCode ?? undefined}
+                            >
                               {e.headline}
                             </span>
-                            <span className="mt-0.5 flex items-center gap-2 text-2xs text-ink-3">
-                              <Chip tone={tone} className="!px-1.5 !py-0.5 !text-[10px]">
-                                {e.sentiment}
-                              </Chip>
+                            <span className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-2xs text-ink-3">
+                              {e.sentiment && (
+                                <Chip tone={tone} className="!px-1.5 !py-0.5 !text-[10px]">
+                                  {e.sentiment}
+                                </Chip>
+                              )}
+                              {minis.map(({ key, Icon, metric }) => (
+                                <span key={key} className="inline-flex items-center gap-0.5 tabular-nums">
+                                  <Icon size={10} aria-hidden />
+                                  {compact(metric.value)}
+                                  <Provenance source={metric.source} className="ml-0.5" />
+                                </span>
+                              ))}
                               {relativeTime(e.createdAt)}
                             </span>
                           </span>
@@ -161,7 +218,7 @@ export function HistoryPanel({
                         <button
                           onClick={() => onRemove(e.id)}
                           aria-label="Remove from history"
-                          className="grid size-10 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-3)] hover:text-[var(--neg)]"
+                          className="grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-3)] hover:text-[var(--neg)]"
                         >
                           <Trash2 size={15} />
                         </button>

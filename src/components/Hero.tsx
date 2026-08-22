@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import * as m from 'motion/react-m'
 import { AnimatePresence } from 'motion/react'
-import { ArrowRight, ClipboardPaste, Link2, Sparkles } from 'lucide-react'
+import { ArrowRight, CircleAlert, ClipboardPaste, Link2, ShieldCheck, Sparkles } from 'lucide-react'
 import { Mascot } from './Mascot'
 import { HeroPreview } from './HeroPreview'
-import { Button } from './ui'
-import { ease, haptic, listItem, listStagger, spring, wordIn, wordStagger } from '@/lib/motion'
+import { Button, Chip } from './ui'
+import { ease, haptic, listItem, listStagger, wordIn, wordStagger } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 
 /**
@@ -108,19 +108,10 @@ export function Hero({
       )}
 
       {/* ── Opening ─────────────────────────────────────────────────────────
-          A dateline, not a badge.
-
-          This was a cartoon face beside a pastel pill. On a screen an office
-          opens to check what is being said about them — including who is
-          spreading fabricated video — a mascot is the single loudest signal
-          that the tool is not serious, and it was the largest object above the
-          fold. The line that replaces it is the one a wire dispatch carries:
-          where this desk sits, and what it can read. */}
+          A dateline, not a badge: where this desk sits, and what it can read.
+          The mascot's mood is the app's state, not decoration — idle here,
+          thinking while a screen is reading. */}
       <m.div variants={listItem} className="mt-5 flex items-center gap-3">
-        {/* Back by request, and sized to sit beside the dateline rather than
-            loom over the headline the way it first did. Its mood is the app's
-            state, not decoration: idle here, thinking while a screen is reading,
-            alarmed where something is overdue. */}
         <Mascot state="idle" size={44} className="shrink-0" />
         <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
           <span className="kicker text-[var(--accent)]">Eluru desk</span>
@@ -128,12 +119,13 @@ export function Hero({
           <span className="kicker">Telugu · Hindi · English</span>
         </div>
       </m.div>
-      <div className="mt-3 border-b border-[var(--rule)]" />
 
       {/* Assembles word by word. Each word is its own transform, so the line
-          arrives with authorship rather than appearing finished. */}
+          arrives with authorship rather than appearing finished. One bold
+          sans voice; the closing word takes the product blue instead of a
+          typeface change. */}
       <m.h1
-        className="hed hed-grad mt-5 text-4xl"
+        className="hed mt-6 text-4xl"
         variants={wordStagger}
         initial="hidden"
         animate="show"
@@ -144,10 +136,7 @@ export function Hero({
           </m.span>
         ))}
         <br />
-        {/* The one classic note on the screen: a high-contrast italic serif,
-            set slightly larger to hold its weight against the sans. Used here
-            and on pull quotes, nowhere else. */}
-        <m.span variants={wordIn} className="serif inline-block text-[1.08em]">
+        <m.span variants={wordIn} className="inline-block text-[var(--accent)]">
           properly.
         </m.span>
       </m.h1>
@@ -161,99 +150,106 @@ export function Hero({
         to do about it.
       </m.p>
 
-      {/* ── The wire slot ───────────────────────────────────────────────────
-          A ruled field rather than a rounded box: one hairline above, one ink
-          rule below that takes the accent on focus. 16px text minimum, or iOS
-          zooms the viewport on focus. */}
+      {/* ── The analyse card ────────────────────────────────────────────────
+          The primary control of the whole product, so it gets the one lifted
+          panel on the screen: a large pill field and a full-width pill CTA
+          inside a white card. 16px input text minimum, or iOS zooms the
+          viewport on focus. */}
       <m.div variants={listItem} className="mt-8">
-        {/* A real, soft-edged field again. The bare ruled line was austere and
-            gave the primary control of the whole product no presence. */}
-        <div
-          className={cn(
-            'flex items-stretch overflow-hidden rounded-[--radius-lg] border bg-[var(--surface)] shadow-[var(--e2)]',
-            'transition-[border-color,box-shadow] duration-200',
-            error
-              ? 'border-[var(--neg)]'
-              : 'border-[var(--border-interactive)] focus-within:border-[var(--accent)] focus-within:shadow-[var(--e3)]',
-          )}
-        >
-          <span className="grid w-11 shrink-0 place-items-center text-ink-3">
-            <Link2 size={18} />
-          </span>
+        <div className="card card-lift p-5 sm:p-6">
+          <label htmlFor="post-link" className="kicker block">
+            Post link
+          </label>
 
-          <input
-            id="post-link"
-            ref={inputRef}
-            type="url"
-            inputMode="url"
-            autoComplete="off"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            enterKeyHint="go"
-            value={url}
-            onChange={(e) => {
-              setUrl(e.target.value)
-              if (error) setError(null)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
-            }}
-            placeholder="youtube.com/watch?v=…"
-            aria-label="Post link"
-            aria-invalid={Boolean(error)}
-            aria-describedby={error ? 'url-error' : undefined}
-            className="h-14 min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-ink-3"
-          />
+          <div
+            className={cn(
+              'mt-3 flex items-center overflow-hidden rounded-full border bg-[var(--surface-2)]',
+              'transition-[border-color,box-shadow,background-color] duration-200',
+              error
+                ? 'border-[var(--neg)]'
+                : 'border-[var(--border-strong)] focus-within:border-[var(--accent)] focus-within:bg-[var(--surface)] focus-within:shadow-[0_0_0_4px_var(--accent-soft)]',
+            )}
+          >
+            <span className="grid w-12 shrink-0 place-items-center text-ink-3">
+              <Link2 size={18} />
+            </span>
 
-          {canPaste && !url && (
-            <button
-              onClick={pasteFromClipboard}
-              aria-label="Paste from clipboard"
-              className="grid size-12 shrink-0 place-items-center border-l border-[var(--border)] text-ink-3 transition-colors hover:bg-[var(--surface-2)] hover:text-ink"
-            >
-              <ClipboardPaste size={17} />
-            </button>
-          )}
+            <input
+              id="post-link"
+              ref={inputRef}
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="go"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value)
+                if (error) setError(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit()
+              }}
+              placeholder="youtube.com/watch?v=…"
+              aria-label="Post link"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'url-error' : undefined}
+              className="h-14 min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-ink-3"
+            />
+
+            {canPaste && !url && (
+              <button
+                onClick={pasteFromClipboard}
+                aria-label="Paste from clipboard"
+                className="mr-1.5 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-[var(--surface-3)] hover:text-ink"
+              >
+                <ClipboardPaste size={17} />
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence>
+            {error && (
+              <m.p
+                id="url-error"
+                role="alert"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={ease.out}
+                /* An icon as well as red: the state must not rest on colour
+                   alone. */
+                className="mt-2.5 flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--neg)]"
+              >
+                <CircleAlert size={14} className="shrink-0" aria-hidden />
+                {error}
+              </m.p>
+            )}
+          </AnimatePresence>
+
+          <Button onClick={submit} size="lg" className="sheen mt-4 w-full">
+            <Sparkles size={17} />
+            Analyse this post
+            <ArrowRight size={17} />
+          </Button>
         </div>
-
-        <AnimatePresence>
-          {error && (
-            <m.p
-              id="url-error"
-              role="alert"
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={ease.out}
-              /* Mono as well as red: the state must not rest on colour alone. */
-              className="mt-2 font-[var(--font-mono)] text-[12px] uppercase tracking-[0.08em] text-[var(--neg)]"
-            >
-              {error}
-            </m.p>
-          )}
-        </AnimatePresence>
-
-        <Button onClick={submit} size="lg" className="sheen mt-3 w-full">
-          <Sparkles size={17} />
-          Analyse this post
-          <ArrowRight size={17} />
-        </Button>
       </m.div>
 
       {/* ── Proof ───────────────────────────────────────────────────────────
           Three facts that answer the questions a new user actually has, then
           the output itself. A form that describes its result is asking to be
           imagined; showing the result is the whole difference. */}
-      <m.div variants={listItem} className="mt-7 grid grid-cols-3 gap-3">
+      <m.div variants={listItem} className="mt-6 grid grid-cols-3 gap-3">
         {[
           ['14', 'platforms'],
           ['0', 'API keys needed'],
           ['~4s', 'per post'],
         ].map(([value, label]) => (
-          <div key={label} className="border-t border-[var(--border)] pt-2.5">
-            <p className="num text-xl">{value}</p>
-            <p className="mt-0.5 text-2xs leading-tight text-ink-3">{label}</p>
+          <div key={label} className="card px-3 py-3.5 text-center sm:px-4">
+            <p className="tnum text-xl font-bold tracking-[-0.02em] text-ink">{value}</p>
+            <p className="mt-1 text-2xs leading-tight text-ink-3">{label}</p>
           </div>
         ))}
       </m.div>
@@ -263,22 +259,26 @@ export function Hero({
       </m.div>
 
       {/* ── Colophon ────────────────────────────────────────────────────────
-          Eleven pill chips read as eleven buttons, and none of them were
-          tappable. A single mono line says the same thing, recovers about
-          90px, and stops promising an interaction that does not exist. */}
-      <m.div variants={listItem} className="mt-8 border-t border-[var(--border)] pt-3">
+          Quiet soft-tinted labels, not buttons: no borders, no shadows, and
+          nothing here promises an interaction that does not exist. */}
+      <m.div variants={listItem} className="mt-8">
         <p className="kicker">Works with</p>
-        <p className="mt-2 font-[var(--font-mono)] text-[11px] leading-[1.9] tracking-[0.08em] text-ink-3">
-          {SUPPORTED.join(' · ').toUpperCase()}
-        </p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {SUPPORTED.map((p) => (
+            <Chip key={p}>{p}</Chip>
+          ))}
+        </div>
       </m.div>
 
-      <m.p
+      <m.div
         variants={listItem}
-        className="mt-5 border-t border-[var(--border)] pt-3 text-xs leading-relaxed text-ink-3"
+        className="mt-6 flex items-start gap-2.5 rounded-[var(--radius-md)] bg-[var(--surface-2)] px-4 py-3"
       >
-        Public posts only. Nothing is stored on a server, so your history stays on this device.
-      </m.p>
+        <ShieldCheck size={15} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+        <p className="text-xs leading-relaxed text-ink-3">
+          Public posts only. Nothing is stored on a server, so your history stays on this device.
+        </p>
+      </m.div>
     </m.div>
   )
 }

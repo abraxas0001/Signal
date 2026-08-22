@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
-import { Check, ExternalLink, Plus, Search, TriangleAlert } from 'lucide-react'
+import { Check, ExternalLink, Plus, Search, TriangleAlert, Users } from 'lucide-react'
 import type { Platform } from '@shared/taxonomy'
 import type { Identity } from '@shared/identity'
 import { parseHandleUrl } from '@shared/handle-url'
 import { handleId, listHandles, saveHandle, type TrackedHandle } from '@/lib/handles'
-import { Avatar, Button, Card, Chip } from './ui'
+import { Button, Card, Chip } from './ui'
+import { PlatformBadge } from '@/components/kit'
 import { cn } from '@/lib/utils'
 
 /**
@@ -144,10 +145,15 @@ export function SuggestedAccounts({
   if (pending.length === 0 && suggestions.length === 0) {
     return (
       <Card>
-        <div className="flex items-start gap-3">
-          <Search size={17} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+        <div className="flex items-start gap-3.5">
+          <span
+            className="icon-badge"
+            style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+          >
+            <Search size={18} aria-hidden />
+          </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold">No accounts were found for {identity.name}</p>
+            <p className="text-sm font-bold">No accounts were found for {identity.name}</p>
             <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
               Public records carry a politician&rsquo;s social accounts only when somebody has
               added them, and for most sitting members nobody has. Paste the addresses below and
@@ -167,10 +173,17 @@ export function SuggestedAccounts({
   if (pending.length === 0) {
     return (
       <Card>
-        <p className="flex items-center gap-2 text-sm text-ink-2">
-          <Check size={16} className="shrink-0 text-[var(--pos)]" aria-hidden />
-          Every account we know about for {identity.name} is already being tracked.
-        </p>
+        <div className="flex items-center gap-3.5">
+          <span
+            className="icon-badge"
+            style={{ background: 'var(--pos-soft)', color: 'var(--pos)' }}
+          >
+            <Check size={18} aria-hidden />
+          </span>
+          <p className="text-sm leading-relaxed text-ink-2">
+            Every account we know about for {identity.name} is already being tracked.
+          </p>
+        </div>
       </Card>
     )
   }
@@ -180,15 +193,23 @@ export function SuggestedAccounts({
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-[15px] font-semibold">
-            {pending.length} {pending.length === 1 ? 'account' : 'accounts'} we believe{' '}
-            {identity.name.split(/\s+/)[0]} owns
-          </h3>
-          <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
-            Check each one before adding it. Marking an account as yours is what decides whose
-            comments the public mood is read from.
-          </p>
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className="icon-badge shrink-0"
+            style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+          >
+            <Users size={18} aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-[15px] font-bold">
+              {pending.length} {pending.length === 1 ? 'account' : 'accounts'} we believe{' '}
+              {identity.name.split(/\s+/)[0]} owns
+            </h3>
+            <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
+              Check each one before adding it. Marking an account as yours is what decides whose
+              comments the public mood is read from.
+            </p>
+          </div>
         </div>
         {pending.length > 1 && (
           <Button size="sm" variant="outline" onClick={addAll}>
@@ -211,19 +232,24 @@ export function SuggestedAccounts({
                   isAdded && 'border-[color-mix(in_oklab,var(--pos)_35%,var(--rule))]',
                 )}
               >
-                <Avatar src={suggestion.avatarUrl} name={suggestion.displayName ?? suggestion.handle} size={38} />
+                <PlatformBadge platform={suggestion.platform} size={38} />
 
-                <div className="min-w-0 flex-1">
+                {/* grow + a real basis: at 375px the handle keeps its line and
+                    the action pill wraps below it, instead of the handle being
+                    crushed against the button. */}
+                <div className="min-w-0 grow basis-48">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold">{suggestion.platform}</span>
+                    <span className="text-sm font-bold">{suggestion.platform}</span>
                     <span className="truncate text-sm text-ink-2">@{suggestion.handle}</span>
                     {suggestion.verified && <Chip tone="positive">verified</Chip>}
                   </div>
+                  {/* A real tap target: this link is the "open it first" check
+                      the warning below asks for, and it was 16px tall. */}
                   <a
                     href={suggestion.url}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="mt-0.5 inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
+                    className="inline-flex min-h-11 items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
                   >
                     {suggestion.source} · open
                     <ExternalLink size={11} aria-hidden />
@@ -231,12 +257,12 @@ export function SuggestedAccounts({
                 </div>
 
                 {isAdded ? (
-                  <span className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-[--radius-md] border border-[color-mix(in_oklab,var(--pos)_35%,transparent)] bg-[var(--pos-soft)] px-3.5 text-sm font-medium text-[var(--pos)]">
+                  <span className="ml-auto inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--pos)_35%,transparent)] bg-[var(--pos-soft)] px-4 text-sm font-semibold text-[var(--pos)]">
                     <Check size={15} aria-hidden />
                     Added as yours
                   </span>
                 ) : (
-                  <Button size="sm" className="shrink-0" onClick={() => addOne(suggestion)}>
+                  <Button size="sm" className="ml-auto shrink-0" onClick={() => addOne(suggestion)}>
                     <Plus size={15} />
                     This is mine
                   </Button>
@@ -249,9 +275,9 @@ export function SuggestedAccounts({
 
       {/* The impersonation case, said out loud. A public figure's own product
           must not be the thing that hands them an impostor's account labelled
-          as theirs. */}
-      <p className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-ink-3">
-        <TriangleAlert size={13} className="mt-0.5 shrink-0" aria-hidden />
+          as theirs. Restyled as a quiet row, never removed. */}
+      <p className="mt-3 flex items-start gap-2.5 rounded-2xl bg-[var(--surface-2)] px-3.5 py-3 text-xs leading-relaxed text-ink-3">
+        <TriangleAlert size={14} className="mt-0.5 shrink-0 text-[var(--warn)]" aria-hidden />
         <span>
           These come from public records, which anybody can edit. If one of them is not actually
           yours, do not add it. Open it first. An account impersonating you belongs on the

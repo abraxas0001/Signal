@@ -74,16 +74,15 @@
   /* Machine-stated labels: mono, uppercase, widely tracked. */
   --tracking-kicker: 0.16em;
 
-  /* Scaled up one step across the board. The old scale topped out where the
-     new one starts, which is what made every panel read as a table cell rather
-     than as a card. A data desk should stay a shade tighter than a marketing
-     page, so the card sits at 14px where the reference uses 20px. */
-  --radius-xs: 6px;
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
-  --radius-2xl: 32px;
+  /* The premium-SaaS scale: cards sit at 20px, hero panels at 28. Generous
+     radii are half of what reads as "product" in the reference shots — the
+     other half is the soft shadow recipe below. */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-2xl: 36px;
   --radius-pill: 999px;
 }
 
@@ -108,10 +107,10 @@
    * because this is read outdoors in daylight, where a cool ground goes
    * flat and a cream one holds.
    */
-  --bg: #f1ede4;
+  --bg: #eef2f9;
   --surface: #ffffff;
-  --surface-2: #f6f2e9;
-  --surface-3: #ece7db;
+  --surface-2: #f5f7fc;
+  --surface-3: #eaeef7;
   /**
    * The first surface, under the name four components already ask for.
    *
@@ -129,44 +128,44 @@
    * `--surface` on this same `:root`, carry it automatically.
    */
   --surface-1: var(--surface);
-  --border: #e2dccd;
-  --border-strong: #c4bda9;
+  --border: #e3e8f2;
+  --border-strong: #c9d3e6;
   /* The boundary of a control the user can operate. WCAG 1.4.11 asks for 3:1
      on those, which --border-strong does not meet (1.44:1 on white) — fine for
      a decorative rule, not fine for the outline of the app's main input. Kept
      separate so quote rules and dividers stay light. */
-  --border-interactive: #83868f;
+  --border-interactive: #8792a8;
   /* Hairline divider. Purely decorative, so it is exempt from the 3:1 floor —
      it never outlines a control and never carries meaning alone. */
-  --rule: #e5dfd0;
+  --rule: #e7ebf4;
 
-  --text: #13140f;
-  --text-2: #4a4b42;
-  /* Darkened from #767d93: at the old value, small labels sat at 3.76:1 on
-     --surface-2, below the 4.5:1 AA floor. These labels carry the provenance
+  --text: #0e1526;
+  --text-2: #43506b;
+  /* Holds ≥4.5:1 on --surface-2 — these small labels carry the provenance
      marks ("exact" / "estimate"), so they are load-bearing, not decoration. */
-  --text-3: #6b6c61;
+  --text-3: #5d6a87;
 
-  /* Ink blue, from an official record rather than a product launch. The old
-     value was #4f46e5 — Tailwind's stock indigo — which, over white cards in
-     Inter, is the exact combination that reads as generated rather than
-     designed. Blue also leaves red free to mean only one thing: risk. */
-  --accent: #1d3f66;
-  --accent-hover: #16324f;
+  /* Product blue — the primary action colour across every reference shot.
+     Violet is the second voice, used for icon badges, secondary charts and
+     the odd gradient; it is never a button. */
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
   --accent-fg: #ffffff;
-  --accent-soft: #dfe6ef;
+  --accent-soft: #e7eefe;
+  --accent-2: #7c3aed;
+  --accent-2-soft: #f1eafd;
 
   /* Each status colour is darkened just enough to clear 4.5:1 against its own
      soft background — chip text states severity and priority, so it has to be
      readable, not merely tinted. Dark mode already passed and is unchanged. */
-  --pos: #0b7e57;
-  --pos-soft: #e3f7ef;
-  --warn: #a75c05;
-  --warn-soft: #fef3e2;
-  --neg: #d41e1e;
-  --neg-soft: #fdebeb;
-  --info: #0d72b8;
-  --info-soft: #e5f3fd;
+  --pos: #067647;
+  --pos-soft: #e4f6ec;
+  --warn: #b45309;
+  --warn-soft: #fef1e0;
+  --neg: #d92d20;
+  --neg-soft: #feebe9;
+  --info: #0b6bcb;
+  --info-soft: #e6f2fd;
 
   /* Kept as names because a few rules still reference them, but muted to the
      ground. The drifting pastel blobs they used to paint were the single most
@@ -179,30 +178,49 @@
      Not --pos/--neg: status is reserved, and green-against-red here would say
      the subject is good and the opponent bad, which is not what is measured.
 
-     Run through the palette validator against this surface (#f7f6f2), not
-     eyeballed: dE 28.0 normal, 23.0 protanopia, 25.5 tritanopia, both inside
-     the lightness band and over the chroma floor, both clearing 3:1. */
-  --vs-subject: #2b6cb0;
-  --vs-rival: #c07214;
+     Run through the palette validator against white, not eyeballed: the pair
+     is slots 1–2 of the categorical set below, worst adjacent CVD ΔE 13.8,
+     all five ≥3:1 against the card surface. */
+  --vs-subject: #2563eb;
+  --vs-rival: #e8590c;
 
-  --aurora-1: #cfcbbf;
-  --aurora-2: #b9b5a8;
-  --aurora-3: #d7d4ca;
+  /* Categorical series, in fixed assignment order — never cycled, never
+     re-ranked. Validated 2026-08-22 with the dataviz six-check script on
+     #ffffff: lightness band, chroma floor, CVD ΔE 13.8 worst adjacent,
+     normal-vision floor 26.4, contrast all ≥3:1 — ALL PASS. */
+  --chart-1: #2563eb;
+  --chart-2: #e8590c;
+  --chart-3: #0d9488;
+  --chart-4: #7c3aed;
+  --chart-5: #db2777;
+
+  /* Data gradients — the premium tell in every reference shot. Each runs
+     light→dark within ONE hue family so bar length stays the encoding. */
+  --grad-blue: linear-gradient(90deg, #46c6f5 0%, #2563eb 100%);
+  --grad-violet: linear-gradient(135deg, #a78bfa 0%, #6d28d9 100%);
+  --grad-sunset: linear-gradient(90deg, #f6a723 0%, #db2777 100%);
+  --grad-mint: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
+
+  --aurora-1: #d9e6ff;
+  --aurora-2: #eae0ff;
+  --aurora-3: #d7f1fe;
 
   /* Diverging scale for sentiment. Deliberately NOT the --pos/--neg status
      colours: status is reserved, and a naive green/red pair separates by only
      dE 6.5 under deuteranopia. Teal/red measures dE 13.4 (light) and 10.7
      (dark), verified with the palette validator. Position and a visible text
      label still carry the value - colour is only ever reinforcement. */
-  --chart-neg: #e02424;
-  --chart-mid: #878fa5;
+  --chart-neg: #dc2626;
+  --chart-mid: #64748b;
   --chart-pos: #0d9488;
 
-  /* Light elevation: two layers - tight contact + wide ambient. */
-  --e1: 0 1px 2px rgb(11 13 20 / 0.04), 0 1px 3px rgb(11 13 20 / 0.06);
-  --e2: 0 2px 4px rgb(11 13 20 / 0.04), 0 6px 12px rgb(11 13 20 / 0.07);
-  --e3: 0 4px 8px rgb(11 13 20 / 0.05), 0 16px 32px rgb(11 13 20 / 0.1);
-  --e4: 0 8px 16px rgb(11 13 20 / 0.06), 0 32px 64px rgb(11 13 20 / 0.14);
+  /* Light elevation: tight contact + a wide, slightly blue ambient. The blue
+     cast in the big shadows is what makes white cards read as floating on a
+     cool ground rather than printed on it. */
+  --e1: 0 1px 2px rgb(16 24 40 / 0.05), 0 1px 3px rgb(16 24 40 / 0.05);
+  --e2: 0 2px 6px rgb(16 24 40 / 0.04), 0 10px 24px -6px rgb(37 63 135 / 0.09);
+  --e3: 0 6px 16px -4px rgb(16 24 40 / 0.08), 0 20px 44px -8px rgb(37 63 135 / 0.12);
+  --e4: 0 10px 24px -6px rgb(16 24 40 / 0.1), 0 36px 72px -12px rgb(37 63 135 / 0.16);
 
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
@@ -216,43 +234,56 @@
 /* Dark is the default when the viewer has expressed no preference. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #12120f;
-    --surface: #1a1a16;
-    --surface-2: #22221d;
-    --surface-3: #2b2b25;
-    --border: #2f2f29;
-    --border-strong: #454439;
-    --border-interactive: #6f6e62;
-    --rule: #35342d;
+    --bg: #0b0f1a;
+    --surface: #141927;
+    --surface-2: #1a2133;
+    --surface-3: #232c42;
+    --border: #253048;
+    --border-strong: #3a4666;
+    --border-interactive: #6b7793;
+    --rule: #212b42;
 
-    --text: #f2f1ea;
-    --text-2: #bdbcb1;
-    --text-3: #8b8a80;
+    --text: #f2f5fc;
+    --text-2: #b9c3da;
+    --text-3: #8591ad;
 
-    --accent: #8fb3dc;
-    --accent-hover: #a9c6e8;
-    --accent-fg: #0b0e12;
-    --accent-soft: #16202d;
+    --accent: #7fb0f9;
+    --accent-hover: #9cc3fb;
+    --accent-fg: #0a1020;
+    --accent-soft: #16233d;
+    --accent-2: #a78bfa;
+    --accent-2-soft: #241b44;
 
     --pos: #34d399;
-    --pos-soft: #0e2a22;
+    --pos-soft: #0c2a21;
     --warn: #fbbf24;
-    --warn-soft: #2b2110;
+    --warn-soft: #2c2310;
     --neg: #f87171;
-    --neg-soft: #2c1416;
+    --neg-soft: #331519;
     --info: #4cc2ff;
-    --info-soft: #0d2233;
+    --info-soft: #0d2334;
 
-    /* The dark pair is chosen for this surface, not brightened from the light
-       one — the dark lightness band is lower, not higher, so the obvious
-       lightened copy fails it. Validated against #1a1a16: dE 25.0 normal,
-       23.3 protanopia, 22.8 tritanopia. */
-    --vs-subject: #4d89cc;
-    --vs-rival: #bb7d1a;
+    /* The dark set is chosen for this surface, not brightened from the light
+       one — the dark lightness band (L 0.48–0.67) sits LOWER, so the obvious
+       lightened copy fails it. Validated 2026-08-22 against #161B29: CVD ΔE
+       13.8 worst adjacent, all five ≥3:1 — ALL PASS. */
+    --vs-subject: #3b82f6;
+    --vs-rival: #e8590c;
 
-    --aurora-1: #35342d;
-    --aurora-2: #2f2f29;
-    --aurora-3: #454439;
+    --chart-1: #3b82f6;
+    --chart-2: #e8590c;
+    --chart-3: #0d9488;
+    --chart-4: #8b5cf6;
+    --chart-5: #db2777;
+
+    --grad-blue: linear-gradient(90deg, #38bdf8 0%, #3b82f6 100%);
+    --grad-violet: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+    --grad-sunset: linear-gradient(90deg, #f59e0b 0%, #db2777 100%);
+    --grad-mint: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
+
+    --aurora-1: #16233d;
+    --aurora-2: #241b44;
+    --aurora-3: #0e2a3d;
 
     --chart-neg: #f87171;
     --chart-mid: #6b7285;
@@ -271,39 +302,46 @@
 
 /* Explicit toggle wins in both directions. */
 [data-theme='dark'] {
-  --bg: #12120f;
-  --surface: #1a1a16;
-  --surface-2: #22221d;
-  --surface-3: #2b2b25;
-  --border: #2f2f29;
-  --border-strong: #454439;
-  --border-interactive: #6f6e62;
-  --rule: #35342d;
-  --text: #f2f1ea;
-  --text-2: #bdbcb1;
-  --text-3: #8b8a80;
-  --accent: #8fb3dc;
-  --accent-hover: #a9c6e8;
-  --accent-fg: #0b0e12;
-  --accent-soft: #16202d;
+  --bg: #0b0f1a;
+  --surface: #141927;
+  --surface-2: #1a2133;
+  --surface-3: #232c42;
+  --border: #253048;
+  --border-strong: #3a4666;
+  --border-interactive: #6b7793;
+  --rule: #212b42;
+  --text: #f2f5fc;
+  --text-2: #b9c3da;
+  --text-3: #8591ad;
+  --accent: #7fb0f9;
+  --accent-hover: #9cc3fb;
+  --accent-fg: #0a1020;
+  --accent-soft: #16233d;
+  --accent-2: #a78bfa;
+  --accent-2-soft: #241b44;
   --pos: #34d399;
-  --pos-soft: #0e2a22;
+  --pos-soft: #0c2a21;
   --warn: #fbbf24;
-  --warn-soft: #2b2110;
+  --warn-soft: #2c2310;
   --neg: #f87171;
-  --neg-soft: #2c1416;
+  --neg-soft: #331519;
   --info: #4cc2ff;
-  --info-soft: #0d2233;
-    /* The dark pair is chosen for this surface, not brightened from the light
-       one — the dark lightness band is lower, not higher, so the obvious
-       lightened copy fails it. Validated against #1a1a16: dE 25.0 normal,
-       23.3 protanopia, 22.8 tritanopia. */
-    --vs-subject: #4d89cc;
-    --vs-rival: #bb7d1a;
-
-  --aurora-1: #35342d;
-  --aurora-2: #2f2f29;
-  --aurora-3: #454439;
+  --info-soft: #0d2334;
+  /* Same validated dark categorical set as the media-query block above. */
+  --vs-subject: #3b82f6;
+  --vs-rival: #e8590c;
+  --chart-1: #3b82f6;
+  --chart-2: #e8590c;
+  --chart-3: #0d9488;
+  --chart-4: #8b5cf6;
+  --chart-5: #db2777;
+  --grad-blue: linear-gradient(90deg, #38bdf8 0%, #3b82f6 100%);
+  --grad-violet: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+  --grad-sunset: linear-gradient(90deg, #f59e0b 0%, #db2777 100%);
+  --grad-mint: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
+  --aurora-1: #16233d;
+  --aurora-2: #241b44;
+  --aurora-3: #0e2a3d;
   --chart-neg: #f87171;
   --chart-mid: #6b7285;
   --chart-pos: #2dd4bf;
@@ -329,6 +367,13 @@
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-accent-fg: var(--accent-fg);
+  --color-accent-2: var(--accent-2);
+  --color-accent-2-soft: var(--accent-2-soft);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --color-pos: var(--pos);
   --color-pos-soft: var(--pos-soft);
   --color-warn: var(--warn);
@@ -355,7 +400,16 @@ html {
 }
 
 body {
-  background: var(--bg);
+  /* Not a flat fill: a soft blue-violet wash from the top corners gives the
+     whole page depth, so white cards read as floating on a lit ground rather
+     than printed on paper. Fixed attachment so it does not scroll away. The
+     base colour stays --bg for any element that reads it. */
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(60% 50% at 0% 0%, color-mix(in oklab, var(--accent) 9%, transparent) 0%, transparent 60%),
+    radial-gradient(55% 45% at 100% 0%, color-mix(in oklab, var(--accent-2) 8%, transparent) 0%, transparent 55%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--text-base);
@@ -606,10 +660,14 @@ p {
  * those carry `.te`, which reassigns them to --font-telugu.
  */
 .hed {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  letter-spacing: -0.012em;
-  line-height: 1.06;
+  /* The reference dashboards speak one bold sans voice — "Instagram
+     Competitor Overview", "Performance Summary" — so the serif display face
+     retires and the headline becomes Inter at weight 700 with tight
+     tracking. The class name stays: forty call sites keep working. */
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.028em;
+  line-height: 1.08;
   font-feature-settings: 'kern' 1, 'liga' 1;
 }
 
@@ -664,10 +722,13 @@ p {
 }
 
 .kicker {
-  font-family: var(--font-mono);
+  /* Sans, not mono: the reference shots label sections with clean semibold
+     caps ("AUDIENCE AGES", "GENERAL"), never typewriter text. */
+  font-family: var(--font-ui);
   font-size: 11px;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: var(--tracking-kicker);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
 }
@@ -826,10 +887,27 @@ body {
  */
 .card {
   background: var(--surface);
-  border: 1px solid color-mix(in oklab, var(--border) 62%, transparent);
-  border-radius: var(--radius-md);
-  box-shadow: var(--e1);
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  border-radius: var(--radius-lg);
+  /* A hairline top highlight over the elevation shadow: the card catches light
+     on its top edge and drops a soft shadow below, which is what reads as a
+     raised, three-dimensional surface rather than a flat pane. */
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, #fff 60%, transparent),
+    var(--e2);
   contain: layout paint;
+}
+/* The top highlight is wrong on dark — a white inset line looks like a seam.
+   A faint lift from the surface's own light instead. */
+:root:not([data-theme='light']) .card {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, #fff 8%, transparent),
+    var(--e2);
+}
+[data-theme='dark'] .card {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, #fff 8%, transparent),
+    var(--e2);
 }
 
 /** The one panel on a screen that should be looked at first. */
@@ -867,7 +945,7 @@ select:not([multiple]):not([size]),
 .select {
   appearance: none;
   -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234a4b42' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2343506b' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   /* Inset from the edge by the same amount as the text on the other side, so
      the control looks padded rather than pinched. */
@@ -879,17 +957,17 @@ select:not([multiple]):not([size]),
 
 :root:not([data-theme='light']) select:not([multiple]):not([size]),
 :root:not([data-theme='light']) .select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23bdbcb1' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23b9c3da' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) select:not([multiple]):not([size]),
   :root:not([data-theme='dark']) .select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234a4b42' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2343506b' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   }
 }
 [data-theme='dark'] select:not([multiple]):not([size]),
 [data-theme='dark'] .select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23bdbcb1' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23b9c3da' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 /* The list itself is drawn by the OS and cannot be styled, but the colours it
@@ -937,11 +1015,11 @@ select option,
    eyebrow and uses it as the main structural signpost; here it replaces the
    run of bold sentence-case labels that all looked like body text. */
 .eyebrow {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 500;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-3);
 }
@@ -1199,4 +1277,118 @@ select option,
   .docked {
     left: var(--rail-w);
   }
+}
+
+/* ===========================================================================
+   Premium kit helpers — the recurring atoms of the reference dashboards.
+   =========================================================================== */
+
+/* A soft-tinted square housing a lucide icon — the leading element of every
+   stat tile and sidebar row in the reference shots. Colour comes from the
+   caller via `background` and `color`. */
+.icon-badge {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+/**
+ * The small variant.
+ *
+ * It repeats the grid/centring rather than only overriding the size, because
+ * callers reach for `icon-badge-sm` ALONE — and without these the glyph is not
+ * centred in its tile, which is exactly the misplacement that showed up on the
+ * ground, engagement and post-strip headers.
+ */
+.icon-badge-sm {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+/* Card hover: a slight lift on pointer devices only. Transform + shadow, so
+   it composites; no layout work. */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .card-hover {
+    transition:
+      transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--e3);
+  }
+}
+
+/* The pill tab row: "Overview / Post / Stories / Audience". One control, so
+   the active state cannot drift between screens. */
+.pill-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--e1);
+}
+.pill-tab {
+  min-height: 2.25rem;
+  padding-inline: 1rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+.pill-tab:hover {
+  color: var(--text);
+}
+.pill-tab[aria-selected='true'],
+.pill-tab.is-active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  box-shadow: var(--e1);
+}
+
+/* Chart tooltip. Positioned by the chart; styled once here. */
+.chart-tip {
+  pointer-events: none;
+  position: absolute;
+  z-index: 20;
+  min-width: 8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--e3);
+  padding: 0.5rem 0.75rem;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Recessive gridlines for SVG charts. */
+.chart-grid {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+.chart-axis-label {
+  fill: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-ui);
+}
+
+/* Benchmark line — the dotted vertical with a pill label from the
+   competitor-overview reference. */
+.benchmark-line {
+  stroke: var(--accent-2);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 4;
+  stroke-linecap: round;
 }

@@ -5,20 +5,42 @@ import {
   RefreshCw,
   Trash2,
   ExternalLink,
-  TrendingUp,
-  TrendingDown,
   Radar,
   ShieldCheck,
   MessageSquareHeart,
   GitCompareArrows,
+  Info,
+  AtSign,
+  Users,
+  Newspaper,
+  History,
+  MapPin,
+  TrendingUp,
+  BarChart3,
 } from 'lucide-react'
 import type { Platform } from '@shared/taxonomy'
-import { Button, Card, Chip, PageHeader, SectionTitle } from './ui'
+import { Button, Card, Chip, PageHeader, SectionTitle, selectClass } from './ui'
+import {
+  CardHead,
+  DeltaChip,
+  HBarBoard,
+  IconStat,
+  IndiaMap,
+  LineChart,
+  PlatformBadge,
+  PlatformSwitcher,
+  PostThumbCard,
+  Sparkline,
+  seriesColor,
+  youtubeThumb,
+} from '@/components/kit'
+import { INDIA_DOTS, INDIA_BBOX } from './india-dots'
+import { geocodePlace } from './gazetteer'
 import { SuggestedAccounts } from './SuggestedAccounts'
 import { FindByName } from './FindByName'
 import { HeadToHead, type RivalRef } from './HeadToHead'
 import { useStore } from '@/lib/store'
-import { cn } from '@/lib/utils'
+import { cn, compact } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
 import { parseHandleUrl } from '@shared/handle-url'
 import {
@@ -36,6 +58,7 @@ import {
   deltaFor,
   type HandleStats,
   type TrackedHandle,
+  type TrackedPost,
   standingFromSurvey,
   type RivalCache,
   type Standing,
@@ -90,71 +113,19 @@ function ago(iso: string | null): string {
  */
 function Tile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
-      <p className="text-xs text-ink-3">{label}</p>
-      <p className="num mt-0.5 text-lg text-ink-1">{value}</p>
+    <div className="rounded-xl bg-[var(--surface-2)] px-3 py-2.5">
+      <p className="text-[11px] font-medium text-ink-3">{label}</p>
+      <p className="tnum mt-0.5 text-[15px] font-bold text-ink">{value}</p>
     </div>
   )
 }
 
-/**
- * The follower history, drawn from the readings actually stored.
- *
- * The dashboard has been keeping every snapshot since the first refresh and
- * showing none of it — a number and an arrow, where the shape of the last
- * month is the thing a press officer actually wants. Two readings is enough to
- * draw a line; below that there is nothing to say and it renders nothing
- * rather than a flat line implying stability nobody measured.
+/*
+ * The follower history sparkline now comes from the kit. Same discipline as
+ * the hand-rolled one it replaced: two readings is enough to draw a line;
+ * below that it renders nothing rather than a flat line implying stability
+ * nobody measured.
  */
-function Sparkline({ values }: { values: number[] }) {
-  if (values.length < 2) return null
-  const lo = Math.min(...values)
-  const hi = Math.max(...values)
-  const span = hi - lo || 1
-  const pts = values
-    .map((v, i) => `${(i / (values.length - 1)) * 100},${28 - ((v - lo) / span) * 24}`)
-    .join(' ')
-  const rising = (values.at(-1) ?? 0) >= (values[0] ?? 0)
-
-  return (
-    <svg
-      viewBox="0 0 100 30"
-      preserveAspectRatio="none"
-      className="mt-2 h-8 w-full"
-      role="img"
-      aria-label={`Followers over the last ${values.length} readings, ${rising ? 'rising' : 'falling'}`}
-    >
-      <polyline
-        points={pts}
-        fill="none"
-        stroke={rising ? 'var(--pos)' : 'var(--neg)'}
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
-  )
-}
-
-/** The platform's own mark, so a row is identifiable before it is read. */
-function PlatformDot({ platform }: { platform: Platform }) {
-  const tone: Record<string, string> = {
-    YouTube: '#FF0033',
-    Instagram: '#C13584',
-    Facebook: '#0866FF',
-    LinkedIn: '#0A66C2',
-    Bluesky: '#1185FE',
-    Mastodon: '#6364FF',
-  }
-  return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-full"
-      style={{ background: tone[platform] ?? 'var(--ink-3)' }}
-    />
-  )
-}
 
 /**
  * What a comparison is actually made of.
@@ -228,11 +199,19 @@ const MEASURES: {
 export function Dashboard({
   onClose,
   onOpenActions,
+  onRead,
   mode = 'accounts',
 }: {
   onClose: () => void
   /** Route to the task list, for anything on this screen that files one. */
   onOpenActions?: () => void
+  /**
+   * Run the full analysis on one post, in the app.
+   *
+   * Optional, because `compare` mode shows no posts. When absent the post
+   * cards simply link out, which is what they did before.
+   */
+  onRead?: (postUrl: string) => void
   /**
    * 'compare' shows only the side-by-side. It is the same data and the same
    * component — a separate screen would have meant a second copy of every
@@ -248,6 +227,15 @@ export function Dashboard({
   const [platform, setPlatform] = useState<Platform>('YouTube')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * What the running sync is doing, named rather than counted.
+   *
+   * A sync spends most of its time waiting on purpose, and the waits are
+   * uneven — seconds for YouTube, a minute for Instagram. A bare spinner
+   * through that reads as a hang, and the account currently being read is the
+   * one fact that explains the pause.
+   */
+  const [syncNote, setSyncNote] = useState<string | null>(null)
   const [rivals, setRivals] = useState<RivalCache | null>(null)
   const [finding, setFinding] = useState(false)
   const [standings, setStandings] = useState<Record<string, Standing>>({})
@@ -275,6 +263,12 @@ export function Dashboard({
    * moves about once per election.
    */
   const [showRivals, setShowRivals] = useState(false)
+  /**
+   * A view filter over the account list, nothing more. It reorders no data
+   * and forgets itself on the next visit; it exists so an office tracking a
+   * dozen handles can look at one platform at a time.
+   */
+  const [platformFilter, setPlatformFilter] = useState<Platform | null>(null)
 
   useEffect(() => setHandles(listHandles()), [])
 
@@ -329,6 +323,117 @@ export function Dashboard({
       setBusy(null)
     }
   }, [])
+
+  /**
+   * Ask the server to read every tracked account slowly and keep what it finds.
+   *
+   * WHY THIS IS A LOOP. A pass is bounded by the function's timeout, and the
+   * whole sync is not: Instagram alone costs a minute per account, deliberately,
+   * because that pacing is the only reason a gated profile answers at all. So
+   * the server does as much as it can in one pass and says how many accounts it
+   * did not reach; this calls again until it says none. The first version fired
+   * one request, slept two seconds and refreshed — for work measured in
+   * minutes, which is why the screen never changed.
+   *
+   * The device's tracked list travels with the request. It lives in
+   * localStorage on purpose (see `src/lib/store.ts`), so the server cannot read
+   * it, and pressing this button is what hands it over.
+   */
+  const syncAll = useCallback(async () => {
+    if (!handles.length) return
+    setBusy('sync-all')
+    setError(null)
+    setSyncNote('Starting…')
+
+    // A bound on the loop, not on the work. Twelve passes at ~45s is nine
+    // minutes, comfortably past the slowest realistic list; without it a server
+    // that always reported one account remaining would spin forever.
+    const MAX_PASSES = 12
+    let synced = 0
+
+    try {
+      for (let pass = 0; pass < MAX_PASSES; pass++) {
+        const res = await fetch('/api/batch-track-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            handles: handles.map((h) => ({
+              platform: h.platform,
+              handle: h.handle,
+              name: h.displayName ?? h.handle,
+              profileUrl: h.profileUrl,
+              own: h.own,
+            })),
+          }),
+        })
+
+        if (!res.ok || !res.body) {
+          let message = 'The sync could not be started.'
+          try {
+            const j = (await res.json()) as { error?: string }
+            if (j.error) message = j.error
+          } catch {
+            /* no JSON body — the generic message stands */
+          }
+          setError(message)
+          return
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let done = false
+        let remaining = 0
+
+        for (;;) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          buffer += decoder.decode(chunk.value, { stream: true })
+
+          const frames = buffer.split('\n\n')
+          buffer = frames.pop() ?? ''
+
+          for (const frame of frames) {
+            const line = frame.split('\n').find((l) => l.startsWith('data:'))
+            if (!line) continue
+            let event: Record<string, unknown>
+            try {
+              event = JSON.parse(line.slice(5).trim()) as Record<string, unknown>
+            } catch {
+              continue
+            }
+
+            if (event['type'] === 'account') {
+              synced++
+              const posts = typeof event['posts'] === 'number' ? event['posts'] : 0
+              // Name the account being read. A count alone cannot tell the
+              // reader that the long pause is Instagram behaving normally.
+              setSyncNote(
+                `${String(event['handle'])} — ${posts} post${posts === 1 ? '' : 's'} (${synced}/${handles.length})`,
+              )
+            } else if (event['type'] === 'complete') {
+              done = event['done'] === true
+              remaining = typeof event['remaining'] === 'number' ? event['remaining'] : 0
+            } else if (event['type'] === 'error') {
+              setError(String(event['message'] ?? 'The sync failed.'))
+              return
+            }
+          }
+        }
+
+        if (done) break
+        setSyncNote(`${remaining} account${remaining === 1 ? '' : 's'} left — continuing…`)
+      }
+
+      setSyncNote('Reading back what was stored…')
+      await refresh(handles)
+      setSyncNote(null)
+    } catch {
+      setError('Could not reach the server. Check your connection.')
+    } finally {
+      setBusy(null)
+    }
+  }, [handles, refresh])
 
   /** Whether a suggested account is already on the tracker. */
   const isTracked = useCallback(
@@ -668,6 +773,149 @@ export function Dashboard({
   const own = useMemo(() => handles.filter((h) => h.own), [handles])
   const watched = useMemo(() => handles.filter((h) => !h.own), [handles])
 
+  /**
+   * The set the flagship sections read from — the tracked list, narrowed by the
+   * channel switcher. A view lens only: it hides rows, never reorders or
+   * refetches, and forgets itself on the next visit. When no channel is chosen
+   * it is the whole list, so an unfiltered dashboard is byte-for-byte what it
+   * was before the switcher existed.
+   */
+  const shown = useMemo(
+    () => (platformFilter ? handles.filter((h) => h.platform === platformFilter) : handles),
+    [handles, platformFilter],
+  )
+  const shownOwn = useMemo(() => shown.filter((h) => h.own).length, [shown])
+
+  /**
+   * Where the desk sits, placed on the offline gazetteer — or null when the
+   * seat is not one it knows. Honest by construction: an unplaceable name lights
+   * no zone rather than guessing a pin somewhere plausible.
+   */
+  const ground = useMemo(() => {
+    if (!identity) return null
+    return (
+      geocodePlace(identity.constituency) ??
+      geocodePlace(identity.district) ??
+      geocodePlace(identity.state)
+    )
+  }, [identity])
+
+  /**
+   * Follower history per account on one shared date axis, for the growth chart.
+   * Own accounts take the subject colour; watched accounts take the validated
+   * series palette, offset past blue so none collides with the subject. Only an
+   * account with two placed readings draws a line — a single reading is a dot,
+   * not a trend — and the whole card stays hidden until at least one qualifies.
+   */
+  const growth = useMemo(() => {
+    const withHistory = [...shown]
+      .filter((h) => h.snapshots.filter((s) => s.followers != null).length >= 2)
+      .sort((a, b) => Number(b.own) - Number(a.own))
+    if (!withHistory.length) return null
+    // One shared time axis: every reading time across the qualifying accounts,
+    // ISO strings so a lexical sort is a chronological one. Each account's line
+    // spans only its own readings — nulls elsewhere are skipped, never bridged
+    // with a value nobody took.
+    const times = [
+      ...new Set(
+        withHistory.flatMap((h) =>
+          h.snapshots.filter((s) => s.followers != null).map((s) => s.takenAt),
+        ),
+      ),
+    ].sort()
+    let w = 0
+    const series = withHistory.map((h) => {
+      const byTime = new Map<string, number>()
+      for (const s of h.snapshots) if (s.followers != null) byTime.set(s.takenAt, s.followers)
+      return {
+        name: h.displayName ?? h.handle,
+        color: h.own ? 'var(--vs-subject)' : seriesColor(w++ + 1),
+        values: times.map((t) => byTime.get(t) ?? null),
+      }
+    })
+    const labels = times.map((t) =>
+      new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+    )
+    return { labels, series }
+  }, [shown])
+
+  /**
+   * The follower board — one gradient bar per account, brand-badge lead, the
+   * desk's own rows emphasised. Counted from the latest reading each account
+   * holds; accounts with no follower reading are left off rather than drawn at
+   * a zero nobody measured.
+   */
+  const followerBoard = useMemo(
+    () =>
+      shown
+        .map((h) => ({ h, followers: statsFor(h.snapshots.at(-1)).followers }))
+        .filter((x): x is { h: TrackedHandle; followers: number } => x.followers != null)
+        .sort((a, b) => b.followers - a.followers)
+        .slice(0, 8),
+    [shown],
+  )
+
+  /**
+   * The headline figures, added up from readings already on this device.
+   * Nothing here is fetched and nothing is estimated — it is the tracked
+   * list, counted. Deltas are deliberately absent: a change needs two
+   * readings of the same total to exist before it can be claimed, and no
+   * such total is stored.
+   */
+  const kpis = useMemo(() => {
+    const latest = shown.map((h) => statsFor(h.snapshots.at(-1)))
+    const followerCounts = latest
+      .map((s) => s.followers)
+      .filter((v): v is number => v != null)
+    return {
+      totalFollowers: followerCounts.length
+        ? followerCounts.reduce((a, b) => a + b, 0)
+        : null,
+      withFollowers: followerCounts.length,
+      postsRead: latest.reduce((a, s) => a + s.posts, 0),
+      readingsKept: shown.reduce((a, h) => a + h.snapshots.length, 0),
+    }
+  }, [shown])
+
+  /**
+   * The most engaging posts across every latest reading, ranked by the
+   * interactions the platforms actually publish. Posts whose likes and
+   * comments are both unpublished sink to the end rather than pretending
+   * to a zero nobody measured.
+   */
+  const topPosts = useMemo(() => {
+    const rows: { post: TrackedPost; handle: TrackedHandle; interactions: number; measured: boolean }[] = []
+    for (const h of shown) {
+      for (const p of h.snapshots.at(-1)?.posts ?? []) {
+        rows.push({
+          post: p,
+          handle: h,
+          interactions: (p.likes ?? 0) + (p.comments ?? 0),
+          measured: p.likes != null || p.comments != null,
+        })
+      }
+    }
+    return rows.sort((a, b) => b.interactions - a.interactions).slice(0, 8)
+  }, [shown])
+
+  /**
+   * The same posts, split by side.
+   *
+   * One merged list was the wrong shape for a screen whose whole job is
+   * comparison: a rival with a larger following takes every slot, and the
+   * office's own best post is off the end of the strip. Ranked within each
+   * side and shown as two rows, so both are legible at once — and a side with
+   * nothing stored says so rather than silently vanishing.
+   */
+  const topPostsOwn = useMemo(() => topPosts.filter((r) => r.handle.own).slice(0, 6), [topPosts])
+  const topPostsRivals = useMemo(() => topPosts.filter((r) => !r.handle.own).slice(0, 6), [topPosts])
+
+  /** The platforms actually present in the list, for the channel switcher. */
+  const platformsTracked = useMemo(
+    () => [...new Set(handles.map((h) => h.platform))],
+    [handles],
+  )
+
   return (
     <m.div
       className="shell shell-wide stack page-end"
@@ -691,6 +939,214 @@ export function Dashboard({
         />
       </m.div>
 
+      {/* ── Channel switcher ─────────────────────────────────────────────
+          The circle-badge lens from the reference boards. Client-side only:
+          it narrows the flagship sections and the account list to one channel
+          at a time and drives nothing but that view state. */}
+      {mode === 'accounts' && platformsTracked.length > 1 && (
+        /* Full-bleed and free to scroll sideways on a phone: many channels
+           simply do not fit 375px. The gutter padding plus the mask fade at
+           each edge is what says "there is more" without a scrollbar; py gives
+           the active ring room so it is not clipped by the scroll clip box. */
+        <m.div
+          variants={fadeUp}
+          className="bleed -mt-1 flex items-center gap-3 overflow-x-auto py-1.5 [mask-image:linear-gradient(to_right,transparent,black_var(--gutter),black_calc(100%_-_var(--gutter)),transparent)]"
+        >
+          <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">
+            Channels
+          </span>
+          <PlatformSwitcher
+            className="shrink-0"
+            platforms={platformsTracked}
+            active={platformFilter}
+            onChange={(p) => setPlatformFilter(p as Platform | null)}
+          />
+        </m.div>
+      )}
+
+      {/* ── The headline numbers ─────────────────────────────────────────
+          Counted from the readings this device already holds. No delta chips:
+          a change needs two readings of the same total before it can be
+          claimed, and these totals are computed fresh each visit. */}
+      {mode === 'accounts' && handles.length > 0 && (
+        <m.div variants={fadeUp} className="grid grid-cols-2 gap-3 lg:grid-cols-4 sm:gap-4">
+          <IconStat
+            icon={<AtSign size={18} />}
+            label="Accounts tracked"
+            value={shown.length}
+            tint="blue"
+            deltaLabel={`${shownOwn} yours · ${shown.length - shownOwn} watched`}
+          />
+          <IconStat
+            icon={<Users size={18} />}
+            label="Total followers"
+            value={kpis.totalFollowers}
+            tint="violet"
+            hero={kpis.totalFollowers != null}
+            deltaLabel={
+              kpis.withFollowers === 0
+                ? 'No follower reading yet — refresh to take one'
+                : kpis.withFollowers < shown.length
+                  ? `Across the ${kpis.withFollowers} of ${shown.length} accounts with a reading`
+                  : 'Across every account shown'
+            }
+          />
+          <IconStat
+            icon={<Newspaper size={18} />}
+            label="Posts read"
+            value={kpis.postsRead}
+            tint="teal"
+            deltaLabel="From the latest reading of each account"
+          />
+          <IconStat
+            icon={<History size={18} />}
+            label="Readings kept"
+            value={kpis.readingsKept}
+            tint="orange"
+            deltaLabel="Snapshots stored on this device only"
+          />
+        </m.div>
+      )}
+
+      {/* ── Where this desk sits ─────────────────────────────────────────
+          The map that replaced the flat "where she's from" line. Lights the
+          seat when the offline gazetteer knows it, and — when it does not —
+          shows the dotted country with nothing pinned rather than a guessed
+          dot, because a full-looking map is not worth a placed lie. */}
+      {mode === 'accounts' && (
+        <m.section variants={fadeUp}>
+          <Card>
+            {/* The kit's standard card opening. The identity chips would crush
+                the title from CardHead's shrink-0 action slot on a 375px
+                screen, so they get their own wrapping row beneath instead. */}
+            <CardHead
+              icon={<MapPin size={16} />}
+              tint="blue"
+              title={ground ? `${ground.name} — your ground` : identity ? 'Your ground' : 'Where this desk sits'}
+              sub={
+                identity
+                  ? 'The seat this desk watches, on the map.'
+                  : 'Set who this desk is for to light its seat here.'
+              }
+            />
+            {identity && (identity.role || identity.party || identity.state) && (
+              <div className="-mt-1 mb-4 flex flex-wrap items-center gap-1.5">
+                {identity.role && <Chip tone="accent">{identity.role}</Chip>}
+                {identity.party && <Chip>{identity.party}</Chip>}
+                {identity.state && <Chip>{identity.state}</Chip>}
+              </div>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-[1.5fr_1fr] sm:items-start">
+              <div className="rounded-2xl bg-[var(--surface-2)] p-3">
+                <IndiaMap
+                  dots={INDIA_DOTS}
+                  bbox={INDIA_BBOX}
+                  zones={ground ? [{ lon: ground.lon, lat: ground.lat, radiusDeg: 1.2, label: ground.name }] : []}
+                />
+              </div>
+              <div className="space-y-3">
+                {ground ? (
+                  <>
+                    <div className="rounded-2xl bg-[var(--surface-2)] p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">
+                        Home ground
+                      </p>
+                      <p className="mt-1 text-[17px] font-bold text-ink">{ground.name}</p>
+                      <p className="mt-0.5 text-sm text-ink-3">{ground.state}</p>
+                      {(identity?.role || identity?.party) && (
+                        <p className="mt-2 text-xs leading-relaxed text-ink-2">
+                          {[identity?.role, identity?.party].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                    {/* The short column would otherwise leave a strip of dead
+                        white beside the tall map, so the honesty of the pin
+                        gets said out loud instead of left in a code comment. */}
+                    <div className="flex items-start gap-2.5 rounded-2xl bg-[var(--surface-2)] p-4">
+                      <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+                      <p className="text-xs leading-relaxed text-ink-3">
+                        Placed with the offline gazetteer on this device — the seat name never
+                        leaves it. A seat the map does not know lights nothing rather than a guess.
+                      </p>
+                    </div>
+                  </>
+                ) : identity ? (
+                  <div className="flex items-start gap-2.5 rounded-2xl bg-[var(--surface-2)] p-4">
+                    <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+                    <p className="text-xs leading-relaxed text-ink-3">
+                      {identity.constituency || identity.district || identity.state
+                        ? `We track ${identity.constituency ?? identity.district ?? identity.state}, but it is not on the offline map yet — so nothing is pinned, rather than dropped somewhere plausible.`
+                        : 'No seat is set for this desk yet, so there is nowhere to light.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl bg-[var(--surface-2)] p-4">
+                    <p className="text-[15px] font-semibold text-ink">No person set yet</p>
+                    <p className="mt-1 text-xs leading-relaxed text-ink-3">
+                      Once this desk knows whose it is, its constituency is lit here and the
+                      whole screen fills in around it.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+        </m.section>
+      )}
+
+      {/* ── Growth across your accounts ──────────────────────────────────
+          One line per tracked account over every follower reading kept here.
+          The subject is drawn in the subject colour; the accounts it watches
+          take the validated series palette. Drawn only where a line can be:
+          two placed readings, or the card stays away. */}
+      {mode === 'accounts' && growth && (
+        <m.section variants={fadeUp}>
+          <Card>
+            <CardHead
+              icon={<TrendingUp size={16} />}
+              tint="violet"
+              title="Growth across your accounts"
+              sub="One line per tracked account."
+            />
+            <LineChart labels={growth.labels} series={growth.series} formatValue={compact} />
+            {/* The provenance line, kept whole. CardHead's one-line sub would
+                truncate exactly the half that matters on a phone. */}
+            <p className="mt-3 text-xs text-ink-3">
+              Followers over every reading stored on this device — never estimated between them.
+            </p>
+          </Card>
+        </m.section>
+      )}
+
+      {/* ── Followers across your accounts ───────────────────────────────
+          The gradient board from the reference, brand-badge leads, the desk's
+          own rows emphasised. Follower counts only — the one figure every
+          platform publishes — so no account is drawn at a number it never gave. */}
+      {mode === 'accounts' && followerBoard.length > 1 && (
+        <m.section variants={fadeUp}>
+          <Card>
+            <CardHead
+              icon={<BarChart3 size={16} />}
+              tint="teal"
+              title="Followers across your accounts"
+              sub="The latest reading each holds, largest first."
+            />
+            <div className="mt-1">
+              <HBarBoard
+                rows={followerBoard.map(({ h, followers }) => ({
+                  label: h.displayName ?? h.handle,
+                  value: followers,
+                  lead: <PlatformBadge platform={h.platform} size={28} />,
+                  emphasis: h.own,
+                }))}
+                formatValue={(n) => compact(n)}
+              />
+            </div>
+          </Card>
+        </m.section>
+      )}
+
       {/* Compare mode had no error slot at all: the only one lives inside the
           accounts-only Add card below, so a failed rival discovery or opinion
           read set state that nothing rendered and the button simply stopped
@@ -700,7 +1156,7 @@ export function Dashboard({
         <m.p
           variants={fadeUp}
           role="alert"
-          className="rounded-[--radius-md] border border-[color-mix(in_oklab,var(--neg)_30%,transparent)] bg-[var(--neg-soft)] px-3 py-2 text-sm text-[var(--neg)]"
+          className="rounded-[var(--radius-md)] border border-[color-mix(in_oklab,var(--neg)_30%,transparent)] bg-[var(--neg-soft)] px-3 py-2 text-sm text-[var(--neg)]"
         >
           {error}
         </m.p>
@@ -724,30 +1180,36 @@ export function Dashboard({
               and the box below used to be the only way in. */}
           <FindByName onAdd={addSuggested} isTracked={isTracked} />
 
-          <div className="my-4 flex items-center gap-3">
+          <div className="my-5 flex items-center gap-3">
             <span className="h-px flex-1 bg-[var(--rule)]" aria-hidden />
-            <span className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
               or paste the address
             </span>
             <span className="h-px flex-1 bg-[var(--rule)]" aria-hidden />
           </div>
 
-          <label className="text-xs uppercase tracking-wide text-ink-3" htmlFor="handle-input">
+          <label
+            className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3"
+            htmlFor="handle-input"
+          >
             Profile link or handle
           </label>
-          <div className="mt-2 flex flex-wrap gap-2">
+          {/* Stacked on a phone, one row from sm up. Sharing 343px between a
+              URL input, a platform picker and two labelled buttons left the
+              input too narrow to show the address being pasted into it. */}
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input
               id="handle-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="youtube.com/@channel  ·  bsky.app/profile/…  ·  @handle"
-              className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm text-ink-1 outline-none focus:border-[var(--accent)]"
+              className="min-h-11 w-full min-w-0 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm text-ink shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)] sm:flex-1"
             />
             <select
               aria-label="Platform, used when you type a bare handle"
               value={platform}
               onChange={(e) => setPlatform(e.target.value as Platform)}
-              className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2 py-2 text-sm text-ink-2"
+              className={cn(selectClass, 'w-full sm:w-auto')}
             >
               {PLATFORMS.map((p) => (
                 <option key={p} value={p}>
@@ -756,8 +1218,13 @@ export function Dashboard({
               ))}
             </select>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button onClick={() => void add(true)} disabled={!input.trim()} size="sm">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button
+              onClick={() => void add(true)}
+              disabled={!input.trim()}
+              size="sm"
+              className="w-full sm:w-auto"
+            >
               <Plus size={14} /> Add as mine
             </Button>
             <Button
@@ -765,22 +1232,52 @@ export function Dashboard({
               onClick={() => void add(false)}
               disabled={!input.trim()}
               size="sm"
+              className="w-full sm:w-auto"
             >
               <Plus size={14} /> Add as competitor
             </Button>
           </div>
-          {error && <p className="mt-3 text-sm text-[var(--negative)]">{error}</p>}
-          <p className="mt-3 text-xs text-ink-3">
-            YouTube, Bluesky and Mastodon are pulled automatically. Facebook, Instagram and LinkedIn
-            do not publish a post list without a login. Those show what we can read, and fill in as
-            you analyse individual posts.
-          </p>
+          {error && (
+            <p className="mt-3 text-sm text-[var(--neg)]" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-[var(--surface-2)] px-3.5 py-3">
+            <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+            <p className="text-xs leading-relaxed text-ink-3">
+              YouTube, Bluesky and Mastodon are pulled automatically. Facebook, Instagram and
+              LinkedIn do not publish a post list without a login. Those show what we can read, and
+              fill in as you analyse individual posts.
+            </p>
+          </div>
         </Card>
       </m.div>
       )}
 
       {mode === 'accounts' && handles.length > 0 && (
-        <m.div variants={fadeUp} className="flex justify-end">
+        <m.div variants={fadeUp} className="flex flex-wrap items-center justify-end gap-2">
+          {/* The running commentary sits beside the button rather than
+              replacing its label, so the account being read stays legible
+              while the button keeps saying what it is doing. On a phone it
+              takes its own full line above the buttons instead of squeezing
+              a long handle name against them. */}
+          {syncNote && (
+            <span
+              className="w-full min-w-0 text-left text-xs text-ink-3 tabular-nums sm:w-auto sm:flex-1 sm:text-right"
+              aria-live="polite"
+            >
+              {syncNote}
+            </span>
+          )}
+          <Button
+            size="sm"
+            onClick={() => void syncAll()}
+            disabled={busy != null}
+            title="Read every tracked account slowly and keep what comes back. Gated platforms only publish a post list this way, so this takes minutes rather than seconds."
+          >
+            <RefreshCw size={14} className={busy === 'sync-all' ? 'animate-spin' : ''} />
+            {busy === 'sync-all' ? 'Syncing…' : 'Sync now'}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -818,21 +1315,22 @@ export function Dashboard({
       {mode === 'compare' && !versus && primary && !showRivals && (
         <m.section variants={fadeUp}>
           <Card>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-[15px] font-semibold">
-                  Compare {primary.displayName ?? primary.handle} against rivals
-                </p>
-                <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                  Finds who this account is actually measured against: a member is compared
-                  with other members, not with a national leader. It then reads each one live.
-                </p>
-              </div>
-              <Button size="sm" className="shrink-0" onClick={() => setShowRivals(true)}>
-                <Radar size={15} />
-                Look for comparisons
-              </Button>
-            </div>
+            {/* The button stays below the copy rather than in CardHead's
+                action slot: "Look for comparisons" is ~180px wide and would
+                crush the title to a few letters on a 375px screen. */}
+            <CardHead
+              icon={<Radar size={16} />}
+              tint="violet"
+              title={`Compare ${primary.displayName ?? primary.handle} against rivals`}
+            />
+            <p className="text-sm leading-relaxed text-ink-2">
+              Finds who this account is actually measured against: a member is compared
+              with other members, not with a national leader. It then reads each one live.
+            </p>
+            <Button size="sm" className="mt-3" onClick={() => setShowRivals(true)}>
+              <Radar size={15} />
+              Look for comparisons
+            </Button>
           </Card>
         </m.section>
       )}
@@ -879,7 +1377,7 @@ export function Dashboard({
                   <button
                     onClick={() => void discover()}
                     disabled={finding}
-                    className="ml-auto text-xs text-ink-3 underline decoration-dotted hover:text-ink-1"
+                    className="ml-auto min-h-11 text-xs font-medium text-ink-3 underline decoration-dotted hover:text-ink"
                   >
                     {finding ? 'checking…' : 'redo'}
                   </button>
@@ -889,8 +1387,10 @@ export function Dashboard({
                     things at once: the same office, the same seat, the same
                     trade. Flattening them into one list loses the reason. */}
                 {[...new Set(rivals.rivals.map((r) => r.cohort))].map((cohort) => (
-                  <div key={cohort} className="mt-4">
-                    <p className="text-xs uppercase tracking-wide text-ink-3">{cohort}</p>
+                  <div key={cohort} className="mt-5">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">
+                      {cohort}
+                    </p>
                     <ul className="mt-2 space-y-2">
                       {rivals.rivals
                         .filter((r) => r.cohort === cohort)
@@ -901,11 +1401,11 @@ export function Dashboard({
                           return (
                             <li
                               key={r.name + r.profileUrl}
-                              className="rounded-[--radius-md] border border-[var(--border)] p-3"
+                              className="rounded-2xl bg-[var(--surface-2)] p-4"
                             >
                               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                                <span className="text-sm font-medium text-ink-1">{r.name}</span>
-                                <span className="num text-xs text-ink-3">
+                                <span className="text-sm font-semibold text-ink">{r.name}</span>
+                                <span className="tnum text-xs text-ink-3">
                                   {r.followers != null
                                     ? `${r.followers.toLocaleString('en-IN')} followers`
                                     : '—'}
@@ -997,12 +1497,12 @@ export function Dashboard({
               return (
                 <Card key={h.id} tone={h.own ? 'accent' : undefined}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <PlatformDot platform={h.platform} />
-                      <span className="truncate text-sm font-medium text-ink-1">
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <PlatformBadge platform={h.platform} size={24} />
+                      <span className="truncate text-sm font-semibold text-ink">
                         {h.displayName ?? h.handle}
                       </span>
-                      {h.own && <span className="text-xs text-[var(--accent)]">you</span>}
+                      {h.own && <Chip tone="accent">you</Chip>}
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
                       {/*
@@ -1096,10 +1596,10 @@ export function Dashboard({
                           borrowing zero's place on the axis. */}
                       <div className="mt-3 flex items-end gap-3">
                         {st.score === null ? (
-                          <span className="num text-3xl leading-none text-ink-3">&mdash;</span>
+                          <span className="tnum text-3xl font-bold leading-none text-ink-3">&mdash;</span>
                         ) : (
                           <span
-                            className="num text-3xl leading-none"
+                            className="tnum text-3xl font-bold leading-none"
                             style={{
                               color:
                                 st.score > 15
@@ -1114,7 +1614,7 @@ export function Dashboard({
                           </span>
                         )}
                         <span className="pb-0.5">
-                          <span className="block text-sm text-ink-1">{st.label}</span>
+                          <span className="block text-sm font-semibold text-ink">{st.label}</span>
                           <span className="block text-xs text-ink-3">
                             {st.score === null
                               ? 'No score came back for this reading.'
@@ -1172,7 +1672,9 @@ export function Dashboard({
                         </p>
                       )}
 
-                      {st.summary && <p className="mt-3 text-sm text-ink-1">{st.summary}</p>}
+                      {st.summary && (
+                        <p className="mt-3 text-sm leading-relaxed text-ink">{st.summary}</p>
+                      )}
 
                       {/* Criticism first. It is the half an office has to act on,
                           and putting praise above it buries the work. */}
@@ -1245,21 +1747,18 @@ export function Dashboard({
                 const peak = nums.length ? Math.max(...nums.map(Math.abs)) : 0
 
                 return (
-                  <div
-                    key={measure.label}
-                    className="rounded-[--radius-md] border border-[var(--border)] p-3"
-                  >
-                    <p className="text-sm text-ink-1">{measure.label}</p>
-                    <p className="text-xs text-ink-3">{measure.note}</p>
-                    <div className="mt-2.5 space-y-2">
+                  <div key={measure.label} className="rounded-2xl bg-[var(--surface-2)] p-4">
+                    <p className="text-sm font-semibold text-ink">{measure.label}</p>
+                    <p className="mt-0.5 text-xs text-ink-3">{measure.note}</p>
+                    <div className="mt-3 space-y-2.5">
                       {compared.map((h, i) => {
                         const v = vals[i]
                         const leads = v != null && best != null && v === best
                         return (
                           <div key={h.id}>
-                            <div className="flex items-baseline justify-between gap-2">
-                              <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-2">
-                                <PlatformDot platform={h.platform} />
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-ink-2">
+                                <PlatformBadge platform={h.platform} size={16} />
                                 <span className="truncate">
                                   {h.displayName ?? h.handle}
                                 </span>
@@ -1270,20 +1769,20 @@ export function Dashboard({
                               </span>
                               <span
                                 className={cn(
-                                  'num shrink-0 text-sm tabular-nums',
-                                  leads ? 'font-semibold text-[var(--accent)]' : 'text-ink-1',
+                                  'tnum shrink-0 text-sm',
+                                  leads ? 'font-bold text-[var(--accent)]' : 'font-medium text-ink',
                                 )}
                               >
                                 {v == null ? '—' : measure.fmt(v)}
                               </span>
                             </div>
-                            <div className="mt-1 h-1 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-3)]">
                               <div
                                 className="h-full rounded-full"
                                 style={{
                                   width: peak > 0 && v != null ? `${(Math.abs(v) / peak) * 100}%` : '0%',
-                                  background: leads ? 'var(--accent)' : 'var(--ink-3)',
-                                  opacity: leads ? 1 : 0.4,
+                                  background: leads ? 'var(--grad-blue)' : 'var(--border-strong)',
+                                  opacity: leads ? 1 : 0.7,
                                 }}
                               />
                             </div>
@@ -1297,7 +1796,11 @@ export function Dashboard({
             </div>
 
             {/* The sentence a press officer would actually say out loud. */}
-            {verdict && <p className="mt-4 text-sm text-ink-1">{verdict}</p>}
+            {verdict && (
+              <p className="mt-4 rounded-xl bg-[var(--accent-soft)] px-4 py-3 text-sm font-medium leading-relaxed text-ink">
+                {verdict}
+              </p>
+            )}
 
             <p className="mt-3 text-xs text-ink-3">
               Measured from the most recent reading of each account. A dash means the
@@ -1307,10 +1810,72 @@ export function Dashboard({
         </m.section>
       )}
 
+      {/* ── Most engaging posts ─────────────────────────────────────────
+          The strip from the reference boards, filled honestly: YouTube names
+          its own thumbnail, and every other platform gets the brand-tinted
+          fallback rather than an image we do not have. Ranked by the
+          interactions the platforms actually publish. */}
+      {mode === 'accounts' && topPosts.length > 0 && (
+        <m.section variants={fadeUp}>
+          <SectionTitle hint="Ranked by likes and comments within each side, so a larger rival cannot crowd your own posts off the strip.">
+            Most engaging posts
+          </SectionTitle>
+          <div className="space-y-4">
+            {[
+              { key: 'own', label: 'Yours', rows: topPostsOwn, tone: 'var(--vs-subject)' },
+              { key: 'rivals', label: 'Who you are watching', rows: topPostsRivals, tone: 'var(--vs-rival)' },
+            ]
+              .filter((side) => side.rows.length > 0)
+              .map((side) => (
+                <div key={side.key}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="size-2 rounded-full" style={{ background: side.tone }} aria-hidden />
+                    <p className="eyebrow">{side.label}</p>
+                    <span className="text-[11px] text-ink-3">
+                      {side.rows.length} {side.rows.length === 1 ? 'post' : 'posts'}
+                    </span>
+                  </div>
+                  <div className="bleed flex gap-4 overflow-x-auto pb-2">
+                    {side.rows.map(({ post, handle, interactions, measured }) => (
+                      /* 150px at base, the kit's own width from sm up. At the
+                         kit's 160px a 375px screen fits exactly two cards with
+                         a 7px sliver of the third — invisible, so the row read
+                         as complete. 150px leaves a ~27px peek that says
+                         "scroll me". */
+                      <PostThumbCard
+                        className="w-[150px]"
+                        key={`${handle.id}:${post.url}`}
+                        thumbnailUrl={handle.platform === 'YouTube' ? youtubeThumb(post.url) : null}
+                        platform={handle.platform}
+                        author={handle.displayName ?? handle.handle}
+                        title={post.title}
+                        metaLine={
+                          measured
+                            ? `${compact(interactions)} interactions${post.views != null ? ` · ${compact(post.views)} views` : ''}`
+                            : post.views != null
+                              ? `${compact(post.views)} views`
+                              : 'Interactions not published'
+                        }
+                        href={post.url}
+                        {...(onRead ? { onAnalyse: () => onRead(post.url) } : {})}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+        </m.section>
+      )}
+
+      {/* The channel lens now lives in the header (PlatformSwitcher), where it
+          narrows the whole screen at once. The account list reads the same
+          `platformFilter` it always did — client-side only, hiding rows,
+          reordering and refetching nothing. */}
+
       {/* ── The accounts ────────────────────────────────────────────────── */}
       {(mode === 'compare' ? [] : [
-        { title: 'Your accounts', rows: own },
-        { title: 'Who you are watching', rows: watched },
+        { title: 'Your accounts', rows: own.filter((h) => !platformFilter || h.platform === platformFilter) },
+        { title: 'Who you are watching', rows: watched.filter((h) => !platformFilter || h.platform === platformFilter) },
       ])
         .filter((g) => g.rows.length)
         .map((group) => (
@@ -1322,72 +1887,111 @@ export function Dashboard({
                 const s = statsFor(latest)
                 const d = deltaFor(h)
                 const auto = AUTO.has(h.platform)
+                const sparkValues = h.snapshots
+                  .map((x) => x.followers)
+                  .filter((f): f is number => f != null)
+                const rising = (sparkValues.at(-1) ?? 0) >= (sparkValues[0] ?? 0)
                 return (
                   <Card key={h.id}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        {h.avatarUrl ? (
-                          <img
-                            src={h.avatarUrl}
-                            alt=""
-                            loading="lazy"
-                            // The CDN serves this fine to a direct request and
-                            // refuses it with a referrer attached, which is why
-                            // it rendered as a broken image.
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none'
-                            }}
-                            className="size-9 shrink-0 rounded-full object-cover ring-1 ring-[var(--border)]"
-                          />
-                        ) : (
-                          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--surface-2)] text-sm font-semibold text-ink-3">
-                            {(h.displayName ?? h.handle).replace(/^@/, '').charAt(0).toUpperCase()}
-                          </span>
-                        )}
-                        <span className="min-w-0">
-                          <span className="flex items-center gap-1.5">
-                            <PlatformDot platform={h.platform} />
-                            <span className="truncate text-sm font-medium text-ink-1">
-                              {h.displayName ?? h.handle}
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="relative shrink-0">
+                          {h.avatarUrl ? (
+                            <img
+                              src={h.avatarUrl}
+                              alt=""
+                              loading="lazy"
+                              // The CDN serves this fine to a direct request and
+                              // refuses it with a referrer attached, which is why
+                              // it rendered as a broken image.
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none'
+                              }}
+                              className="size-11 rounded-full object-cover ring-1 ring-[var(--border)]"
+                            />
+                          ) : (
+                            <span className="grid size-11 place-items-center rounded-full bg-[var(--surface-3)] text-[15px] font-bold text-ink-3">
+                              {(h.displayName ?? h.handle).replace(/^@/, '').charAt(0).toUpperCase()}
                             </span>
+                          )}
+                          <PlatformBadge
+                            platform={h.platform}
+                            size={18}
+                            className="absolute -bottom-0.5 -right-0.5 ring-2 ring-[var(--surface)]"
+                          />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[15px] font-bold text-ink">
+                            {h.displayName ?? h.handle}
                           </span>
-                          <span className="block truncate text-xs text-ink-3">
+                          <span className="block truncate text-xs font-medium text-ink-3">
                             {h.platform} · @{h.handle.replace(/^@/, '')}
                           </span>
                         </span>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
+                      <div className="flex shrink-0 items-center">
                         {h.profileUrl && (
                           <a
                             href={h.profileUrl}
                             target="_blank"
                             rel="noreferrer noopener"
-                            className="rounded p-1.5 text-ink-3 hover:text-ink-1"
+                            className="grid size-11 place-items-center rounded-full text-ink-3 transition-colors hover:bg-[var(--surface-2)] hover:text-ink"
                             aria-label={`Open ${h.handle} on ${h.platform}`}
                           >
-                            <ExternalLink size={14} />
+                            <ExternalLink size={16} />
                           </a>
                         )}
                         <button
                           onClick={() => void refresh([h])}
                           disabled={busy != null}
-                          className="rounded p-1.5 text-ink-3 hover:text-ink-1"
+                          className="grid size-11 place-items-center rounded-full text-ink-3 transition-colors hover:bg-[var(--surface-2)] hover:text-ink disabled:opacity-45"
                           aria-label={`Refresh ${h.handle}`}
                         >
-                          <RefreshCw size={14} className={busy === h.id ? 'animate-spin' : ''} />
+                          <RefreshCw size={16} className={busy === h.id ? 'animate-spin' : ''} />
                         </button>
                         <button
                           onClick={() => setHandles(removeHandle(h.id))}
-                          className="rounded p-1.5 text-ink-3 hover:text-[var(--negative)]"
+                          className="grid size-11 place-items-center rounded-full text-ink-3 transition-colors hover:bg-[var(--neg-soft)] hover:text-[var(--neg)]"
                           aria-label={`Stop tracking ${h.handle}`}
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {/* The headline figure, with the shape of its history
+                        beside it. Movement is only shown once there are two
+                        readings to compare — a "0%" change on a first refresh
+                        would be an invention, not a measurement. */}
+                    <div className="mt-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-ink-3">Followers</p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <span className="tnum text-[28px] font-bold leading-none tracking-[-0.02em] text-ink">
+                            {fmt(s.followers)}
+                          </span>
+                          {d.followers != null && d.followers !== 0 && (
+                            <DeltaChip
+                              value={d.followers}
+                              suffix=""
+                              title={`Since the reading ${ago(d.since)}`}
+                            />
+                          )}
+                        </div>
+                      </div>
+                      {sparkValues.length >= 2 && (
+                        <div className="min-w-28 max-w-[220px] flex-1">
+                          <Sparkline
+                            values={sparkValues}
+                            color={rising ? 'var(--pos)' : 'var(--neg)'}
+                            height={40}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <Tile label="Followers" value={fmt(s.followers)} />
                       <Tile label="Posts read" value={fmt(s.posts)} />
                       <Tile label="Per post" value={fmt(s.avgEngagement)} />
@@ -1397,24 +2001,10 @@ export function Dashboard({
                       />
                     </div>
 
-                    <Sparkline
-                      values={h.snapshots
-                        .map((x) => x.followers)
-                        .filter((f): f is number => f != null)}
-                    />
-
-                    {/* Movement is only shown once there are two readings to
-                        compare. A "0%" change on a first refresh would be an
-                        invention, not a measurement. */}
                     {(d.followers != null || d.avgEngagement != null) && (
-                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
+                      <div className="tnum mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
                         {d.followers != null && d.followers !== 0 && (
-                          <span className="inline-flex items-center gap-1">
-                            {d.followers > 0 ? (
-                              <TrendingUp size={12} className="text-[var(--positive)]" />
-                            ) : (
-                              <TrendingDown size={12} className="text-[var(--negative)]" />
-                            )}
+                          <span>
                             {d.followers > 0 ? '+' : ''}
                             {fmt(d.followers)} followers since {ago(d.since)}
                           </span>
@@ -1429,17 +2019,23 @@ export function Dashboard({
                     )}
 
                     {s.postsPerWeek != null && (
-                      <p className="mt-2 text-xs text-ink-3">
+                      <p className="mt-3 text-xs text-ink-3">
                         About {s.postsPerWeek} posts a week, across the last {s.posts} we
                         can see.
                       </p>
                     )}
 
-                    {!auto && (
-                      <p className="mt-2 text-xs text-ink-3">{h.listingNote}</p>
+                    {/* The gated-platform note. This copy is the product's
+                        honesty about what it can and cannot read — it gets a
+                        quiet room of its own, never the bin. */}
+                    {!auto && h.listingNote && (
+                      <div className="mt-3 flex items-start gap-2.5 rounded-xl bg-[var(--surface-2)] px-3.5 py-3">
+                        <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+                        <p className="text-xs leading-relaxed text-ink-3">{h.listingNote}</p>
+                      </div>
                     )}
 
-                    <p className="mt-2 text-xs text-ink-3">
+                    <p className="mt-3 text-xs text-ink-3">
                       Read {ago(latest?.takenAt ?? null)}
                       {h.snapshots.length > 1 && ` · ${h.snapshots.length} readings kept`}
                     </p>
@@ -1453,26 +2049,32 @@ export function Dashboard({
       {handles.length === 0 && mode === 'accounts' && (
         <m.section variants={fadeUp}>
           <Card>
-            <p className="text-sm text-ink-1">Nothing tracked yet.</p>
-            <p className="mt-1 text-xs text-ink-3">
-              Start with one of these. They are public accounts that read cleanly.
+            <CardHead
+              icon={<Users size={16} />}
+              tint="blue"
+              title="Nothing tracked yet"
+              sub="Start with one of these"
+            />
+            <p className="text-xs text-ink-3">
+              They are public accounts that read cleanly.
             </p>
             <ul className="mt-3 space-y-2">
               {[
-                { url: 'https://www.youtube.com/@narendramodi', label: 'Narendra Modi', note: 'YouTube · 3.13 crore' },
-                { url: 'https://www.facebook.com/narendramodi/', label: 'Narendra Modi', note: 'Facebook · 6.2 crore, followers only' },
-                { url: 'https://www.youtube.com/@PMOIndia', label: 'PMO India', note: 'YouTube · 22 lakh' },
+                { url: 'https://www.youtube.com/@narendramodi', label: 'Narendra Modi', note: 'YouTube · 3.13 crore', platform: 'YouTube' },
+                { url: 'https://www.facebook.com/narendramodi/', label: 'Narendra Modi', note: 'Facebook · 6.2 crore, followers only', platform: 'Facebook' },
+                { url: 'https://www.youtube.com/@PMOIndia', label: 'PMO India', note: 'YouTube · 22 lakh', platform: 'YouTube' },
               ].map((ex) => (
                 <li key={ex.url}>
                   <button
                     onClick={() => setInput(ex.url)}
-                    className="flex w-full items-center justify-between gap-2 rounded-[--radius-md] border border-[var(--border)] px-3 py-2 text-left hover:border-[var(--accent)]"
+                    className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]"
                   >
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm text-ink-1">{ex.label}</span>
+                    <PlatformBadge platform={ex.platform} size={28} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-ink">{ex.label}</span>
                       <span className="block truncate text-xs text-ink-3">{ex.note}</span>
                     </span>
-                    <Plus size={14} className="shrink-0 text-ink-3" />
+                    <Plus size={16} className="shrink-0 text-ink-3" />
                   </button>
                 </li>
               ))}
@@ -1486,17 +2088,42 @@ export function Dashboard({
           record — so printing "a comparison needs two accounts" underneath a
           completed one contradicts the screen above it. */}
       {handles.length === 0 && mode === 'compare' && !versus && (
-        <m.p variants={fadeUp} className="py-8 text-center text-sm text-ink-3">
-          Add at least one account under Accounts, then come back here.
-        </m.p>
+        <m.section variants={fadeUp}>
+          <Card>
+            <CardHead
+              icon={<GitCompareArrows size={16} />}
+              tint="blue"
+              title="Nothing to compare yet"
+            />
+            <p className="text-sm leading-relaxed text-ink-2">
+              Add at least one account under Accounts, then come back here to put it
+              against a rival.
+            </p>
+            <Button className="mt-3" size="sm" variant="outline" onClick={onClose}>
+              Back to accounts
+            </Button>
+          </Card>
+        </m.section>
       )}
 
       {mode === 'compare' && !versus && handles.length > 0 &&
         handles.filter((h) => statsFor(h.snapshots.at(-1)).engagementRate != null).length < 2 && (
-          <m.p variants={fadeUp} className="py-8 text-center text-sm text-ink-3">
-            A comparison needs two accounts with a follower count and at least one post
-            read. Refresh them under Accounts.
-          </m.p>
+          <m.section variants={fadeUp}>
+            <Card>
+              <CardHead
+                icon={<GitCompareArrows size={16} />}
+                tint="orange"
+                title="Not enough read to compare"
+              />
+              <p className="text-sm leading-relaxed text-ink-2">
+                A comparison needs two accounts with a follower count and at least one post
+                read. Refresh them under Accounts.
+              </p>
+              <Button className="mt-3" size="sm" variant="outline" onClick={onClose}>
+                Back to accounts
+              </Button>
+            </Card>
+          </m.section>
         )}
 
       <m.p variants={fadeUp} className="text-center text-xs text-ink-3">

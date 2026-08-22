@@ -1,16 +1,6 @@
 import { useReducedMotion } from 'motion/react'
 import * as m from 'motion/react-m'
-import {
-  Clock,
-  GitCompareArrows,
-  Inbox,
-  LayoutGrid,
-  Link2,
-  ListChecks,
-  Megaphone,
-  Newspaper,
-  Settings as SettingsIcon,
-} from 'lucide-react'
+import { ChevronRight, Link2, Settings as SettingsIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { GROUPS, type NavItem, type Tab } from '@/lib/nav'
 import { SignalGlyph } from '@/components/ui'
@@ -61,28 +51,36 @@ const SIDEBAR_GROUPS = GROUPS.map((g) => ({
 
 /**
  * index.css rounds every :focus-visible target to --radius-xs, and that rule is
- * written after the utility layers, so it wins on source order. Without an
- * override the row's corners snap square the moment it takes keyboard focus,
- * which reads as a rendering fault rather than as focus.
+ * written after the utility layers, so it wins on source order. The rows are
+ * full pills now, so the override has to be a pill too — a keyboard focus that
+ * snaps the corners square reads as a rendering fault rather than as focus.
  */
 const FOCUS =
-  'focus-visible:rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
+  'focus-visible:rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
 
-/** 44px minimum on every row — this layout is also what a tablet gets. */
+/** 48px pills — this layout is also what a tablet gets, so thumbs count. */
 const ROW =
-  'flex min-h-11 w-full items-center gap-3 rounded-xl text-left transition-colors duration-200'
+  'flex min-h-12 w-full items-center gap-3 rounded-full text-left transition-colors duration-200'
+
+/**
+ * The Sociolyze "Home" treatment: the open screen is a SOLID accent pill with
+ * accent-fg text and the accent-tinted soft shadow the primary Button already
+ * wears — one shadow recipe, not two. Idle rows stay quiet ink and only take
+ * a surface wash on hover.
+ */
+const PILL_ACTIVE =
+  'bg-[var(--accent)] text-[var(--accent-fg)] shadow-[0_1px_2px_rgb(16_24_40/0.1),0_8px_20px_-6px_color-mix(in_oklab,var(--accent)_55%,transparent)]'
+const PILL_IDLE = 'text-ink-2 hover:bg-[var(--surface-2)] hover:text-ink'
 
 function NavRow({
   item,
   active,
   count,
-  reduced,
   onSelect,
 }: {
   item: NavItem
   active: boolean
   count: number | undefined
-  reduced: boolean
   onSelect: (k: NavKey) => void
 }) {
   const { id, label, Icon } = item
@@ -96,27 +94,8 @@ function NavRow({
       // into the name instead. No unit is added: the caller decides what it is
       // counting and this component does not get to guess.
       aria-label={badge ? `${label}, ${badge}` : undefined}
-      className={cn(
-        ROW,
-        FOCUS,
-        'relative pl-4 pr-2.5',
-        active
-          ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-          : 'text-ink-2 hover:bg-[var(--surface-2)] hover:text-ink',
-      )}
+      className={cn(ROW, FOCUS, 'pl-4 pr-3', active ? PILL_ACTIVE : PILL_IDLE)}
     >
-      {/* The active mark, turned on its side from the tab bar's. Colour is not
-          carrying this alone — the rail, the heavier stroke, the bolder label
-          and aria-current all say the same thing, so the row still reads
-          without colour vision. */}
-      <m.span
-        aria-hidden
-        className="absolute left-0 top-1/2 h-6 w-[3px] origin-center -translate-y-1/2 rounded-full bg-[var(--accent)]"
-        initial={false}
-        animate={{ scaleY: active ? 1 : 0, opacity: active ? 1 : 0 }}
-        transition={reduced ? { duration: 0 } : spring.snap}
-      />
-
       <Icon size={18} strokeWidth={active ? 2.4 : 1.9} className="shrink-0" aria-hidden />
       <span
         className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-semibold' : 'font-medium')}
@@ -127,11 +106,24 @@ function NavRow({
       {badge && (
         <span
           aria-hidden
-          className="tnum grid min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-2xs font-semibold leading-5 text-[var(--accent-fg)]"
+          className={cn(
+            'tnum grid min-w-5 shrink-0 place-items-center rounded-full px-1.5 text-2xs font-bold leading-5',
+            // On the filled pill the badge inverts, or it would vanish into
+            // its own colour. Colour is never carrying the count alone — the
+            // number is folded into the aria-label above.
+            active
+              ? 'bg-[var(--accent-fg)] text-[var(--accent)]'
+              : 'bg-[var(--accent)] text-[var(--accent-fg)]',
+          )}
         >
           {badge}
         </span>
       )}
+
+      {/* The chevron the reference's active "Home" row carries. Decorative:
+          the fill, the heavier stroke, the bolder label and aria-current all
+          already say "you are here", so it is hidden from readers. */}
+      {active && <ChevronRight size={15} strokeWidth={2.4} className="shrink-0 opacity-70" aria-hidden />}
     </button>
   )
 }
@@ -162,11 +154,11 @@ export function SideNav({ active, onSelect, counts }: Props) {
         {/* The same lockup the mobile header carries. It was a gradient-filled
             rounded tile here, which made the app wear two different marks
             depending on the width of the window. */}
-        <div className="mb-5 flex items-center gap-2.5 px-1">
+        <div className="mb-6 flex items-center gap-2.5 px-2">
           <span className="shrink-0 text-[var(--accent)]">
-            <SignalGlyph size={24} />
+            <SignalGlyph size={26} />
           </span>
-          <span className="hed text-[1.3rem] leading-none tracking-[-0.005em]">Signal</span>
+          <span className="hed text-[1.35rem] leading-none tracking-[-0.005em]">Signal</span>
         </div>
 
         {/* The one thing this product does, in the one colour that means "do
@@ -180,8 +172,8 @@ export function SideNav({ active, onSelect, counts }: Props) {
           className={cn(
             ROW,
             FOCUS,
-            'px-3.5 text-sm font-semibold',
-            'bg-[var(--accent)] text-[var(--accent-fg)] shadow-[var(--e2)]',
+            'px-4 text-sm font-semibold',
+            PILL_ACTIVE,
             active === 'analyse' &&
               'ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface)]',
           )}
@@ -190,25 +182,21 @@ export function SideNav({ active, onSelect, counts }: Props) {
           Analyse a link
         </m.button>
 
-        {/* Scrolls on its own so a short laptop window never pushes the lock
-            control off the bottom of the column. */}
-        <div className="scroller mt-6 min-h-0 flex-1 space-y-5 overflow-y-auto">
+        {/* Scrolls on its own so a short laptop window never pushes the foot
+            card off the bottom of the column. */}
+        <div className="scroller mt-6 min-h-0 flex-1 space-y-6 overflow-y-auto">
           {SIDEBAR_GROUPS.map((group) => (
             <div key={group.heading}>
-              <p
-                aria-hidden
-                className="tracking-kicker px-4 pb-1.5 text-2xs font-semibold uppercase text-ink-3"
-              >
+              <p aria-hidden className="kicker px-4 pb-2">
                 {group.heading}
               </p>
-              <ul aria-label={group.heading} className="space-y-0.5">
+              <ul aria-label={group.heading} className="space-y-1">
                 {group.items.map((item) => (
                   <li key={item.id}>
                     <NavRow
                       item={item}
                       active={active === item.id}
                       count={counts?.[item.id]}
-                      reduced={reduced}
                       onSelect={onSelect}
                     />
                   </li>
@@ -219,30 +207,42 @@ export function SideNav({ active, onSelect, counts }: Props) {
         </div>
 
         {/* Settings sits at the foot, pinned under a rule, the way settings
-            usually does — and the way this column already treated the control
-            that used to be here.
+            usually does — restyled as the compact card the reference keeps in
+            this slot: icon badge, two lines, a quiet door. No progress bar,
+            because nothing here measures progress and a meter with nothing to
+            measure would be decoration lying about data.
 
-            That control was Lock, which is now only in the header. It was in
-            both places at once, and of the two the header is the right one: it
-            is beside the theme toggle and the history button, it is present on
-            every width including the phone, and a padlock is the one control an
-            office reaches for in a hurry. Duplicating it here bought nothing
-            and cost the foot of the column, which Settings had no home in. */}
+            The control that used to share this foot was Lock, which is now
+            only in the header: it is beside the theme toggle and the history
+            button there, present on every width including the phone, and a
+            padlock is the one control an office reaches for in a hurry. */}
         <div className="mt-3 border-t border-[var(--border)] pt-3">
           <button
             onClick={() => onSelect('settings')}
             aria-current={active === 'settings' ? 'page' : undefined}
             className={cn(
-              ROW,
-              FOCUS,
-              'px-4 text-sm font-medium',
-              active === 'settings'
-                ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                : 'text-ink-2 hover:bg-[var(--surface-2)] hover:text-ink',
+              'card card-hover flex w-full items-center gap-3 p-3 text-left',
+              'focus-visible:rounded-[var(--radius-lg)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]',
+              active === 'settings' && 'ring-2 ring-[var(--accent)]',
             )}
           >
-            <SettingsIcon size={16} strokeWidth={active === 'settings' ? 2.4 : 1.9} className="shrink-0" aria-hidden />
-            Settings
+            <span
+              className="icon-badge icon-badge-sm"
+              style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+            >
+              <SettingsIcon
+                size={16}
+                strokeWidth={active === 'settings' ? 2.4 : 2}
+                aria-hidden
+              />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-ink">Settings</span>
+              <span className="block truncate text-[11px] text-ink-3">
+                Keys, accounts & preferences
+              </span>
+            </span>
+            <ChevronRight size={15} className="shrink-0 text-ink-3" aria-hidden />
           </button>
         </div>
       </div>

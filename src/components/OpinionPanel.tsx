@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ChevronRight, Loader2, RefreshCw, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
+import { ChevronRight, Loader2, RefreshCw, Scale, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
 import type { OpinionSurvey, OpinionTheme } from '@/lib/opinion'
 import { Button, Card, Chip } from './ui'
+import { CardHead, DonutBreakdown, ProgressRow } from '@/components/kit'
 import { RecoveryPlan } from './RecoveryPlan'
 import { cn, relativeTime } from '@/lib/utils'
 
@@ -63,7 +64,9 @@ export function OpinionPanel({
     return (
       <Card>
         <div className="flex items-center gap-3">
-          <Loader2 size={17} className="animate-spin text-[var(--accent)]" aria-hidden />
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)]">
+            <Loader2 size={17} className="animate-spin text-[var(--accent)]" aria-hidden />
+          </span>
           <div className="min-w-0">
             <p className="text-[15px] font-semibold">
               {stage === 'reading'
@@ -122,6 +125,10 @@ export function OpinionPanel({
   const colour = { pos: 'var(--pos)', neg: 'var(--neg)', warn: 'var(--warn)' } as const
   const Icon = { pos: ThumbsUp, neg: ThumbsDown, warn: TriangleAlert } as const
 
+  // The count of gathered themes, re-used by the ring and the share bars below.
+  const themeTotal =
+    survey.criticism.length + survey.controversies.length + survey.praise.length
+
   return (
     <div className="stack-tight">
       <Card>
@@ -153,6 +160,57 @@ export function OpinionPanel({
           commentators. This is not a survey of your constituents.
           {survey.readAt ? ` Read ${relativeTime(survey.readAt)}.` : ''}
         </p>
+
+        {/* The balance of what was found — nothing new, just the three theme
+            lists this panel already renders, counted into one ring. Colours
+            match the group headers below, so the ring is a table of contents
+            rather than a second opinion. */}
+        {themeTotal > 0 && (
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <CardHead
+              icon={<Scale size={14} />}
+              title="The balance of coverage"
+              sub="Counted from the theme lists below"
+              tint="blue"
+            />
+            {/* The share column claims a real minimum width, so at 375px it
+                wraps under the ring instead of crushing beside it. */}
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+              <DonutBreakdown
+                size={96}
+                thickness={13}
+                segments={[
+                  { label: 'Attacked on', value: survey.criticism.length, color: 'var(--neg)' },
+                  { label: 'Disputed', value: survey.controversies.length, color: 'var(--warn)' },
+                  { label: 'Credited for', value: survey.praise.length, color: 'var(--pos)' },
+                ]}
+                centerLabel={String(themeTotal)}
+                centerSub={themeTotal === 1 ? 'theme' : 'themes'}
+                className="mx-auto shrink-0 sm:mx-0"
+              />
+              <div className="min-w-[200px] flex-1 space-y-3">
+                {(
+                  [
+                    { label: 'Attacked on', n: survey.criticism.length, c: 'var(--neg)' },
+                    { label: 'Disputed', n: survey.controversies.length, c: 'var(--warn)' },
+                    { label: 'Credited for', n: survey.praise.length, c: 'var(--pos)' },
+                  ] as const
+                )
+                  .filter((r) => r.n > 0)
+                  .map((r, i) => (
+                    <ProgressRow
+                      key={r.label}
+                      label={r.label}
+                      fraction={r.n / themeTotal}
+                      detail={`${r.n} ${r.n === 1 ? 'theme' : 'themes'}`}
+                      color={r.c}
+                      delay={0.05 * i}
+                    />
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/*
@@ -172,10 +230,27 @@ export function OpinionPanel({
         const ThemeIcon = Icon[group.tone]
         return (
           <Card key={group.key} padded={false}>
-            <div className="flex items-center gap-2 px-4 pt-4">
-              <ThemeIcon size={15} style={{ color: colour[group.tone] }} aria-hidden />
-              <h3 className="text-[15px] font-semibold">{group.title}</h3>
-              <span className="tnum text-xs text-ink-3">{group.items.length}</span>
+            {/* Hand-rolled to CardHead's exact composition — badge, bold
+                title, count pill in the action seat — but NOT CardHead
+                itself: its tint set has no negative red, and these badges
+                must stay the same colours as the ring's segments above or
+                the "table of contents" linkage breaks. */}
+            <div className="flex items-center justify-between gap-3 px-4 pt-4">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span
+                  className="icon-badge-sm"
+                  style={{
+                    background: `color-mix(in oklab, ${colour[group.tone]} 12%, transparent)`,
+                    color: colour[group.tone],
+                  }}
+                >
+                  <ThemeIcon size={14} aria-hidden />
+                </span>
+                <h3 className="min-w-0 text-[13px] font-semibold leading-tight">{group.title}</h3>
+              </div>
+              <span className="tnum shrink-0 rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-xs font-semibold text-ink-2">
+                {group.items.length}
+              </span>
             </div>
 
             <ul className="mt-2 divide-y divide-[var(--border)]">

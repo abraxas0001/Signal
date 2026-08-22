@@ -23,6 +23,20 @@ import { parseCountField } from '@shared/parse'
  * (Base UI has no keyboard-aware repositioning; vaul has been frozen since
  * 2024). Motion's spring.settle gives the same feel in far less code.
  */
+
+/** The numbered badge that leads each rescue route. */
+function StepBadge({ n }: { n: number }) {
+  return (
+    <span
+      aria-hidden
+      className="icon-badge icon-badge-sm rounded-full text-[13px] font-bold"
+      style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+    >
+      {n}
+    </span>
+  )
+}
+
 export function RescueSheet({
   open,
   reason,
@@ -168,7 +182,7 @@ export function RescueSheet({
             role="dialog"
             aria-modal="true"
             aria-label="Add the missing details"
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[92svh] overflow-y-auto rounded-t-[--radius-2xl] border-t border-[var(--border)] bg-[var(--surface)] scroller"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[92svh] overflow-y-auto rounded-t-3xl bg-[var(--surface)] shadow-[var(--e4)] scroller"
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
@@ -182,14 +196,16 @@ export function RescueSheet({
             }}
           >
             {/* Grab handle */}
-            <div className="sticky top-0 z-10 flex justify-center bg-[var(--surface)] pb-1 pt-3">
-              <div className="h-1 w-9 rounded-full bg-[var(--text-3)]/40" />
+            <div className="sticky top-0 z-10 flex justify-center rounded-t-3xl bg-[var(--surface)] pb-1 pt-3">
+              <div className="h-1 w-9 rounded-full bg-[var(--border-strong)]" />
             </div>
 
-            <div className="px-4 pb-[calc(var(--sab)+20px)] pt-2">
+            <div className="px-5 pb-[calc(var(--sab)+20px)] pt-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="text-xl font-semibold">Fill in the gaps</h2>
+                  <h2 className="text-xl font-bold tracking-[-0.01em] text-ink">
+                    Fill in the gaps
+                  </h2>
                   {reason && (
                     <p className="mt-1 text-sm text-ink-2">{reason}</p>
                   )}
@@ -200,17 +216,22 @@ export function RescueSheet({
                 <button
                   onClick={onClose}
                   aria-label="Close"
-                  className="-mr-1 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-2)]"
+                  className="-mr-1 grid size-11 shrink-0 place-items-center rounded-full bg-[var(--surface-2)] text-ink-3 transition-colors hover:bg-[var(--surface-3)]"
                 >
                   <X size={19} />
                 </button>
               </div>
 
               {/* 1. Post text — the fastest and most reliable rescue. */}
-              <label className="mt-5 block">
-                <span className="text-sm font-medium">Post text</span>
-                <span className="ml-1.5 text-xs text-ink-3">
-                  paste it in any language
+              <label className="mt-6 block">
+                <span className="flex items-center gap-2.5">
+                  <StepBadge n={1} />
+                  <span>
+                    <span className="text-sm font-semibold text-ink">Post text</span>
+                    <span className="ml-1.5 text-xs text-ink-3">
+                      paste it in any language
+                    </span>
+                  </span>
                 </span>
                 <textarea
                   value={text}
@@ -220,20 +241,23 @@ export function RescueSheet({
                   }}
                   rows={5}
                   placeholder="Paste the words from the post here…"
-                  className="mt-1.5 w-full resize-y rounded-[--radius-md] border border-[var(--border-interactive)] bg-[var(--surface-2)] p-3 leading-relaxed outline-none focus:border-[var(--accent)]"
+                  className="mt-2.5 w-full resize-y rounded-[var(--radius-md)] border border-[var(--border-interactive)] bg-[var(--surface-2)] p-3.5 leading-relaxed outline-none transition-colors focus:border-[var(--accent)] focus:bg-[var(--surface)]"
                 />
               </label>
 
               {/* 2. Engagement numbers */}
-              <fieldset className="mt-4">
-                <legend className="text-sm font-medium">Engagement</legend>
-                <p className="text-xs text-ink-3">
+              <fieldset className="mt-5">
+                <legend className="flex items-center gap-2.5">
+                  <StepBadge n={2} />
+                  <span className="text-sm font-semibold text-ink">Engagement</span>
+                </legend>
+                <p className="mt-1 text-xs text-ink-3">
                   Only what you can see. Leave the rest blank.
                 </p>
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {(['likes', 'comments', 'shares', 'views'] as const).map((k) => (
                     <label key={k} className="block">
-                      <span className="text-2xs uppercase tracking-[0.04em] text-ink-3">
+                      <span className="text-2xs font-semibold uppercase tracking-[0.06em] text-ink-3">
                         {k}
                       </span>
                       <input
@@ -248,7 +272,7 @@ export function RescueSheet({
                         placeholder="—"
                         aria-invalid={fieldErrors.includes(k)}
                         className={cn(
-                          'mt-0.5 w-full rounded-[--radius-sm] border bg-[var(--surface-2)] px-2.5 py-2 tabular-nums outline-none focus:border-[var(--accent)]',
+                          'mt-1 w-full min-h-11 rounded-[var(--radius-sm)] border bg-[var(--surface-2)] px-3 py-2 tabular-nums outline-none transition-colors focus:border-[var(--accent)] focus:bg-[var(--surface)]',
                           fieldErrors.includes(k)
                             ? 'border-[var(--neg)]'
                             : 'border-[var(--border-interactive)]',
@@ -260,10 +284,15 @@ export function RescueSheet({
               </fieldset>
 
               {/* 3. Screenshot — slower and lossier, so offered last. */}
-              <div className="mt-4">
-                <span className="text-sm font-medium">Screenshot</span>
-                <span className="ml-1.5 text-xs text-ink-3">
-                  optional, and we will read it
+              <div className="mt-5">
+                <span className="flex items-center gap-2.5">
+                  <StepBadge n={3} />
+                  <span>
+                    <span className="text-sm font-semibold text-ink">Screenshot</span>
+                    <span className="ml-1.5 text-xs text-ink-3">
+                      optional, and we will read it
+                    </span>
+                  </span>
                 </span>
 
                 <input
@@ -275,7 +304,7 @@ export function RescueSheet({
                 />
 
                 {screenshot ? (
-                  <div className="relative mt-1.5 overflow-hidden rounded-[--radius-md] border border-[var(--border)]">
+                  <div className="relative mt-2.5 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] shadow-[var(--e1)]">
                     <img src={screenshot} alt="Your screenshot" className="max-h-56 w-full object-contain bg-[var(--surface-2)]" />
                     <button
                       onClick={() => setScreenshot(null)}
@@ -288,10 +317,10 @@ export function RescueSheet({
                 ) : (
                   <button
                     onClick={() => fileRef.current?.click()}
-                    className="mt-1.5 flex min-h-20 w-full flex-col items-center justify-center gap-1 rounded-[--radius-md] border border-dashed border-[var(--border-interactive)] bg-[var(--surface-2)] text-ink-3"
+                    className="mt-2.5 flex min-h-20 w-full flex-col items-center justify-center gap-1 rounded-[var(--radius-md)] border border-dashed border-[var(--border-interactive)] bg-[var(--surface-2)] text-ink-3 transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
                   >
                     <ImageUp size={20} />
-                    <span className="text-sm">Add a screenshot</span>
+                    <span className="text-sm font-medium">Add a screenshot</span>
                   </button>
                 )}
               </div>
@@ -302,14 +331,14 @@ export function RescueSheet({
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}
-                    className="mt-3 text-sm text-[var(--neg)]"
+                    className="mt-3 rounded-[var(--radius-sm)] bg-[var(--neg-soft)] px-3 py-2 text-sm font-medium text-[var(--neg)]"
                   >
                     {error}
                   </m.p>
                 )}
               </AnimatePresence>
 
-              <div className={cn('mt-5 flex gap-2')}>
+              <div className={cn('mt-6 flex gap-2')}>
                 <Button variant="outline" onClick={onClose} className="flex-1">
                   Cancel
                 </Button>

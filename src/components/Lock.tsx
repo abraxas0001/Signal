@@ -194,12 +194,15 @@ function PassphraseField({
 
   return (
     <div>
-      <label htmlFor={id} className="text-xs uppercase tracking-wide text-ink-3">
+      <label
+        htmlFor={id}
+        className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3"
+      >
         {label}
       </label>
       <div
         className={
-          'mt-1.5 flex items-stretch overflow-hidden rounded-[--radius-md] border bg-[var(--surface-2)] ' +
+          'mt-1.5 flex items-stretch overflow-hidden rounded-full border bg-[var(--surface-2)] transition-colors ' +
           (invalid
             ? 'border-[var(--neg)]'
             : 'border-[var(--border-interactive)] focus-within:border-[var(--accent)]')
@@ -224,13 +227,13 @@ function PassphraseField({
           autoFocus={autoFocus}
           aria-invalid={invalid === true}
           /* 16px or iOS Safari zooms the whole page on focus. */
-          className="h-12 min-w-0 flex-1 bg-transparent px-3 text-[16px] outline-none placeholder:text-ink-3"
+          className="h-12 min-w-0 flex-1 bg-transparent px-4 text-[16px] outline-none placeholder:text-ink-3"
         />
         <button
           type="button"
           onClick={() => setShown((s) => !s)}
           aria-label={shown ? 'Hide passphrase' : 'Show passphrase'}
-          className="grid w-12 shrink-0 place-items-center text-ink-3 hover:text-ink-2"
+          className="grid w-12 shrink-0 place-items-center rounded-full text-ink-3 hover:text-ink-2"
         >
           {shown ? <EyeOff size={18} /> : <Eye size={18} />}
         </button>
@@ -259,7 +262,10 @@ function NameField({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="text-xs uppercase tracking-wide text-ink-3">
+      <label
+        htmlFor={id}
+        className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3"
+      >
         {label}
       </label>
       <input
@@ -275,7 +281,7 @@ function NameField({
         autoCapitalize="words"
         enterKeyHint="next"
         autoFocus={autoFocus}
-        className="mt-1.5 h-12 w-full rounded-[--radius-md] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-[16px] outline-none focus:border-[var(--accent)] placeholder:text-ink-3"
+        className="mt-1.5 h-12 w-full rounded-full border border-[var(--border-interactive)] bg-[var(--surface-2)] px-4 text-[16px] outline-none transition-colors focus:border-[var(--accent)] placeholder:text-ink-3"
       />
       {hint && <p className="mt-1.5 text-xs text-ink-3">{hint}</p>}
     </div>
@@ -287,7 +293,7 @@ function Notice({ tone, children }: { tone: 'warn' | 'neg'; children: ReactNode 
     <div
       role={tone === 'neg' ? 'alert' : undefined}
       className={
-        'flex gap-2.5 rounded-[--radius-md] p-3 text-sm leading-relaxed ' +
+        'flex gap-2.5 rounded-[var(--radius-md)] p-3 text-sm leading-relaxed ' +
         (tone === 'neg'
           ? 'bg-[var(--neg-soft)] text-[var(--neg)]'
           : 'bg-[var(--warn-soft)] text-[var(--warn)]')
@@ -487,28 +493,28 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
           animate="show"
           className="mx-auto w-full max-w-md px-4 py-10 safe-b"
         >
-          <m.div variants={fadeUp} className="mb-6 flex items-center gap-2.5">
+          <m.div variants={fadeUp} className="mb-6 flex items-center justify-center gap-2.5">
             <span
-              className="grid size-9 place-items-center rounded-[10px] text-[var(--accent-fg)] shadow-[var(--e1)]"
+              className="grid size-10 place-items-center rounded-xl text-[var(--accent-fg)] shadow-[var(--e2)]"
               style={{
                 background:
                   'linear-gradient(140deg, var(--accent) 0%, color-mix(in oklab, var(--accent) 74%, var(--aurora-2)) 100%)',
               }}
             >
-              <SignalGlyph />
+              <SignalGlyph size={18} />
             </span>
-            <span className="text-lg font-semibold tracking-[-0.03em]">Signal</span>
+            <span className="hed text-xl leading-none">Signal</span>
           </m.div>
 
           {step === 'blocked' && (
             <m.div variants={fadeUp}>
-              <Card>
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--neg-soft)] text-[var(--neg)]">
-                    <TriangleAlert size={18} />
+              <Card level="lift">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--neg-soft)] text-[var(--neg)]">
+                    <TriangleAlert size={20} />
                   </span>
                   <div className="min-w-0">
-                    <h1 className="text-xl font-semibold tracking-[-0.015em]">
+                    <h1 className="text-xl font-bold tracking-[-0.015em]">
                       The account list is damaged
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
@@ -537,13 +543,13 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
 
           {step === 'pick' && (
             <m.div variants={fadeUp}>
-              <Card>
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
-                    <Lock size={18} />
+              <Card level="lift">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                    <Lock size={20} />
                   </span>
                   <div className="min-w-0">
-                    <h1 className="text-xl font-semibold tracking-[-0.015em]">Who is this?</h1>
+                    <h1 className="text-xl font-bold tracking-[-0.015em]">Who is this?</h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
                       Each person on this device has their own records and their own passphrase.
                       Nobody sees anybody else's.
@@ -563,12 +569,12 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                           setPassphrase('')
                           setStep('signin')
                         }}
-                        className="flex min-h-14 w-full items-center gap-3 rounded-[--radius-md] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-4 text-left transition-colors hover:border-[var(--accent)]"
+                        className="flex min-h-14 w-full items-center gap-3 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-left shadow-[var(--e1)] transition-colors hover:border-[var(--accent)]"
                       >
-                        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--surface)] text-ink-3">
+                        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
                           <User size={16} />
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{a.name}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
                         <ChevronRight size={16} className="shrink-0 text-ink-3" />
                       </button>
                     </li>
@@ -597,15 +603,14 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
 
           {step === 'signin' && chosen !== null && (
             <m.div variants={fadeUp}>
-              <Card>
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
-                    <Lock size={18} />
+              <Card level="lift">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                    <Lock size={20} />
                   </span>
-                  <div className="min-w-0">
-                    <h1 className="truncate text-xl font-semibold tracking-[-0.015em]">
-                      {chosen.name}
-                    </h1>
+                  <div className="min-w-0 max-w-full">
+                    {/* No tight tracking here: the name is dynamic and may be Indic. */}
+                    <h1 className="truncate text-xl font-bold">{chosen.name}</h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
                       Enter this account's passphrase to open its records.
                     </p>
@@ -676,13 +681,13 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
 
           {step === 'create' && (
             <m.div variants={fadeUp}>
-              <Card>
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
-                    <ShieldCheck size={18} />
+              <Card level="lift">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                    <ShieldCheck size={20} />
                   </span>
                   <div className="min-w-0">
-                    <h1 className="text-xl font-semibold tracking-[-0.015em]">
+                    <h1 className="text-xl font-bold tracking-[-0.015em]">
                       {hasAccounts() ? 'Add a person to this device' : 'Set up this device'}
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
@@ -795,13 +800,13 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
 
           {step === 'backup' && (
             <m.div variants={fadeUp}>
-              <Card>
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--pos-soft)] text-[var(--pos)]">
-                    <ShieldCheck size={18} />
+              <Card level="lift">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--pos-soft)] text-[var(--pos)]">
+                    <ShieldCheck size={20} />
                   </span>
                   <div className="min-w-0">
-                    <h1 className="text-xl font-semibold tracking-[-0.015em]">
+                    <h1 className="text-xl font-bold tracking-[-0.015em]">
                       Encrypted. Take a backup.
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
@@ -838,13 +843,13 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
 
           {step === 'restore' && (
             <m.div variants={fadeUp}>
-              <Card>
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
-                    <Upload size={18} />
+              <Card level="lift">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                    <Upload size={20} />
                   </span>
                   <div className="min-w-0">
-                    <h1 className="text-xl font-semibold tracking-[-0.015em]">
+                    <h1 className="text-xl font-bold tracking-[-0.015em]">
                       Restore from a backup
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
@@ -868,7 +873,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="mt-5 flex min-h-14 w-full items-center gap-3 rounded-[--radius-md] border border-dashed border-[var(--border-interactive)] bg-[var(--surface-2)] px-4 text-left"
+                  className="mt-5 flex min-h-14 w-full items-center gap-3 rounded-2xl border border-dashed border-[var(--border-interactive)] bg-[var(--surface-2)] px-4 text-left transition-colors hover:border-[var(--accent)]"
                 >
                   <Upload size={18} className="shrink-0 text-ink-3" />
                   <span className="min-w-0 flex-1 truncate text-sm">
@@ -936,13 +941,13 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
 
           {step === 'restored' && restored && (
             <m.div variants={fadeUp}>
-              <Card>
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--pos-soft)] text-[var(--pos)]">
-                    <ShieldCheck size={18} />
+              <Card level="lift">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--pos-soft)] text-[var(--pos)]">
+                    <ShieldCheck size={20} />
                   </span>
                   <div className="min-w-0">
-                    <h1 className="text-xl font-semibold tracking-[-0.015em]">Restored</h1>
+                    <h1 className="text-xl font-bold tracking-[-0.015em]">Restored</h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
                       This account now holds what was in the file, encrypted with the passphrase you
                       just used.
@@ -1177,7 +1182,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
               role="dialog"
               aria-modal="true"
               aria-label="Account"
-              className="scroller fixed inset-x-0 bottom-0 z-50 max-h-[92svh] overflow-y-auto rounded-t-[--radius-2xl] border-t border-[var(--border)] bg-[var(--surface)]"
+              className="scroller fixed inset-x-0 bottom-0 z-50 max-h-[92svh] overflow-y-auto rounded-t-[var(--radius-2xl)] border-t border-[var(--border)] bg-[var(--surface)]"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
@@ -1187,7 +1192,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
               <div className="px-4 pb-[calc(var(--sab)+20px)] pt-5">
                 <div className="mx-auto flex w-full max-w-md items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="truncate text-xl font-semibold">
+                    <h2 className="truncate text-xl font-bold">
                       {account ? account.name : 'Account'}
                     </h2>
                     <p className="mt-1 text-sm text-ink-2">
@@ -1209,7 +1214,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                 <div className="mx-auto mt-5 w-full max-w-md space-y-3">
                   {writeProblem && <Notice tone="neg">{writeProblem}</Notice>}
                   {note && (
-                    <p className="rounded-[--radius-md] bg-[var(--pos-soft)] p-3 text-sm text-[var(--pos)]">
+                    <p className="rounded-[var(--radius-md)] bg-[var(--pos-soft)] p-3 text-sm text-[var(--pos)]">
                       {note}
                     </p>
                   )}

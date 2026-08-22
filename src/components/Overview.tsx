@@ -1,8 +1,9 @@
 import { Fragment } from 'react'
 import * as m from 'motion/react-m'
-import { CheckCircle2, MinusCircle, Link2, LayoutGrid, GitCompareArrows } from 'lucide-react'
+import { CheckCircle2, MinusCircle, Info, Link2, LayoutGrid, GitCompareArrows } from 'lucide-react'
 import type { Platform } from '@shared/taxonomy'
 import { Card, SectionTitle, Button, SignalGlyph } from './ui'
+import { CardHead, PlatformBadge, DeltaChip, Sparkline } from '@/components/kit'
 import { Mascot } from './Mascot'
 import { fadeUp, listStagger } from '@/lib/motion'
 import { listHandles, statsFor, deltaFor, type TrackedHandle } from '@/lib/handles'
@@ -112,26 +113,6 @@ function Mark({ state, what }: { state: Connector['posts']; what: string }) {
   )
 }
 
-/** The platform's own mark, so a row is identifiable before it is read. */
-function PlatformDot({ platform }: { platform: Platform }) {
-  const tone: Record<string, string> = {
-    YouTube: '#FF0033',
-    Instagram: '#C13584',
-    Facebook: '#0866FF',
-    LinkedIn: '#0A66C2',
-    Bluesky: '#1185FE',
-    Mastodon: '#6364FF',
-    'Twitter/X': '#111111',
-  }
-  return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-full ring-1 ring-black/10"
-      style={{ background: tone[platform] ?? 'var(--ink-3)' }}
-    />
-  )
-}
-
 const fmt = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('en-IN'))
 
 export function Overview({
@@ -166,16 +147,16 @@ export function Overview({
             carries it; the dashboard spelling "SIGNAL" in mono was the odd one
             out and part of why this screen read as a different product. */}
         <span className="inline-flex items-center gap-2 text-[var(--accent)]">
-          <span className="grid size-7 place-items-center rounded-lg bg-[var(--accent)] text-[var(--accent-fg)]">
+          <span className="grid size-7 place-items-center rounded-lg bg-[var(--accent)] text-[var(--accent-fg)] shadow-[var(--e1)]">
             <SignalGlyph size={15} />
           </span>
-          <span className="text-sm font-semibold tracking-[-0.03em] text-ink-1">Signal</span>
+          <span className="text-sm font-semibold tracking-[-0.03em] text-ink">Signal</span>
         </span>
 
-        <h1 className="hed hed-grad mt-6 text-[2.6rem]">
+        <h1 className="hed mt-6 text-[2.6rem]">
           Where you
           <br />
-          <span className="serif">stand today.</span>
+          <span className="text-[var(--accent)]">stand today.</span>
         </h1>
         {/* The mascot reacts to the state of the board rather than sitting
             there as decoration: pleased once something is being tracked,
@@ -185,8 +166,8 @@ export function Overview({
           <div className="mt-4 flex items-center gap-3">
             <Mascot state="success" size={48} />
             <p className="text-[15px] leading-relaxed text-ink-2">
-              <span className="num text-ink-1">{fmt(totalFollowers)}</span> people follow the{' '}
-              <span className="num text-ink-1">{withReadings.length}</span>{' '}
+              <span className="tnum font-bold text-ink">{fmt(totalFollowers)}</span> people follow the{' '}
+              <span className="tnum font-bold text-ink">{withReadings.length}</span>{' '}
               account{withReadings.length === 1 ? '' : 's'} you watch.
             </p>
           </div>
@@ -203,68 +184,100 @@ export function Overview({
       {/* ── At a glance ─────────────────────────────────────────────────── */}
       {withReadings.length > 0 && (
         <m.section variants={fadeUp}>
-          <SectionTitle>Your accounts</SectionTitle>
-          <div className="space-y-2">
+          <SectionTitle
+            action={
+              <Button size="sm" variant="outline" onClick={onAccounts} aria-label="Manage accounts">
+                <LayoutGrid size={14} /> Manage
+              </Button>
+            }
+          >
+            Your accounts
+          </SectionTitle>
+          <div className="space-y-3">
             {withReadings.slice(0, 4).map((h) => {
               const s = statsFor(h.snapshots.at(-1))
               const d = deltaFor(h)
+              // The follower reading from every snapshot on record — a real
+              // trend line drawn only from measurements actually taken. The
+              // Sparkline draws nothing under two readings, so a freshly-added
+              // account shows no invented shape.
+              const followerTrend = h.snapshots.map((snap) => snap.followers)
+              const hasTrend = followerTrend.filter((v) => v != null).length >= 2
+              const trendColor =
+                d.followers == null || d.followers === 0
+                  ? 'var(--accent)'
+                  : d.followers > 0
+                    ? 'var(--pos)'
+                    : 'var(--neg)'
               return (
-                <Card key={h.id} tone={h.own ? 'accent' : undefined} className="grain">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="min-w-0">
-                      <span className="kicker block">{h.platform}</span>
-                      <span className="mt-1.5 block truncate text-[15px] font-semibold text-ink-1">
+                <Card key={h.id} tone={h.own ? 'accent' : undefined} className="card-hover">
+                  <div className="flex items-center gap-3">
+                    <PlatformBadge platform={h.platform} size={40} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] font-semibold text-ink">
                         {h.displayName ?? h.handle}
                       </span>
-                      <span className="mt-0.5 block text-xs text-ink-3">
-                        {fmt(s.followers)} followers
+                      <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">
+                        <span className="tnum">{fmt(s.followers)} followers</span>
                         {d.followers != null && d.followers !== 0 && (
-                          <span className={d.followers > 0 ? 'text-[var(--pos)]' : 'text-[var(--neg)]'}>
-                            {' '}
-                            {d.followers > 0 ? '▲' : '▼'} {fmt(Math.abs(d.followers))}
-                          </span>
+                          <DeltaChip
+                            value={d.followers}
+                            suffix=""
+                            title="Change since the previous reading"
+                          />
                         )}
                       </span>
                     </span>
                     <span className="shrink-0 text-right">
-                      <span className="num block text-2xl leading-none text-ink-1">
+                      <span className="tnum block text-2xl font-bold leading-none tracking-[-0.02em] text-ink">
                         {s.engagementRate != null ? s.engagementRate.toFixed(2) : '—'}
                         {s.engagementRate != null && (
-                          <span className="text-base text-ink-3">%</span>
+                          <span className="text-sm font-semibold text-ink-3">%</span>
                         )}
                       </span>
                       <span className="kicker mt-1.5 block">engagement</span>
                     </span>
                   </div>
+                  {hasTrend && (
+                    <div className="mt-3 flex items-center gap-3 border-t border-[var(--border)] pt-3">
+                      <span className="kicker shrink-0">followers</span>
+                      <div className="min-w-0 flex-1">
+                        <Sparkline values={followerTrend} color={trendColor} height={30} />
+                      </div>
+                    </div>
+                  )}
                 </Card>
               )
             })}
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={onAccounts}>
-              <LayoutGrid size={14} /> Manage accounts
-            </Button>
-            {withReadings.length > 1 && (
+          {withReadings.length > 1 && (
+            <div className="mt-4">
               <Button size="sm" variant="outline" onClick={onCompare}>
                 <GitCompareArrows size={14} /> Compare
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </m.section>
       )}
 
       {/* ── Read a post ─────────────────────────────────────────────────── */}
       <m.section variants={fadeUp}>
-        <Card tone="accent" className="grain">
-          <p className="text-sm text-ink-1">
+        <Card tone="accent" level="lift">
+          <CardHead
+            icon={<Link2 size={16} aria-hidden />}
+            tint="blue"
+            title="Read a post"
+            sub="Any public link, in any language"
+          />
+          <p className="text-sm leading-relaxed text-ink-2">
             Paste a link to any public post and get what it says, what it means, and what
             people made of it.
           </p>
-          <Button className="mt-3" size="sm" onClick={onAnalyse}>
+          <Button className="mt-4" size="sm" onClick={onAnalyse}>
             <Link2 size={14} /> Read a post
           </Button>
           {historyCount > 0 && (
-            <p className="mt-2 text-xs text-ink-3">
+            <p className="tnum mt-2.5 text-xs text-ink-3">
               {historyCount} post{historyCount === 1 ? '' : 's'} read so far.
             </p>
           )}
@@ -287,9 +300,9 @@ export function Overview({
 
             {CONNECTORS.map((c) => (
               <Fragment key={c.platform}>
-                <span className="flex items-center gap-2 border-t border-[var(--border)] py-2.5">
-                  <PlatformDot platform={c.platform} />
-                  <span className="text-sm text-ink-1">
+                <span className="flex items-center gap-2.5 border-t border-[var(--border)] py-2.5">
+                  <PlatformBadge platform={c.platform} size={24} />
+                  <span className="truncate text-sm font-medium text-ink">
                     {c.platform === 'Twitter/X' ? 'X' : c.platform}
                   </span>
                 </span>
@@ -307,14 +320,15 @@ export function Overview({
 
           {/* The detail lives under the grid rather than beside every row, so
               the matrix stays scannable and the caveats stay readable. */}
-          <details className="mt-4 border-t border-[var(--border)] pt-3">
-            <summary className="cursor-pointer text-xs text-ink-3">
+          <details className="group mt-4 rounded-[var(--radius-md)] bg-[var(--surface-2)]">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3.5 text-xs font-medium text-ink-2 [&::-webkit-details-marker]:hidden">
+              <Info size={14} className="shrink-0 text-ink-3" aria-hidden />
               What each platform actually gives
             </summary>
-            <ul className="mt-2 space-y-2">
+            <ul className="space-y-2 px-3.5 pb-3.5">
               {CONNECTORS.map((c) => (
-                <li key={c.platform} className="text-xs text-ink-3">
-                  <span className="text-ink-2">
+                <li key={c.platform} className="text-xs leading-relaxed text-ink-3">
+                  <span className="font-semibold text-ink-2">
                     {c.platform === 'Twitter/X' ? 'X' : c.platform}
                   </span>{': '}
                   {c.note}
@@ -328,12 +342,17 @@ export function Overview({
       {mine.length === 0 && (
         <m.div variants={fadeUp}>
           <Card>
-            <p className="text-sm text-ink-1">Track your first account</p>
-            <p className="mt-1 text-xs text-ink-3">
+            <CardHead
+              icon={<LayoutGrid size={16} aria-hidden />}
+              tint="violet"
+              title="Track your first account"
+              sub="Start with a YouTube channel"
+            />
+            <p className="text-sm leading-relaxed text-ink-3">
               Add a YouTube channel to get posts, engagement and comments. Facebook and
               Instagram will show follower counts.
             </p>
-            <Button className="mt-3" size="sm" onClick={onAccounts}>
+            <Button className="mt-4" size="sm" onClick={onAccounts}>
               <LayoutGrid size={14} /> Add an account
             </Button>
           </Card>

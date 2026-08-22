@@ -8,18 +8,21 @@ import {
   Check,
   CircleAlert,
   ExternalLink,
-  Link2,
   ListChecks,
   Lock,
+  MapPin,
   Megaphone,
   MessageSquare,
+  Newspaper,
   OctagonAlert,
   Plus,
   Quote,
   RefreshCw,
   ScanEye,
+  TrendingUp,
   TriangleAlert,
   UserRound,
+  Users,
 } from 'lucide-react'
 import type { Identity } from '@shared/identity'
 import { unverifiedFields } from '@shared/identity'
@@ -39,8 +42,27 @@ import { useMorningScan } from '@/lib/morning-scan'
 import { useOpinion } from '@/lib/opinion'
 import { OpinionPanel } from './OpinionPanel'
 import { Avatar, Button, Card, Chip, Empty, Shell, type ChipTone } from './ui'
-import { cn, full, relativeTime } from '@/lib/utils'
-import { fadeUp, listStagger } from '@/lib/motion'
+import {
+  CardHead,
+  ColumnChart,
+  DonutBreakdown,
+  HBarBoard,
+  IconStat,
+  IndiaMap,
+  Legend,
+  LineChart,
+  PlatformBadge,
+  PostThumbCard,
+  RankRow,
+  seriesColor,
+  youtubeThumb,
+  type MapMarker,
+} from '@/components/kit'
+import { geocodePlace, partyColor, type Place } from './gazetteer'
+import { INDIA_DOTS, INDIA_BBOX } from './india-dots'
+import { listHandles, type TrackedHandle } from '@/lib/handles'
+import { cn, compact, full, relativeTime } from '@/lib/utils'
+import { fadeUp, listItem, listStagger } from '@/lib/motion'
 
 /**
  * The dashboard.
@@ -116,6 +138,19 @@ export function Briefing({
 
   const candidates = store.newsCandidates ?? []
 
+  /* Where the read stories come from, for the news-origin map. A purely
+     presentational reduction over the news the briefing already computed:
+     every story whose free-text place resolves against the offline gazetteer
+     becomes a weighted marker, and anything that will not resolve is simply
+     never placed — honesty over a full-looking map. */
+  const newsOrigins = useMemo(() => newsOriginMap(b.news), [b.news])
+
+  /* The tracked accounts, read once, so the home fills with the office's own
+     ground and reach even before the morning scan has found a single story.
+     Presentational only — the same list the Accounts screen reads, surfaced
+     here so the dashboard is never an empty page when accounts exist. */
+  const handles = useMemo(() => listHandles(), [])
+
   return (
     <Shell className="stack">
       <m.div
@@ -134,6 +169,87 @@ export function Briefing({
             onSetUp={onEditIdentity}
           />
         </m.header>
+
+        {/* ── the desk at a glance ────────────────────────────────────────
+            The office's own ground and reach, surfaced on the home so the
+            dashboard reads as a live desk rather than an empty inbox before
+            the morning scan lands. Everything here is read from the tracked
+            accounts and the identity this device already holds. */}
+        {(handles.length > 0 || b.identity !== null) && (
+          <m.section variants={fadeUp} aria-labelledby="desk-heading">
+            <h2 id="desk-heading" className="sr-only">
+              Your desk at a glance
+            </h2>
+            <DeskOverview
+              handles={handles}
+              identity={b.identity}
+              onManage={() => onNavigate('accounts')}
+              onRead={onRead}
+            />
+          </m.section>
+        )}
+
+        {/* ── the morning in numbers ──────────────────────────────────────
+            The counts this screen already computes, as quiet tiles rather
+            than doors: none of them navigates, and none carries a delta,
+            because no second reading on another day exists to compare
+            against. Hidden entirely while every count is zero — a row of
+            zeros is padding, not a briefing. */}
+        {b.identity !== null &&
+          (b.news.length > 0 ||
+            b.mood.commentsRead > 0 ||
+            b.voice.total > 0 ||
+            b.issues.length > 0) && (
+            <m.div
+              className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4"
+              variants={listStagger}
+            >
+              <m.div variants={listItem}>
+                <IconStat
+                  className="h-full"
+                  icon={<Newspaper size={18} aria-hidden />}
+                  label="Stories worth noticing"
+                  value={b.news.length}
+                  tint="blue"
+                  deltaLabel={b.windowLabel}
+                />
+              </m.div>
+              <m.div variants={listItem}>
+                <IconStat
+                  className="h-full"
+                  icon={<MessageSquare size={18} aria-hidden />}
+                  label="Comments read"
+                  value={b.mood.commentsRead}
+                  tint="violet"
+                  deltaLabel={
+                    b.mood.postsRead > 0
+                      ? `Under ${b.mood.postsRead} of your own posts`
+                      : b.windowLabel
+                  }
+                />
+              </m.div>
+              <m.div variants={listItem}>
+                <IconStat
+                  className="h-full"
+                  icon={<Megaphone size={18} aria-hidden />}
+                  label="Local-account posts"
+                  value={b.voice.total}
+                  tint="orange"
+                  deltaLabel={b.windowLabel}
+                />
+              </m.div>
+              <m.div variants={listItem}>
+                <IconStat
+                  className="h-full"
+                  icon={<ListChecks size={18} aria-hidden />}
+                  label="Complaint topics"
+                  value={b.issues.length}
+                  tint="teal"
+                  deltaLabel={b.windowLabel}
+                />
+              </m.div>
+            </m.div>
+          )}
 
         {/* ── the one thing ───────────────────────────────────────────── */}
         <m.section variants={fadeUp} aria-labelledby="lead-heading">
@@ -253,13 +369,26 @@ export function Briefing({
             />
           ) : (
             <>
-              <ul className="grid gap-3 lg:grid-cols-2">
+              {/* Where today's coverage is coming from. Only drawn when at least
+                  one story names a place the gazetteer can resolve; the rest of
+                  the stories are listed below, unpinned and unchanged. */}
+              {newsOrigins.markers.length > 0 && (
+                <div className="mb-4">
+                  <NewsOriginCard
+                    markers={newsOrigins.markers}
+                    placed={newsOrigins.placed}
+                    total={b.news.length}
+                  />
+                </div>
+              )}
+
+              <m.ul className="grid gap-3 lg:grid-cols-2" variants={listStagger}>
                 {b.news.map((item) => (
-                  <li key={item.mention.id}>
+                  <m.li key={item.mention.id} variants={listItem}>
                     <NewsCard item={item} onRead={onRead} />
-                  </li>
+                  </m.li>
                 ))}
-              </ul>
+              </m.ul>
 
               {/* Found this morning and not yet read. Kept below the read
                   stories rather than mixed in: a headline that matched a search
@@ -296,17 +425,17 @@ export function Briefing({
               }
               action={<LinkOut label="Grievance desk" onClick={go('grievances')} />}
             />
-            <ul className="grid gap-2.5 lg:grid-cols-2">
+            <m.ul className="grid gap-3 lg:grid-cols-2" variants={listStagger}>
               {b.issues.map((issue, i) => (
-                <li key={issue.id}>
+                <m.li key={issue.id} variants={listItem}>
                   <IssueCard
                     issue={issue}
                     rank={i + 1}
                     onOpen={() => onNavigate('grievances', issue.id)}
                   />
-                </li>
+                </m.li>
               ))}
-            </ul>
+            </m.ul>
           </m.section>
         )}
 
@@ -326,7 +455,7 @@ export function Briefing({
                 {b.lines.map((line) => (
                   <li key={line.text}>
                     <p className="flex gap-2.5 text-[15px] leading-relaxed">
-                      <Quote size={15} className="mt-1.5 shrink-0 text-ink-3" aria-hidden />
+                      <Quote size={15} className="mt-1.5 shrink-0 text-[var(--accent-2)]" aria-hidden />
                       <span>{line.text}</span>
                     </p>
                     <p className="mt-1 pl-[26px] text-xs text-ink-3">
@@ -360,13 +489,13 @@ export function Briefing({
               hint="Nothing is actioned until you add it."
               action={<LinkOut label="Action list" onClick={go('actions')} />}
             />
-            <ul className="stack-tight">
+            <m.ul className="stack-tight" variants={listStagger}>
               {b.suggestions.map((s) => (
-                <li key={s.sourceId}>
+                <m.li key={s.sourceId} variants={listItem}>
                   <SuggestionCard suggestion={s} onOpenActions={go('actions')} />
-                </li>
+                </m.li>
               ))}
-            </ul>
+            </m.ul>
           </m.section>
         )}
 
@@ -411,7 +540,7 @@ function Greeting({
             {greeting}.
           </h1>
           <p className="mt-2 max-w-[56ch] text-sm leading-relaxed text-ink-2">
-            "Nobody has been set up yet, so there is nothing to scan for."
+            Nobody has been set up yet, so there is nothing to scan for.
           </p>
         </div>
         <Button onClick={onSetUp} className="shrink-0">
@@ -456,7 +585,7 @@ function Greeting({
                 {facts.map((fact) => (
                   <li
                     key={fact}
-                    className="rounded-[--radius-pill] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1 text-xs text-ink-2"
+                    className="rounded-[var(--radius-pill)] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1 text-xs text-ink-2"
                   >
                     {fact}
                   </li>
@@ -475,10 +604,11 @@ function Greeting({
                   target="_blank"
                   rel="noreferrer noopener"
                   title={`${handle.platform}: @${handle.handle}`}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 text-xs text-ink-2 transition-colors hover:text-ink"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] py-1.5 pl-1.5 pr-3.5 text-xs font-medium text-ink-2 shadow-[var(--e1)] transition-colors hover:border-[var(--border-interactive)] hover:text-ink"
                 >
-                  {handle.connected && <BadgeCheck size={13} className="text-[var(--pos)]" aria-hidden />}
+                  <PlatformBadge platform={handle.platform} size={24} />
                   {handle.platform}
+                  {handle.connected && <BadgeCheck size={13} className="text-[var(--pos)]" aria-hidden />}
                 </a>
               </li>
             ))}
@@ -492,7 +622,7 @@ function Greeting({
       {unverified.length > 0 && (
         <button
           onClick={onSetUp}
-          className="mt-4 flex w-full items-center gap-2.5 rounded-[--radius-md] border border-[color-mix(in_oklab,var(--warn)_28%,transparent)] bg-[var(--warn-soft)] px-3.5 py-2.5 text-left transition-opacity hover:opacity-90"
+          className="mt-4 flex min-h-11 w-full items-center gap-2.5 rounded-[var(--radius-md)] border border-[color-mix(in_oklab,var(--warn)_28%,transparent)] bg-[var(--warn-soft)] px-3.5 py-2.5 text-left transition-opacity hover:opacity-90"
         >
           <CircleAlert size={15} className="shrink-0 text-[var(--warn)]" aria-hidden />
           <span className="min-w-0 flex-1 text-sm leading-snug text-[var(--warn)]">
@@ -525,21 +655,21 @@ function LeadCard({
   }[lead.tone]
 
   return (
-    <Card>
+    <Card level="lift">
       <div className="absolute inset-y-0 left-0 w-1" style={{ background: tone.colour }} aria-hidden />
       <div className="flex items-start gap-3.5 pl-1.5">
         <span
-          className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full"
+          className="icon-badge mt-0.5"
           style={{ background: tone.soft, color: tone.colour }}
         >
-          <tone.Icon size={18} aria-hidden />
+          <tone.Icon size={19} aria-hidden />
         </span>
 
         <div className="min-w-0 flex-1">
           <p id="lead-heading" className="kicker">
             Needs you today
           </p>
-          <p className="mt-1.5 text-lg font-semibold leading-snug tracking-[-0.015em]">
+          <p className="mt-1.5 text-lg font-bold leading-snug tracking-[-0.015em]">
             {lead.line}
           </p>
           {lead.detail && (
@@ -652,7 +782,7 @@ function MoodPanel({ mood, onOpenAccounts }: { mood: Mood; onOpenAccounts: () =>
   return (
     <Card>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-lg font-semibold leading-snug tracking-[-0.015em]">{verdict}</p>
+        <p className="text-lg font-bold leading-snug tracking-[-0.015em]">{verdict}</p>
         <p className="tnum text-sm text-ink-3">
           {mood.commentsRead.toLocaleString('en-IN')} comments read
         </p>
@@ -661,13 +791,17 @@ function MoodPanel({ mood, onOpenAccounts }: { mood: Mood; onOpenAccounts: () =>
       {/* Position and a written percentage both carry the value, so the
           reading survives without colour vision. */}
       <div
-        className="mt-4 flex h-2.5 w-full overflow-hidden rounded-full bg-[var(--surface-3)]"
+        className="mt-4 flex h-3 w-full gap-[3px]"
         role="img"
         aria-label={`${mood.positive}% positive, ${mood.neutral}% neutral, ${mood.negative}% negative`}
       >
         {segments.map((seg) =>
           seg.n === 0 ? null : (
-            <span key={seg.label} style={{ width: `${seg.n}%`, background: seg.colour }} />
+            <span
+              key={seg.label}
+              className="h-full rounded-full"
+              style={{ flexGrow: seg.n, background: seg.colour }}
+            />
           ),
         )}
       </div>
@@ -732,16 +866,22 @@ function MoodPanel({ mood, onOpenAccounts }: { mood: Mood; onOpenAccounts: () =>
           <p className="kicker">Read from your accounts</p>
           <ul className="mt-2 flex flex-wrap gap-1.5">
             {mood.accounts.map((a) => (
-              <li key={`${a.platform}-${a.handle}`}>
-                <Chip>
-                  {a.platform} · {a.handle} · {a.standing.commentsRead} comments
+              /* A long YouTube handle made this one chip wider than a phone
+                 and dragged the whole card into horizontal overflow; the chip
+                 now ellipsizes inside the card instead. The full reading rides
+                 on the row that follows and on the Accounts screen. */
+              <li key={`${a.platform}-${a.handle}`} className="min-w-0 max-w-full">
+                <Chip className="max-w-full">
+                  <span className="min-w-0 truncate">
+                    {a.platform} · {a.handle} · {a.standing.commentsRead} comments
+                  </span>
                 </Chip>
               </li>
             ))}
           </ul>
           <button
             onClick={onOpenAccounts}
-            className="mt-2 text-xs font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
+            className="mt-1 inline-flex min-h-11 items-center text-xs font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
           >
             Not your account? Fix it on Accounts
           </button>
@@ -766,7 +906,7 @@ function MoodPanel({ mood, onOpenAccounts }: { mood: Mood; onOpenAccounts: () =>
       {mood.unmeasured.length > 0 && (
         <button
           onClick={onOpenAccounts}
-          className="mt-3 text-xs font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
+          className="mt-2 inline-flex min-h-11 items-center text-left text-xs font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
         >
           {mood.unmeasured.length} more of your {mood.unmeasured.length === 1 ? 'account has' : 'accounts have'} not been read
         </button>
@@ -816,12 +956,17 @@ function ScanPanel({
   if (scan.busy) {
     return (
       <Card>
-        <div className="flex items-center gap-3">
-          <RefreshCw size={17} className="animate-spin text-[var(--accent)]" aria-hidden />
+        <div className="flex items-center gap-3.5">
+          <span
+            className="icon-badge"
+            style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+          >
+            <RefreshCw size={17} className="animate-spin" aria-hidden />
+          </span>
           <div className="min-w-0">
-            <p className="text-[15px] font-semibold">Reading this morning&rsquo;s papers…</p>
+            <p className="text-[15px] font-bold">Reading this morning&rsquo;s papers…</p>
             <p className="mt-0.5 text-sm text-ink-2">
-              "Checking each front page for your name."
+              Checking each front page for your name.
             </p>
           </div>
         </div>
@@ -894,17 +1039,25 @@ function FoundToday({
   onRead: () => void
 }) {
   return (
-    <Card className="border-[color-mix(in_oklab,var(--accent)_40%,var(--rule))]">
+    <Card tone="accent">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-[15px] font-semibold">
-            {count} {count === 1 ? 'story' : 'stories'} in today&rsquo;s papers mention you
-          </p>
-          <p className="mt-1 text-sm leading-relaxed text-ink-2">
-            Found by matching your name and seat against each masthead&rsquo;s front page.
-            Nobody has read them yet. What they actually say, whether any of it is
-            questionable, and what to do about it all come from reading them.
-          </p>
+        <div className="flex min-w-0 items-start gap-3.5">
+          <span
+            className="icon-badge"
+            style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+          >
+            <Newspaper size={18} aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[15px] font-bold">
+              {count} {count === 1 ? 'story' : 'stories'} in today&rsquo;s papers mention you
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-ink-2">
+              Found by matching your name and seat against each masthead&rsquo;s front page.
+              Nobody has read them yet. What they actually say, whether any of it is
+              questionable, and what to do about it all come from reading them.
+            </p>
+          </div>
         </div>
         <Button size="sm" className="shrink-0" onClick={onRead} disabled={busy}>
           <ScanEye size={15} />
@@ -976,7 +1129,7 @@ function PerceptionPanel({
   return (
     <Card>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-lg font-semibold leading-snug tracking-[-0.015em]">{verdict}</p>
+        <p className="text-lg font-bold leading-snug tracking-[-0.015em]">{verdict}</p>
         <p className="tnum text-sm text-ink-3">
           {perception.total} {perception.total === 1 ? 'story' : 'stories'} read
         </p>
@@ -990,13 +1143,17 @@ function PerceptionPanel({
       </p>
 
       <div
-        className="mt-4 flex h-2.5 w-full overflow-hidden rounded-full bg-[var(--surface-3)]"
+        className="mt-4 flex h-3 w-full gap-[3px]"
         role="img"
         aria-label={`${perception.supportive} supportive, ${perception.neutral} neutral, ${perception.critical} critical`}
       >
         {segments.map((seg) =>
           seg.n === 0 ? null : (
-            <span key={seg.label} style={{ width: `${pct(seg.n)}%`, background: seg.colour }} />
+            <span
+              key={seg.label}
+              className="h-full rounded-full"
+              style={{ flexGrow: pct(seg.n), background: seg.colour }}
+            />
           ),
         )}
       </div>
@@ -1016,7 +1173,7 @@ function PerceptionPanel({
       </ul>
 
       {perception.suspect > 0 && (
-        <p className="mt-3.5 flex items-start gap-2 rounded-[--radius-md] border border-[color-mix(in_oklab,var(--neg)_28%,transparent)] bg-[var(--neg-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--neg)]">
+        <p className="mt-3.5 flex items-start gap-2 rounded-[var(--radius-md)] border border-[color-mix(in_oklab,var(--neg)_28%,transparent)] bg-[var(--neg-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--neg)]">
           <ScanEye size={15} className="mt-0.5 shrink-0" aria-hidden />
           <span>
             {perception.suspect} of these {perception.suspect === 1 ? 'was' : 'were'} flagged as
@@ -1053,7 +1210,7 @@ function PerceptionPanel({
 
       <button
         onClick={onOpenCoverage}
-        className="mt-3 text-xs font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
+        className="mt-2 inline-flex min-h-11 items-center text-xs font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
       >
         See every story
       </button>
@@ -1089,10 +1246,15 @@ function VoicePanel({
   if (busy) {
     return (
       <Card>
-        <div className="flex items-center gap-3">
-          <RefreshCw size={17} className="animate-spin text-[var(--accent)]" aria-hidden />
+        <div className="flex items-center gap-3.5">
+          <span
+            className="icon-badge"
+            style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+          >
+            <RefreshCw size={17} className="animate-spin" aria-hidden />
+          </span>
           <div className="min-w-0">
-            <p className="text-[15px] font-semibold">Reading the local accounts…</p>
+            <p className="text-[15px] font-bold">Reading the local accounts…</p>
             <p className="mt-0.5 text-sm text-ink-2">
               Opening each channel&rsquo;s recent posts and checking what they say about you.
             </p>
@@ -1139,7 +1301,7 @@ function VoicePanel({
     <div className="stack-tight">
       <Card>
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <p className="text-lg font-semibold leading-snug tracking-[-0.015em]">{verdict}</p>
+          <p className="text-lg font-bold leading-snug tracking-[-0.015em]">{verdict}</p>
           {voice.criticalReach > 0 && (
             <p className="tnum text-sm text-ink-3">
               {full(voice.criticalReach)} followers hear the critical ones
@@ -1167,8 +1329,8 @@ function VoicePanel({
 
         {voice.unreadable > 0 && (
           <p className="mt-3 border-t border-[var(--rule)] pt-3 text-xs leading-relaxed text-ink-3">
-            {voice.unreadable} more {voice.unreadable === 1 ? 'account is' : 'accounts are'} on the
-            being watched and published nothing a stranger can read. Facebook, Instagram, LinkedIn and
+            {voice.unreadable} more {voice.unreadable === 1 ? 'account is' : 'accounts are'} being
+            watched but published nothing a stranger can read. Facebook, Instagram, LinkedIn and
             X show a server nothing, so silence from those is not evidence of quiet.
           </p>
         )}
@@ -1197,7 +1359,7 @@ function VoicePanel({
           being kept from the thing it was bought to watch. */}
       {voice.aboutSeat.length > 0 && (
         <Card>
-          <p className="text-[15px] font-semibold">
+          <p className="text-[15px] font-bold">
             {voice.aboutSeat.length} more{' '}
             {voice.aboutSeat.length === 1 ? 'post is' : 'posts are'} about your constituency
           </p>
@@ -1209,8 +1371,8 @@ function VoicePanel({
             {voice.aboutSeat.slice(0, 4).map((v) => (
               <li key={v.postUrl} className="border-t border-[var(--rule)] pt-2.5">
                 <p className="flex flex-wrap items-center gap-2 text-xs text-ink-3">
-                  <span className="font-medium text-ink-2">{v.displayName ?? v.handle}</span>
-                  <span>{v.platform}</span>
+                  <PlatformBadge platform={v.platform} size={20} />
+                  <span className="font-semibold text-ink-2">{v.displayName ?? v.handle}</span>
                   {v.followers ? <span>· {full(v.followers)} followers</span> : null}
                   {v.postedAt ? <span>· {relativeTime(v.postedAt)}</span> : null}
                 </p>
@@ -1229,7 +1391,7 @@ function VoicePanel({
                   <button
                     type="button"
                     onClick={() => onRead(v.postUrl)}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
+                    className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
                   >
                     <ScanEye size={12} aria-hidden />
                     Read it fully
@@ -1238,7 +1400,7 @@ function VoicePanel({
                     href={v.postUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
+                    className="inline-flex min-h-11 items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
                   >
                     <ExternalLink size={11} aria-hidden />
                     open
@@ -1268,7 +1430,16 @@ function VoiceCard({
         tone === 'suspect' && 'border-[color-mix(in_oklab,var(--neg)_45%,var(--rule))]',
       )}
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <PlatformBadge platform={voice.platform} size={32} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold">{voice.displayName ?? voice.handle}</p>
+          <p className="mt-0.5 text-xs text-ink-3">
+            {voice.platform}
+            {voice.followers ? ` · ${full(voice.followers)} followers` : ''}
+            {voice.postedAt ? ` · ${relativeTime(voice.postedAt)}` : ''}
+          </p>
+        </div>
         {tone === 'suspect' && (
           <Chip tone="negative" icon={<ScanEye size={11} aria-hidden />}>
             Check this
@@ -1289,17 +1460,9 @@ function VoiceCard({
               ? 'For you'
               : 'Neutral'}
         </Chip>
-        <span className="text-sm font-semibold">{voice.displayName ?? voice.handle}</span>
-        <span className="text-xs text-ink-3">
-          {voice.platform}
-          {voice.followers ? ` · ${full(voice.followers)} followers` : ''}
-        </span>
-        {voice.postedAt && (
-          <span className="text-xs text-ink-3">· {relativeTime(voice.postedAt)}</span>
-        )}
       </div>
 
-      <p className="mt-2.5 text-sm leading-relaxed text-ink-2">
+      <p className="mt-3 text-sm leading-relaxed text-ink-2">
         <button
           type="button"
           onClick={() => onRead(voice.postUrl)}
@@ -1309,11 +1472,11 @@ function VoiceCard({
         </button>
       </p>
 
-      <span className="mt-2 flex items-center gap-3">
+      <span className="mt-1 flex items-center gap-3">
         <button
           type="button"
           onClick={() => onRead(voice.postUrl)}
-          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
+          className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
         >
           <ScanEye size={12} aria-hidden />
           Read it fully
@@ -1322,7 +1485,7 @@ function VoiceCard({
           href={voice.postUrl}
           target="_blank"
           rel="noreferrer noopener"
-          className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
+          className="inline-flex min-h-11 items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
         >
           <ExternalLink size={11} aria-hidden />
           open
@@ -1333,6 +1496,506 @@ function VoiceCard({
         <p className="mt-3 border-t border-[var(--rule)] pt-3 text-sm leading-relaxed text-ink-2">
           <span className="font-medium text-[var(--neg)]">Why it was flagged: </span>
           {voice.fakeNote}
+        </p>
+      )}
+    </Card>
+  )
+}
+
+/* ── where the news comes from ───────────────────────────────────────────── */
+
+/**
+ * A story's tone, collapsed to the three the map can colour. A flagged or
+ * critical story reads red, a supportive one green, everything else amber —
+ * the same safety-first order the rest of this screen uses, so a place with
+ * one hostile story is never painted calm by two routine ones beside it.
+ */
+function storyTone(item: NewsItem): 'neg' | 'pos' | 'mid' {
+  if (item.suspect || item.mention.stance === 'critical') return 'neg'
+  if (item.mention.stance === 'supportive') return 'pos'
+  return 'mid'
+}
+
+/**
+ * Reduce the read stories to weighted map markers, one per resolved place.
+ *
+ * Stories are grouped by the location their free-text place resolves to, so two
+ * stories out of Hyderabad make one heavier marker rather than two stacked
+ * pins. Marker weight follows how many stories a place carries; its colour
+ * follows the strongest tone among them. `placed` counts the stories that were
+ * actually mapped, so the card can say honestly how many were not.
+ */
+/* ── desk overview ───────────────────────────────────────────────────────── */
+
+/** Latest follower reading for a handle, or null when never read. */
+function latestFollowers(h: TrackedHandle): number | null {
+  for (let i = h.snapshots.length - 1; i >= 0; i--) {
+    const f = h.snapshots[i]?.followers
+    if (typeof f === 'number') return f
+  }
+  return null
+}
+
+interface DeskPost {
+  url: string
+  platform: string
+  title: string | null
+  author: string
+  engagement: number
+  metaLine: string
+}
+
+/**
+ * The most-engaging posts the given accounts have stored, biggest first.
+ *
+ * The HOME passes only the office's own accounts. That is deliberate: a rival
+ * with a bigger following outranks everything the office published, so an
+ * unfiltered list turned the dashboard's own "most engaging posts" into a feed
+ * of somebody else's work. The Accounts screen, which exists to compare, shows
+ * both sides side by side instead.
+ */
+function deskPosts(handles: TrackedHandle[]): DeskPost[] {
+  const posts: DeskPost[] = []
+  for (const h of handles) {
+    const latest = h.snapshots[h.snapshots.length - 1]
+    for (const p of latest?.posts ?? []) {
+      const eng = (p.likes ?? 0) + (p.comments ?? 0)
+      posts.push({
+        url: p.url,
+        platform: h.platform,
+        title: p.title,
+        author: h.displayName || h.handle,
+        engagement: eng,
+        metaLine: [p.views != null ? `${compact(p.views)} views` : null, eng > 0 ? `${compact(eng)} reactions` : null]
+          .filter(Boolean)
+          .join(' · '),
+      })
+    }
+  }
+  return posts.sort((a, b) => b.engagement - a.engagement).slice(0, 10)
+}
+
+/**
+ * The home's "desk at a glance" — the office's own ground and reach, drawn
+ * from the tracked accounts and identity this device already holds. It is the
+ * account screen's headline content surfaced on the dashboard so the home is
+ * a live desk, not an empty page, before the morning scan has found anything.
+ *
+ * Honest by construction: the constituency lights only if the seat resolves
+ * against the offline gazetteer, a handle with no reading shows a dash rather
+ * than a fabricated count, and the map lights in the party's own colour.
+ */
+function DeskOverview({
+  handles,
+  identity,
+  onManage,
+  onRead,
+}: {
+  handles: TrackedHandle[]
+  identity: Identity | null
+  onManage: () => void
+  onRead: (postUrl: string) => void
+}) {
+  const own = handles.filter((h) => h.own)
+  const watched = handles.filter((h) => !h.own)
+  const totalFollowers = handles.reduce((s, h) => s + (latestFollowers(h) ?? 0), 0)
+  const channels = new Set(handles.map((h) => h.platform)).size
+
+  // The seat, geocoded once. Null when it will not resolve — the map then
+  // centres on India and says so rather than pinning a plausible dot. The
+  // ground lights in the party's colour (BJP saffron, Congress blue, …).
+  const seat = geocodePlace(identity?.constituency ?? identity?.district ?? identity?.state ?? null)
+  const ground = partyColor(identity?.party)
+
+  const board = handles
+    .map((h) => ({ h, followers: latestFollowers(h) }))
+    .filter((r): r is { h: TrackedHandle; followers: number } => r.followers != null)
+    .sort((a, b) => b.followers - a.followers)
+
+  // The home shows the office's OWN posts. Rivals are compared on Accounts.
+  const posts = deskPosts(own.length > 0 ? own : handles)
+  const zones = seat ? [{ lon: seat.lon, lat: seat.lat, radiusDeg: 1.3, label: `${seat.name}, ${seat.state}` }] : []
+
+  /**
+   * Follower growth, INDEXED to each account's first reading (100 = where it
+   * started), from the dated readings stored on this device.
+   *
+   * Indexed rather than raw on purpose, and it is the only honest way to draw
+   * this: a national account at ten crore and a constituency page at three
+   * lakh on one axis flattens the smaller line onto the baseline, so the
+   * screen shows one curve and three straight lines that are not straight.
+   * Two measures of different magnitude on a single axis is the classic chart
+   * error; the documented fixes are separate charts or a common base, and a
+   * common base is also the more useful question — who is growing fastest,
+   * not who is biggest. Absolute counts are one card to the left.
+   *
+   * Only handles with two or more readings can be plotted: one reading is a
+   * number, not a trend, and a flat line drawn from it would assert a
+   * steadiness nobody measured.
+   */
+  const growth = (() => {
+    const plottable = handles.filter((h) => h.snapshots.filter((s) => s.followers != null).length >= 2)
+    if (plottable.length === 0) return null
+    const days = [...new Set(plottable.flatMap((h) => h.snapshots.map((s) => s.takenAt.slice(0, 10))))].sort()
+    if (days.length < 2) return null
+    const labels = days.map((d) => {
+      const [, mm, dd] = d.split('-')
+      return `${dd}/${mm}`
+    })
+    const series = plottable.slice(0, 4).map((h, i) => {
+      const base = h.snapshots.find((s) => s.followers != null)?.followers ?? null
+      return {
+        name: h.displayName || h.handle,
+        color: h.own ? 'var(--vs-subject)' : seriesColor(i + 1),
+        values: days.map((d) => {
+          const hit = h.snapshots.filter((s) => s.takenAt.slice(0, 10) === d && s.followers != null).pop()
+          if (hit?.followers == null || base == null || base === 0) return null
+          return Math.round((hit.followers / base) * 1000) / 10
+        }),
+      }
+    })
+    return {
+      labels,
+      series,
+      note: `Indexed to each account's first reading · ${days.length} readings`,
+    }
+  })()
+
+  /* Share of total reach by channel. Summed from the latest reading of each
+     handle, so a platform we could not read simply does not appear. */
+  const reachShare = (() => {
+    const byPlatform = new Map<string, number>()
+    for (const h of handles) {
+      const f = latestFollowers(h)
+      if (f == null) continue
+      byPlatform.set(h.platform, (byPlatform.get(h.platform) ?? 0) + f)
+    }
+    return [...byPlatform.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([platform, value], i) => ({ label: platform, value, color: seriesColor(i) }))
+  })()
+
+  /* Engagement per stored post, newest-first along the axis. */
+  const postBars = posts
+    .slice(0, 8)
+    .map((p, i) => ({ label: `#${i + 1}`, value: p.engagement, highlight: i === 0 }))
+    .filter((c) => c.value > 0)
+
+  return (
+    <div className="stack-tight">
+      {/* Ground + reach. The map is a fixed panel; the reach column fills the
+          rest and never stretches its tiles to match the map's height. */}
+      <div className="grid items-start gap-4 lg:grid-cols-12">
+        {/* The map — the office's ground, lit in the party colour. */}
+        <Card className="lg:col-span-5" padded={false} level="lift">
+          {/* The standard card opening. The party colour stays on the map
+              itself (the zone lights in it); the badge joins the same tinted
+              system every other card on the desk opens with. */}
+          <div className="border-b border-[var(--rule)] px-4 pb-1 pt-4">
+            <CardHead
+              icon={<MapPin size={16} aria-hidden />}
+              tint="blue"
+              title={seat ? `${seat.name} — your ground` : 'Your ground'}
+              sub={
+                seat
+                  ? [identity?.role, identity?.party, seat.state].filter(Boolean).join(' · ')
+                  : identity
+                    ? 'The seat is not on the offline map yet, so nothing is pinned.'
+                    : 'Set who this desk is for and the constituency lights up here.'
+              }
+            />
+          </div>
+          <div className="p-3 sm:p-4">
+            <IndiaMap dots={INDIA_DOTS} bbox={INDIA_BBOX} zones={zones} accentColor={ground} />
+          </div>
+        </Card>
+
+        {/* Reach — compact tiles that size to content, then the board fills. */}
+        <div className="flex flex-col gap-4 lg:col-span-7">
+          {/* Three tiles in a two-column phone grid left the third sitting
+              beside a hole. The followers tile — the headline figure — takes
+              the whole first row at 375 instead; sm and up restores the
+              original three-across order. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+            <IconStat icon={<UserRound size={18} aria-hidden />} label="Accounts tracked" value={handles.length} tint="blue" deltaLabel={`${own.length} yours · ${watched.length} watched`} />
+            <IconStat className="order-first col-span-2 sm:order-none sm:col-span-1" icon={<Users size={18} aria-hidden />} label="Total followers" value={totalFollowers || null} tint="violet" hero={totalFollowers > 0} deltaLabel="Across every account" />
+            <IconStat icon={<Megaphone size={18} aria-hidden />} label="Channels" value={channels || null} tint="teal" deltaLabel={channels === 1 ? 'One platform' : 'Platforms watched'} />
+          </div>
+
+          {board.length > 1 ? (
+            <Card className="flex-1 p-4 sm:p-6">
+              <CardHead
+                icon={<Users size={16} aria-hidden />}
+                tint="green"
+                title="Followers by account"
+                sub="Latest reading per account"
+                action={
+                  <button
+                    type="button"
+                    onClick={onManage}
+                    className="inline-flex min-h-11 items-center text-[12px] font-semibold text-[var(--accent)] hover:underline"
+                  >
+                    Manage
+                  </button>
+                }
+              />
+              <HBarBoard
+                rows={board.slice(0, 5).map((r) => ({
+                  label: r.h.displayName || r.h.handle,
+                  // Who they are to this desk — kept to one short word so it
+                  // never wraps in a fixed-width column. The handle rides on
+                  // the row's title attribute rather than crowding the line.
+                  sublabel: r.h.own ? 'Yours' : r.h.label || 'Watched',
+                  value: r.followers,
+                  lead: (
+                    <span className="relative block">
+                      <Avatar src={r.h.avatarUrl} name={r.h.displayName || r.h.handle} size={38} />
+                      <span className="absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-[var(--surface)]">
+                        <PlatformBadge platform={r.h.platform} size={17} />
+                      </span>
+                    </span>
+                  ),
+                  emphasis: r.h.own,
+                }))}
+                formatValue={(n) => full(Math.round(n))}
+              />
+            </Card>
+          ) : (
+            // One account, so no board to draw. Rather than leave a gap, invite
+            // the next account — the honest way to fill the space.
+            <Card level="quiet" className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+              <span className="icon-badge bg-[var(--accent-soft)] text-[var(--accent)]">
+                <Plus size={18} aria-hidden />
+              </span>
+              <p className="text-[13px] font-semibold">Add the accounts you are measured against</p>
+              <p className="max-w-[36ch] text-[11px] text-ink-3">
+                A rival or two turns this into a board that ranks reach at a glance.
+              </p>
+              <button
+                type="button"
+                onClick={onManage}
+                className="inline-flex min-h-11 items-center text-[12px] font-semibold text-[var(--accent)] hover:underline"
+              >
+                Manage accounts
+              </button>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* ── the numbers, drawn ──────────────────────────────────────────
+          Growth from the dated follower readings this device has stored, and
+          the share of reach by channel. Both are measurements, not estimates,
+          and neither renders until there is enough to plot honestly. */}
+      {(growth !== null || reachShare.length > 1) && (
+        <div className="grid items-start gap-4 lg:grid-cols-3">
+          {/* When its neighbour has nothing to draw, each card takes the whole
+              row rather than leaving two-thirds of it blank. */}
+          {growth && (
+            <Card className={cn('p-4 sm:p-6', reachShare.length > 1 ? 'lg:col-span-2' : 'lg:col-span-3')}>
+              <CardHead
+                icon={<TrendingUp size={16} aria-hidden />}
+                tint="blue"
+                title="Follower growth"
+                sub={growth.note}
+              />
+              <LineChart
+                labels={growth.labels}
+                series={growth.series}
+                height={210}
+                area={false}
+                formatValue={(n) => (n == null ? '—' : `${Math.round(n * 10) / 10}`)}
+              />
+            </Card>
+          )}
+
+          {reachShare.length > 1 && (
+            <Card className={cn('p-4 sm:p-6', !growth && 'lg:col-span-3')}>
+              <CardHead
+                icon={<Users size={16} aria-hidden />}
+                tint="violet"
+                title="Reach by channel"
+                sub="Share of followers by platform"
+              />
+              <div
+                className={cn(
+                  'flex flex-col items-center gap-3',
+                  // Alone on the row, the donut and its legend sit side by
+                  // side so the full-width card is not a tall empty column.
+                  !growth && 'sm:flex-row sm:justify-center sm:gap-8',
+                )}
+              >
+                <DonutBreakdown
+                  segments={reachShare}
+                  size={150}
+                  centerLabel={compact(reachShare.reduce((s, r) => s + r.value, 0))}
+                  centerSub="followers"
+                />
+                <Legend items={reachShare.map((r) => ({ label: r.label, color: r.color }))} className="justify-center" />
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* Engagement per post, as columns — the shape of what actually landed. */}
+      {postBars.length > 1 && (
+        <Card className="p-4 sm:p-6">
+          <CardHead
+            icon={<MessageSquare size={16} aria-hidden />}
+            tint="green"
+            title="Engagement by post"
+            sub="Likes plus comments on each stored post"
+          />
+          <div className="grid items-start gap-4 lg:grid-cols-5">
+            <div className="lg:col-span-3">
+              <ColumnChart columns={postBars} gradient="violet" height={190} formatValue={compact} />
+            </div>
+            <div className="lg:col-span-2">
+              <p className="eyebrow mb-2">Best performing</p>
+              {posts.slice(0, 5).map((p, i) => (
+                <RankRow
+                  key={p.url}
+                  className="min-h-11"
+                  rank={i + 1}
+                  label={<span className="truncate">{p.title ?? p.author}</span>}
+                  value={compact(p.engagement)}
+                  tint={i === 0 ? 'violet' : 'blue'}
+                  onClick={() => onRead(p.url)}
+                  title="Read this post in full — comments, sentiment and the fake-news check"
+                />
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Most engaging posts — a scrolling strip, each with an Analyse button
+          that runs the full read (comments, sentiment, fake-news) in the app. */}
+      {posts.length > 0 && (
+        /* Fewer than four posts cannot fill a desktop row, so the card closes
+           around what it has instead of trailing a wide empty run. On a phone
+           it stays full width: the strip's first partial card peeking past the
+           edge is what invites the scroll. */
+        <Card padded={false} className={cn(posts.length < 4 && 'lg:w-fit lg:max-w-full')}>
+          <div className="px-4 pt-4">
+            <CardHead
+              icon={<TrendingUp size={16} aria-hidden />}
+              tint="violet"
+              title="Most engaging posts"
+              sub="Tap Analyse to read one in full"
+            />
+          </div>
+          {/* `.bleed` undoes the SHELL gutter; inside an unpadded card its
+              negative margins shoved the strip flush against the rounded
+              corners and clipped the first thumbnail. Plain padding keeps the
+              strip inside the card and leaves a partial next card visible at
+              375px. */}
+          <div className="flex gap-4 overflow-x-auto px-4 pb-4">
+            {posts.map((p) => (
+              <PostThumbCard
+                key={p.url}
+                thumbnailUrl={youtubeThumb(p.url)}
+                platform={p.platform}
+                author={p.author}
+                metaLine={p.metaLine}
+                title={p.title}
+                onAnalyse={() => onRead(p.url)}
+              />
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+function newsOriginMap(news: NewsItem[]): { markers: MapMarker[]; placed: number } {
+  const byKey = new Map<string, { place: Place; count: number; tones: Set<'neg' | 'pos' | 'mid'> }>()
+  let placed = 0
+
+  for (const item of news) {
+    const place = geocodePlace(item.mention.place)
+    if (!place) continue // never a pin we cannot honestly place
+    placed += 1
+    const key = `${place.lon},${place.lat}`
+    const bucket = byKey.get(key)
+    if (bucket) {
+      bucket.count += 1
+      bucket.tones.add(storyTone(item))
+    } else {
+      byKey.set(key, { place, count: 1, tones: new Set([storyTone(item)]) })
+    }
+  }
+
+  const buckets = [...byKey.values()]
+  if (buckets.length === 0) return { markers: [], placed }
+  const maxCount = Math.max(...buckets.map((x) => x.count))
+
+  const markers = buckets.map(({ place, count, tones }): MapMarker => {
+    const tone: MapMarker['tone'] = tones.has('neg') ? 'negative' : tones.has('pos') ? 'positive' : 'warning'
+    const word = tone === 'negative' ? 'critical or flagged' : tone === 'positive' ? 'supportive' : 'neutral'
+    return {
+      lon: place.lon,
+      lat: place.lat,
+      label: place.name,
+      detail: `${place.state} · ${count} ${count === 1 ? 'story' : 'stories'} · ${word}`,
+      tone,
+      weight: 0.35 + 0.65 * (count / maxCount),
+    }
+  })
+
+  return { markers, placed }
+}
+
+/**
+ * The news-origin map card. Marker size reads how much of the morning's
+ * coverage a place carries; marker colour reads its tone. Stories the
+ * gazetteer cannot place are counted openly and left in the list below.
+ */
+function NewsOriginCard({ markers, placed, total }: { markers: MapMarker[]; placed: number; total: number }) {
+  const tones = new Set(markers.map((mk) => mk.tone))
+  const legend = [
+    { tone: 'negative' as const, label: 'Critical or flagged', colour: 'var(--neg)' },
+    { tone: 'positive' as const, label: 'Supportive', colour: 'var(--pos)' },
+    { tone: 'warning' as const, label: 'Neutral', colour: 'var(--warn)' },
+  ].filter((l) => tones.has(l.tone))
+
+  return (
+    <Card className="p-4 sm:p-6">
+      {/* The standard opening; the explanation stays a full paragraph below it
+          because CardHead's one-line sub would truncate the honest count. */}
+      <CardHead
+        icon={<MapPin size={16} aria-hidden />}
+        tint="blue"
+        title="Where today’s news is coming from"
+        className="mb-2"
+      />
+      <p className="text-sm leading-relaxed text-ink-2">
+        {placed} of {total} {total === 1 ? 'story names' : 'stories name'} a place that could be
+        put on the map. A bigger marker is more coverage from there; its colour is the tone of it.
+      </p>
+
+      <div className="mt-4">
+        <IndiaMap dots={INDIA_DOTS} bbox={INDIA_BBOX} markers={markers} className="mx-auto max-w-[380px]" />
+      </div>
+
+      {legend.length > 0 && (
+        <ul className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-1.5">
+          {legend.map((seg) => (
+            <li key={seg.label} className="flex items-center gap-2 text-xs text-ink-2">
+              <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: seg.colour }} />
+              {seg.label}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {total > placed && (
+        <p className="mt-3 border-t border-[var(--rule)] pt-3 text-xs leading-relaxed text-ink-3">
+          {total - placed} {total - placed === 1 ? 'story does' : 'stories do'} not name a place the
+          map could resolve, so {total - placed === 1 ? 'it is' : 'they are'} listed below unpinned
+          rather than dropped somewhere plausible.
         </p>
       )}
     </Card>
@@ -1358,6 +2021,20 @@ const STANCE_LABEL: Record<string, string> = {
 function NewsCard({ item, onRead }: { item: NewsItem; onRead: (postUrl: string) => void }) {
   const { mention, suspect } = item
   const when = mention.publishedAt ?? mention.seenAt
+  // Only chipped when the free-text place resolves against the gazetteer, so a
+  // location shown here is one the map can also carry — never a guess.
+  const place = useMemo(() => geocodePlace(mention.place), [mention.place])
+
+  // The soft icon badge is tinted by what kind of story this is — flagged
+  // first, then by stance. The tint repeats the chip's reading; it never
+  // replaces it.
+  const badge = suspect
+    ? { bg: 'var(--neg-soft)', fg: 'var(--neg)', Icon: ScanEye }
+    : mention.stance === 'critical'
+      ? { bg: 'var(--warn-soft)', fg: 'var(--warn)', Icon: Newspaper }
+      : mention.stance === 'supportive'
+        ? { bg: 'var(--pos-soft)', fg: 'var(--pos)', Icon: Newspaper }
+        : { bg: 'var(--accent-soft)', fg: 'var(--accent)', Icon: Newspaper }
 
   return (
     <Card
@@ -1369,68 +2046,88 @@ function NewsCard({ item, onRead }: { item: NewsItem; onRead: (postUrl: string) 
         suspect && 'border-[color-mix(in_oklab,var(--neg)_45%,var(--rule))]',
       )}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        {suspect && (
-          <Chip tone="negative" icon={<ScanEye size={11} aria-hidden />}>
-            Check this
-          </Chip>
-        )}
-        <Chip tone={STANCE_TONE[mention.stance] ?? 'neutral'}>
-          {STANCE_LABEL[mention.stance] ?? mention.stance}
-        </Chip>
-        {mention.publisher && <span className="text-xs text-ink-3">{mention.publisher}</span>}
-        {when && (
-          <span className="text-xs text-ink-3">· {relativeTime(when)}</span>
-        )}
+      <div className="flex items-start gap-3">
+        <span
+          className="icon-badge icon-badge-sm mt-0.5"
+          style={{ background: badge.bg, color: badge.fg }}
+        >
+          <badge.Icon size={16} aria-hidden />
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {suspect && (
+              <Chip tone="negative" icon={<ScanEye size={11} aria-hidden />}>
+                Check this
+              </Chip>
+            )}
+            <Chip tone={STANCE_TONE[mention.stance] ?? 'neutral'}>
+              {STANCE_LABEL[mention.stance] ?? mention.stance}
+            </Chip>
+            {mention.publisher && (
+              <span className="text-xs font-medium text-ink-3">{mention.publisher}</span>
+            )}
+            {when && <span className="text-xs text-ink-3">· {relativeTime(when)}</span>}
+            {place && (
+              <span
+                className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border)] bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-ink-2"
+                title={`${place.name}, ${place.state}`}
+              >
+                <MapPin size={11} className="text-[var(--accent)]" aria-hidden />
+                {place.name}
+              </span>
+            )}
+          </div>
+
+          <h3 className="mt-2.5 text-[15px] font-bold leading-snug">
+            <button
+              type="button"
+              onClick={() => onRead(mention.url)}
+              className="text-left underline decoration-[var(--rule)] underline-offset-4 hover:decoration-[var(--accent)]"
+            >
+              {mention.headline}
+            </button>
+          </h3>
+
+          {/* The full reading here, the original a tap away. A headline that only
+              ever led out to the publisher meant the office did its own reading on
+              the publisher's site — losing the translation, the stance and the
+              fake-news check this card is announcing. */}
+          <span className="mt-1 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onRead(mention.url)}
+              className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
+            >
+              <ScanEye size={12} aria-hidden />
+              Read it fully
+            </button>
+            <a
+              href={mention.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex min-h-11 items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
+            >
+              <ExternalLink size={11} aria-hidden />
+              open
+            </a>
+          </span>
+
+          {mention.summary && (
+            <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-ink-2">{mention.summary}</p>
+          )}
+
+          {/* What was actually observed, in the reader's own words. A "suspected
+              fake" badge with no reason attached is an accusation the office cannot
+              defend, and this product is in the business of the opposite. */}
+          {suspect && mention.fake?.note && (
+            <p className="mt-3 border-t border-[var(--rule)] pt-3 text-sm leading-relaxed text-ink-2">
+              <span className="font-medium text-[var(--neg)]">Why it was flagged: </span>
+              {mention.fake.note}
+            </p>
+          )}
+        </div>
       </div>
-
-      <h3 className="mt-2.5 text-[15px] font-semibold leading-snug">
-        <button
-          type="button"
-          onClick={() => onRead(mention.url)}
-          className="text-left underline decoration-[var(--rule)] underline-offset-4 hover:decoration-[var(--accent)]"
-        >
-          {mention.headline}
-        </button>
-      </h3>
-
-      {/* The full reading here, the original a tap away. A headline that only
-          ever led out to the publisher meant the office did its own reading on
-          the publisher's site — losing the translation, the stance and the
-          fake-news check this card is announcing. */}
-      <span className="mt-2 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => onRead(mention.url)}
-          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
-        >
-          <ScanEye size={12} aria-hidden />
-          Read it fully
-        </button>
-        <a
-          href={mention.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
-        >
-          <ExternalLink size={11} aria-hidden />
-          open
-        </a>
-      </span>
-
-      {mention.summary && (
-        <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-ink-2">{mention.summary}</p>
-      )}
-
-      {/* What was actually observed, in the reader's own words. A "suspected
-          fake" badge with no reason attached is an accusation the office cannot
-          defend, and this product is in the business of the opposite. */}
-      {suspect && mention.fake?.note && (
-        <p className="mt-3 border-t border-[var(--rule)] pt-3 text-sm leading-relaxed text-ink-2">
-          <span className="font-medium text-[var(--neg)]">Why it was flagged: </span>
-          {mention.fake.note}
-        </p>
-      )}
     </Card>
   )
 }
@@ -1442,6 +2139,14 @@ const SEVERITY_TONE: Record<string, ChipTone> = {
   High: 'warning',
   Medium: 'accent',
   Low: 'neutral',
+}
+
+/** The soft badge tint that pairs with each severity / priority chip. */
+const LEVEL_BADGE: Record<string, { background: string; color: string }> = {
+  Critical: { background: 'var(--neg-soft)', color: 'var(--neg)' },
+  High: { background: 'var(--warn-soft)', color: 'var(--warn)' },
+  Medium: { background: 'var(--accent-soft)', color: 'var(--accent)' },
+  Low: { background: 'var(--surface-3)', color: 'var(--text-3)' },
 }
 
 function IssueCard({
@@ -1456,13 +2161,18 @@ function IssueCard({
   return (
     <button
       onClick={onOpen}
-      className="flex h-full w-full items-start gap-3 rounded-[--radius-sm] border border-[var(--rule)] bg-[var(--surface)] p-4 text-left transition-colors hover:bg-[var(--surface-2)]"
+      className="card card-hover flex h-full min-h-11 w-full cursor-pointer items-start gap-3 p-4 text-left sm:p-5"
     >
-      <span className="kicker mt-0.5 w-4 shrink-0 text-ink-3">{rank}</span>
+      <span
+        className="grid size-8 shrink-0 place-items-center rounded-full text-[13px] font-bold"
+        style={LEVEL_BADGE[issue.severity] ?? LEVEL_BADGE['Low']}
+      >
+        {rank}
+      </span>
 
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2">
-          <span className="text-[15px] font-semibold leading-snug">{issue.title}</span>
+          <span className="text-[15px] font-bold leading-snug">{issue.title}</span>
           <Chip tone={SEVERITY_TONE[issue.severity] ?? 'neutral'}>{issue.severity}</Chip>
         </span>
 
@@ -1512,56 +2222,65 @@ function SuggestionCard({
   return (
     <Card>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Chip tone={PRIORITY_TONE[rec.priority] ?? 'neutral'}>{rec.priority}</Chip>
-            <span className="text-sm font-semibold">{rec.action}</span>
-          </div>
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <span
+            className="icon-badge icon-badge-sm mt-0.5"
+            style={LEVEL_BADGE[rec.priority] ?? LEVEL_BADGE['Medium']}
+          >
+            <ListChecks size={16} aria-hidden />
+          </span>
 
-          <p className="mt-2 text-sm leading-relaxed text-ink-2">{rec.rationale}</p>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Chip tone={PRIORITY_TONE[rec.priority] ?? 'neutral'}>{rec.priority}</Chip>
+              <span className="text-sm font-bold">{rec.action}</span>
+            </div>
 
-          <p className="mt-2 text-xs text-ink-3">
-            On:{' '}
-            {suggestion.url ? (
-              <a
-                href={suggestion.url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex items-center gap-1 underline decoration-[var(--rule)] underline-offset-2 hover:text-ink-2"
-              >
-                {suggestion.headline}
-                <ExternalLink size={11} aria-hidden />
-              </a>
-            ) : (
-              suggestion.headline
+            <p className="mt-2 text-sm leading-relaxed text-ink-2">{rec.rationale}</p>
+
+            <p className="mt-2 text-xs text-ink-3">
+              On:{' '}
+              {suggestion.url ? (
+                <a
+                  href={suggestion.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1 underline decoration-[var(--rule)] underline-offset-2 hover:text-ink-2"
+                >
+                  {suggestion.headline}
+                  <ExternalLink size={11} aria-hidden />
+                </a>
+              ) : (
+                suggestion.headline
+              )}
+            </p>
+
+            {rec.talkingPoints.length > 0 && (
+              <details className="group mt-3">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center text-xs font-medium text-ink-3 hover:text-ink-2">
+                  {rec.talkingPoints.length} line
+                  {rec.talkingPoints.length === 1 ? '' : 's'} you could say
+                  <span className="ml-1 inline-block transition-transform group-open:rotate-90">
+                    ›
+                  </span>
+                </summary>
+                <ul className="mt-2 space-y-2 border-l border-[var(--rule)] pl-3">
+                  {rec.talkingPoints.map((point) => (
+                    <li key={point} className="text-sm leading-relaxed text-ink-2">
+                      {point}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
-          </p>
-
-          {rec.talkingPoints.length > 0 && (
-            <details className="group mt-3">
-              <summary className="cursor-pointer list-none text-xs font-medium text-ink-3 hover:text-ink-2">
-                {rec.talkingPoints.length} line
-                {rec.talkingPoints.length === 1 ? '' : 's'} you could say
-                <span className="ml-1 inline-block transition-transform group-open:rotate-90">
-                  ›
-                </span>
-              </summary>
-              <ul className="mt-2 space-y-2 border-l border-[var(--rule)] pl-3">
-                {rec.talkingPoints.map((point) => (
-                  <li key={point} className="text-sm leading-relaxed text-ink-2">
-                    {point}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
+          </div>
         </div>
 
         <div className="shrink-0">
           {filed ? (
             <button
               onClick={onOpenActions}
-              className="inline-flex min-h-11 items-center gap-2 rounded-[--radius-md] border border-[color-mix(in_oklab,var(--pos)_35%,transparent)] bg-[var(--pos-soft)] px-3.5 text-sm font-medium text-[var(--pos)]"
+              className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius-md)] border border-[color-mix(in_oklab,var(--pos)_35%,transparent)] bg-[var(--pos-soft)] px-3.5 text-sm font-medium text-[var(--pos)]"
             >
               <Check size={15} aria-hidden />
               On the action list
@@ -1606,14 +2325,14 @@ function Heading({
   action?: React.ReactNode
 }) {
   return (
-    <div className="mb-3 flex items-end justify-between gap-4">
+    <div className="section-head">
       <div className="min-w-0">
         <h2 id={id} className="text-lg font-semibold tracking-[-0.011em]">
           {title}
         </h2>
-        {hint && <p className="mt-0.5 text-xs leading-relaxed text-ink-3">{hint}</p>}
+        {hint && <p className="measure mt-1.5 text-sm leading-relaxed text-ink-3">{hint}</p>}
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   )
 }
@@ -1622,7 +2341,7 @@ function LinkOut({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-sm font-medium text-ink-2 transition-colors hover:text-ink"
+      className="inline-flex min-h-11 shrink-0 items-center gap-1 whitespace-nowrap text-sm font-semibold text-[var(--accent)] transition-colors hover:text-[var(--accent-hover)]"
     >
       {label}
       <ArrowRight size={14} aria-hidden />

@@ -2,6 +2,8 @@ import { useRef } from 'react'
 import * as m from 'motion/react-m'
 import { useMotionValue, useSpring, useTransform, useReducedMotion } from 'motion/react'
 import { ArrowUpRight, Heart, MessageCircle, Repeat2, Eye } from 'lucide-react'
+import { PlatformBadge } from '@/components/kit'
+import { Chip } from './ui'
 import { spring } from '@/lib/motion'
 
 /**
@@ -11,7 +13,8 @@ import { spring } from '@/lib/motion'
  * user to imagine what they would get back. Everything premium-feeling this
  * product was compared against — Linear, 21st.dev — shows the output on the
  * way in rather than describing it. So this is the actual thing, at a quarter
- * scale: the verdict, a sentiment reading, the counts.
+ * scale: the verdict, a sentiment reading, the counts — floating on a soft
+ * blue-cast shadow so it reads as the product, not the page.
  *
  * Static content on purpose. It is a specimen, not a live fetch — nothing here
  * should cost a request or a model call before the user has asked for one, and
@@ -75,41 +78,35 @@ export function HeroPreview({ onOpen }: { onOpen: () => void }) {
       />
 
       <m.div
-        className="card overflow-hidden p-0 shadow-[var(--e3)] [transform-style:preserve-3d]"
+        className="card overflow-hidden p-0 shadow-[var(--e4)] [transform-style:preserve-3d]"
         style={{ rotateX: rx, rotateY: ry }}
       >
         {/* Header strip */}
         <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface-2)] px-4 py-2.5">
-          <span className="flex items-center gap-2">
-            <span className="grid size-5 place-items-center rounded-full bg-black text-[10px] font-bold text-white">
-              X
-            </span>
-            <span className="text-xs font-medium text-ink-2">greatandhranews</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <PlatformBadge platform="Twitter/X" size={20} />
+            <span className="truncate text-xs font-semibold text-ink-2">greatandhranews</span>
           </span>
-          <span className="kicker">Worked example</span>
+          <span className="kicker shrink-0">Worked example</span>
         </div>
 
-        <div className="p-4">
+        <div className="p-4 sm:p-5">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-2xs font-medium text-[var(--accent)]">
-              Corruption
-            </span>
-            <span className="rounded-full bg-[var(--warn-soft)] px-2 py-0.5 text-2xs font-medium text-[var(--warn)]">
-              Civic
-            </span>
+            <Chip tone="accent">Corruption</Chip>
+            <Chip tone="warning">Civic</Chip>
           </div>
 
-          <p className="hed mt-2.5 text-lg leading-snug">
+          <p className="hed mt-3 text-lg leading-snug">
             News outlet accuses the Home Minister of seizing a woman’s land
           </p>
 
           {/* Sentiment, at a glance */}
-          <div className="mt-3.5">
+          <div className="mt-4">
             <div className="flex items-baseline justify-between">
-              <span className="text-xs font-semibold text-[var(--chart-neg)]">Strong Negative</span>
-              <span className="num text-xs text-[var(--chart-neg)]">−78</span>
+              <span className="text-xs font-bold text-[var(--chart-neg)]">Strong Negative</span>
+              <span className="tnum text-xs font-bold text-[var(--chart-neg)]">−78</span>
             </div>
-            <div className="relative mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-3)]">
+            <div className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-[var(--surface-3)]">
               <m.span
                 className="absolute inset-y-0 left-0 w-full origin-left rounded-full"
                 style={{ background: 'var(--chart-neg)' }}
@@ -121,23 +118,23 @@ export function HeroPreview({ onOpen }: { onOpen: () => void }) {
           </div>
 
           {/* The counts */}
-          <div className="mt-3.5 grid grid-cols-4 gap-2 border-t border-[var(--border)] pt-3">
+          <div className="mt-4 grid grid-cols-4 gap-2 border-t border-[var(--border)] pt-3.5">
             {[
-              [<Heart key="h" size={11} />, '546'],
-              [<MessageCircle key="c" size={11} />, '9'],
-              [<Repeat2 key="r" size={11} />, '165'],
-              [<Eye key="v" size={11} />, '15.3K'],
+              [<Heart key="h" size={12} />, '546'],
+              [<MessageCircle key="c" size={12} />, '9'],
+              [<Repeat2 key="r" size={12} />, '165'],
+              [<Eye key="v" size={12} />, '15.3K'],
             ].map(([icon, value], i) => (
               <span key={i} className="min-w-0">
                 <span className="flex items-center gap-1 text-ink-3">{icon}</span>
-                <span className="num mt-0.5 block text-sm">{value}</span>
+                <span className="tnum mt-1 block text-sm font-bold text-ink">{value}</span>
               </span>
             ))}
           </div>
         </div>
 
         {/* Footer call to action */}
-        <span className="flex items-center justify-between border-t border-[var(--border)] px-4 py-2.5 text-xs font-medium text-[var(--accent)]">
+        <span className="flex items-center justify-between border-t border-[var(--border)] px-4 py-3 text-xs font-bold text-[var(--accent)]">
           See the full report
           <ArrowUpRight size={14} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
         </span>

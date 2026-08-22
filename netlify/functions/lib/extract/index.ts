@@ -9,6 +9,9 @@ import { extractBluesky, extractMastodon } from './fediverse'
 import { extractThreads } from './threads'
 import { extractPinterest, extractSnapchat } from './visual'
 import { extractWeb } from './web'
+import { extractFacebookEnhanced } from './facebook-enhanced'
+import { extractLinkedInEnhanced } from './linkedin-enhanced'
+import { extractInstagramJSON } from './instagram-json'
 
 export type { ExtractContext, ExtractResult, ApiKeys } from './types'
 
@@ -149,8 +152,13 @@ async function runAdapter(
       result = await extractTwitter(id, ctx)
       break
     case 'Facebook':
+      result = await extractFacebookEnhanced(id, ctx)
+      break
     case 'Instagram':
-      result = await extractMeta(id, ctx)
+      result = await extractInstagramJSON(id, ctx)
+      break
+    case 'LinkedIn':
+      result = await extractLinkedInEnhanced(id, ctx)
       break
     case 'Threads':
       result = await extractThreads(id, ctx)

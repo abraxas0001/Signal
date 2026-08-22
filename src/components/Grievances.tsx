@@ -83,7 +83,10 @@ import {
   TARGETS,
   TOPICS,
 } from '@shared/taxonomy'
-import { Bar, Button, Card, Chip, PageHeader, SectionTitle, selectClass, type ChipTone } from './ui'
+import { Bar, Button, Card, Chip, PageHeader, selectClass, type ChipTone } from './ui'
+import { CardHead, DonutBreakdown, IconStat, IndiaMap, type MapMarker } from '@/components/kit'
+import { geocodePlace } from './gazetteer'
+import { INDIA_BBOX, INDIA_DOTS } from './india-dots'
 import { LevelPips } from './charts'
 import { makeId, readStore, update, useStore } from '@/lib/store'
 import { absoluteDate, cn, hostOf, isIndicScript, pluralise } from '@/lib/utils'
@@ -679,6 +682,35 @@ const SEVERITY_TONE: Record<Severity, ChipTone> = {
   Medium: 'info',
   High: 'warning',
   Critical: 'negative',
+}
+
+/**
+ * Severity carried onto the origin map.
+ *
+ * The map has five marker tones and no grey, so the four-step severity scale
+ * folds to a three-tier alarm ramp: the two calm tiers share the accent dot,
+ * High warns, Critical alarms. The exact severity word still rides on every
+ * marker's tooltip and on the record row, so nothing is lost by the fold.
+ */
+const SEVERITY_MARKER_TONE: Record<Severity, MapMarker['tone']> = {
+  Low: 'accent',
+  Medium: 'accent',
+  High: 'warning',
+  Critical: 'negative',
+}
+
+/** The CSS behind each marker tone, so a legend dot matches its pin exactly. */
+const MARKER_TONE_COLOUR: Record<string, string> = {
+  accent: 'var(--accent)',
+  warning: 'var(--warn)',
+  negative: 'var(--neg)',
+}
+
+/** What each tone means once folded, for the map's small legend. */
+const MARKER_TONE_LABEL: Record<string, string> = {
+  accent: 'Low / medium',
+  warning: 'High',
+  negative: 'Critical',
 }
 
 const SUSPICION_TONE: Record<FakeSuspicion, ChipTone> = {
@@ -1470,6 +1502,82 @@ export function Grievances({
 
   const failedLinks = useMemo(() => links.filter((l) => l.status === 'failed'), [links])
 
+  /* Presentational tallies for the stat strip, the severity donut and the
+     origin map. Every number here is a re-count of lists the desk already
+     holds — nothing new is fetched, stored or filtered, and no delta is
+     invented. */
+  const urgentToday = dayRecords.filter(
+    (r) => r.severity === 'High' || r.severity === 'Critical',
+  ).length
+  const flaggedToday = dayRecords.filter((r) =>
+    FLAGGED_SUSPICION.includes(r.fake.suspicion),
+  ).length
+  const severityMix = [...SEVERITIES]
+    .reverse()
+    .map((level) => ({
+      label: level,
+      value: dayRecords.filter((r) => r.severity === level).length,
+      color: SEVERITY_COLOUR[level],
+    }))
+    .filter((s) => s.value > 0)
+
+  /**
+   * Where the day's grievances resolve on the map.
+   *
+   * Every place is one the desk already filed — a record's constituency or a
+   * village, mandal or ward named in the story — that the offline gazetteer can
+   * pin. A name it cannot place is dropped, never guessed onto the map: an
+   * honest scatter beats a full-looking one. Places are counted by how many
+   * records name them and toned by the most serious grievance filed there.
+   */
+  const originPlaces = useMemo(() => {
+    const worseOf = (a: Severity, b: Severity): Severity =>
+      SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b
+    const byPlace = new Map<
+      string,
+      { lon: number; lat: number; name: string; state: string; count: number; worst: Severity }
+    >()
+    for (const r of dayRecords) {
+      const named = [r.constituency, ...r.places].filter((t): t is string => Boolean(t))
+      // A record naming a place twice — its constituency and a ward inside it
+      // both resolving to the same dot — counts once for that record.
+      const here = new Set<string>()
+      for (const t of named) {
+        const place = geocodePlace(t)
+        if (!place) continue
+        const key = `${place.lon},${place.lat}`
+        if (here.has(key)) continue
+        here.add(key)
+        const at = byPlace.get(key)
+        if (at) {
+          at.count += 1
+          at.worst = worseOf(at.worst, r.severity)
+        } else {
+          byPlace.set(key, {
+            lon: place.lon,
+            lat: place.lat,
+            name: place.name,
+            state: place.state,
+            count: 1,
+            worst: r.severity,
+          })
+        }
+      }
+    }
+    return [...byPlace.values()].sort((a, b) => b.count - a.count)
+  }, [dayRecords])
+
+  const originMax = Math.max(...originPlaces.map((p) => p.count), 1)
+  const originMarkers: MapMarker[] = originPlaces.map((p) => ({
+    lon: p.lon,
+    lat: p.lat,
+    label: p.name,
+    detail: `${p.count} ${pluralise(p.count, 'record')} · worst: ${p.worst}`,
+    tone: SEVERITY_MARKER_TONE[p.worst],
+    weight: p.count / originMax,
+  }))
+  const originTones = new Set(originMarkers.map((mk) => mk.tone))
+
   return (
     <m.div
       className="shell shell-wide page-end"
@@ -1506,12 +1614,12 @@ export function Grievances({
           reachable by stepping back a day; only the day on screen changes. */}
       <m.div
         variants={fadeUp}
-        className="mt-3 flex flex-wrap items-center gap-2 border-y border-[var(--rule)] py-2"
+        className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-[var(--e1)]"
       >
         <button
           onClick={() => setDay(shiftDay(day, -1))}
           aria-label="Previous day"
-          className="grid size-9 place-items-center rounded-[3px] text-ink-2 hover:bg-[var(--surface-2)]"
+          className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)]"
         >
           <ChevronLeft size={16} />
         </button>
@@ -1520,7 +1628,7 @@ export function Grievances({
           {isToday(day) ? 'Today' : formatDeskDay(day)}
         </span>
         {isToday(day) && (
-          <span className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+          <span className="kicker">
             {formatDeskDay(day)}
           </span>
         )}
@@ -1529,7 +1637,7 @@ export function Grievances({
           onClick={() => setDay(shiftDay(day, 1))}
           disabled={isToday(day)}
           aria-label="Next day"
-          className="grid size-9 place-items-center rounded-[3px] text-ink-2 hover:bg-[var(--surface-2)] disabled:opacity-35"
+          className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)] disabled:opacity-35"
         >
           <ChevronRight size={16} />
         </button>
@@ -1540,7 +1648,10 @@ export function Grievances({
           </Button>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        {/* Wraps as a unit on phones: at 375px Sync + Clear + Export do not fit
+            beside the day stepper, and a non-wrapping cluster pushed Export off
+            the right edge of the screen. */}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {/*
             Fetch today now, rather than waiting for the morning.
 
@@ -1587,7 +1698,7 @@ export function Grievances({
             </Button>
           )}
           {otherDays > 0 && (
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3 sm:inline">
+            <span className="kicker hidden sm:inline">
               {otherDays} earlier {pluralise(otherDays, 'day')} kept
             </span>
           )}
@@ -1637,6 +1748,165 @@ export function Grievances({
           />
         </div>
       </m.div>
+
+      {/* The desk at a glance: the reference dashboards open every screen with
+          a stat row, so the four numbers the office asks for first sit here —
+          all re-counts of what is already on screen, never a new query. */}
+      {(dayRecords.length > 0 || issues.length > 0) && (
+        <m.div variants={fadeUp} className="mt-4">
+          <CardHead
+            icon={<Inbox size={16} />}
+            title="The desk at a glance"
+            sub="Re-counted from what the desk already holds"
+            hint="Every number here is a re-count of records already on the desk — nothing new is fetched, and no delta is invented."
+            tint="blue"
+            action={<Chip tone="neutral">{isToday(day) ? 'Today' : formatDeskDay(day)}</Chip>}
+          />
+          <div
+            className={cn(
+              'grid items-start gap-3 sm:gap-4',
+              severityMix.length > 0 && 'lg:grid-cols-[minmax(0,1fr)_320px]',
+            )}
+          >
+            <div
+              className={cn(
+                'grid grid-cols-2 gap-3 sm:gap-4',
+                severityMix.length === 0 && 'lg:grid-cols-4',
+              )}
+            >
+              <IconStat
+                icon={<Inbox size={18} />}
+                label={isToday(day) ? 'Records today' : 'Records this day'}
+                value={dayRecords.length}
+                tint="blue"
+                hero
+              />
+              <IconStat
+                icon={<Layers size={18} />}
+                label="Issues on the desk"
+                value={issues.length}
+                tint="violet"
+              />
+              <IconStat
+                icon={<CircleAlert size={18} />}
+                label="High or critical"
+                value={urgentToday}
+                tint="orange"
+              />
+              <IconStat
+                icon={<ShieldAlert size={18} />}
+                label="Worth checking"
+                value={flaggedToday}
+                tint="pink"
+              />
+            </div>
+
+            {severityMix.length > 0 && (
+              <Card className="lg:h-full">
+                <CardHead
+                  icon={<CircleAlert size={16} />}
+                  title="Severity mix"
+                  sub={
+                    isToday(day) ? 'Today’s records, by severity' : 'This day’s records, by severity'
+                  }
+                  tint="orange"
+                />
+                {/* Wraps rather than squeezes: on a 320px screen the donut and
+                    its legend stack instead of crushing the labels. */}
+                <div className="flex flex-wrap items-center gap-4 sm:gap-5">
+                  <DonutBreakdown
+                    segments={severityMix}
+                    size={132}
+                    thickness={16}
+                    centerLabel={String(dayRecords.length)}
+                    centerSub={pluralise(dayRecords.length, 'record')}
+                    className="mx-auto sm:mx-0"
+                  />
+                  <ul className="min-w-[9rem] flex-1 space-y-1.5">
+                    {severityMix.map((s) => (
+                      <li key={s.label} className="flex items-center gap-2 text-sm">
+                        <i className="size-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
+                        <span className="min-w-0 flex-1 truncate font-medium text-ink-2">
+                          {s.label}
+                        </span>
+                        <span className="tnum font-semibold text-ink">{s.value}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </Card>
+            )}
+          </div>
+        </m.div>
+      )}
+
+      {/* Where the day's grievances are coming from.
+          A dotted map of the places the desk's records name, pinned only where
+          the offline gazetteer can place them — a name it cannot resolve is
+          left off rather than dropped somewhere plausible. Marker size counts
+          the records; its colour marks the most serious grievance filed there. */}
+      {originPlaces.length > 0 && (
+        <m.div variants={fadeUp} className="mt-4">
+          <Card>
+            <CardHead
+              icon={<MapPin size={16} />}
+              title="Where grievances are coming from"
+              sub="Pinned only where the desk’s gazetteer is sure"
+              hint="Only places this desk’s gazetteer can pin are shown; one it cannot resolve is left off the map, never guessed onto it."
+              tint="blue"
+            />
+
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_248px] lg:items-center">
+              <div className="mx-auto w-full max-w-sm">
+                <IndiaMap dots={INDIA_DOTS} bbox={INDIA_BBOX} markers={originMarkers} />
+              </div>
+
+              <div className="min-w-0">
+                <p className="eyebrow">Most-named places</p>
+                <ul className="mt-2.5 space-y-1.5">
+                  {originPlaces.slice(0, 6).map((p) => {
+                    const tone = SEVERITY_MARKER_TONE[p.worst] ?? 'accent'
+                    return (
+                      <li key={`${p.lon},${p.lat}`} className="flex items-center gap-2 text-sm">
+                        <i
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ background: MARKER_TONE_COLOUR[tone] }}
+                        />
+                        <span className="min-w-0 flex-1 truncate font-medium text-ink-2">
+                          {p.name}
+                          <span className="ml-1 font-normal text-ink-3">{p.state}</span>
+                        </span>
+                        <span className="tnum shrink-0 font-semibold text-ink">{p.count}</span>
+                      </li>
+                    )
+                  })}
+                </ul>
+
+                {/* The tone key, drawn only for the tiers actually on the map. */}
+                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
+                  {(['accent', 'warning', 'negative'] as const)
+                    .filter((t) => originTones.has(t))
+                    .map((t) => (
+                      <span key={t} className="flex items-center gap-1.5 text-2xs text-ink-3">
+                        <i
+                          className="size-2 rounded-full"
+                          style={{ background: MARKER_TONE_COLOUR[t] }}
+                        />
+                        {MARKER_TONE_LABEL[t]}
+                      </span>
+                    ))}
+                </div>
+
+                <p className="mt-2.5 text-2xs leading-relaxed text-ink-3">
+                  Marker size counts the records placed there; its colour marks the most serious
+                  among them. A place the gazetteer cannot resolve is left off the map, never
+                  guessed onto it.
+                </p>
+              </div>
+            </div>
+          </Card>
+        </m.div>
+      )}
 
       {tab === 'records' ? (
         <div
@@ -1824,10 +2094,13 @@ export function Grievances({
               <EmptyDesk />
             ) : visible.length === 0 ? (
               <Card>
-                <p className="text-sm font-medium">Nothing matches all of those filters.</p>
-                <p className="mt-1 text-sm text-ink-3">
-                  Every filter has to be true at once. Drop one, or clear them all.
-                </p>
+                <CardHead
+                  icon={<Filter size={16} />}
+                  title="Nothing matches all of those filters"
+                  sub="Every filter has to be true at once"
+                  tint="blue"
+                />
+                <p className="text-sm text-ink-3">Drop one, or clear them all.</p>
                 <Button variant="outline" className="mt-3" onClick={() => setFilters(NO_FILTERS)}>
                   Clear filters
                 </Button>
@@ -1885,17 +2158,17 @@ export function Grievances({
 
           {issues.length === 0 ? (
             <Card>
-              <div className="flex gap-2.5">
-                <Layers size={18} className="mt-0.5 shrink-0 text-ink-3" />
-                <div>
-                  <p className="text-sm font-medium">No issues yet</p>
-                  <p className="mt-1 text-sm text-ink-3">
-                    An issue is several records about the same thing: nine complaints about one
-                    water line, not nine separate stories. They appear once enough links have been
-                    read for the desk to group them.
-                  </p>
-                </div>
-              </div>
+              <CardHead
+                icon={<Layers size={16} />}
+                title="No issues yet"
+                sub="Issues appear once enough links have been read"
+                tint="violet"
+              />
+              <p className="text-sm leading-relaxed text-ink-3">
+                An issue is several records about the same thing: nine complaints about one
+                water line, not nine separate stories. They appear once enough links have been
+                read for the desk to group them.
+              </p>
             </Card>
           ) : visibleIssues.length === 0 ? (
             /* A filter combination that matches nothing is a completely
@@ -1903,26 +2176,25 @@ export function Grievances({
                issues yet" here would tell an office its week was quiet when it
                has thirty issues and a typo in the search box. */
             <Card>
-              <div className="flex gap-2.5">
-                <Filter size={18} className="mt-0.5 shrink-0 text-ink-3" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">
-                    None of your {issues.length} issues match these filters
-                  </p>
-                  <p className="mt-1 text-sm text-ink-3">
-                    Loosen one, or clear them and start again.
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="mt-3"
-                    onClick={() => setIssueFilters(NO_ISSUE_FILTERS)}
-                  >
-                    <X size={14} />
-                    Clear filters
-                  </Button>
-                </div>
-              </div>
+              {/* A short static title with the count on the quiet line beneath:
+                  the old single-line heading carried the number inside it and
+                  truncated on a 375px screen at exactly the words that mattered. */}
+              <CardHead
+                icon={<Filter size={16} />}
+                title="Nothing matches these filters"
+                sub={`All ${issues.length} ${pluralise(issues.length, 'issue')} are hidden by them`}
+                tint="blue"
+              />
+              <p className="text-sm text-ink-3">Loosen one, or clear them and start again.</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-3"
+                onClick={() => setIssueFilters(NO_ISSUE_FILTERS)}
+              >
+                <X size={14} />
+                Clear filters
+              </Button>
             </Card>
           ) : (
             <m.ul
@@ -1938,7 +2210,7 @@ export function Grievances({
                   ref={issue.id === focusIssueId ? focusRef : undefined}
                   className={
                     issue.id === focusIssueId
-                      ? 'rounded-[--radius-sm] ring-2 ring-[var(--accent)] ring-offset-4 ring-offset-[var(--bg)]'
+                      ? 'rounded-[var(--radius-lg)] ring-2 ring-[var(--accent)] ring-offset-4 ring-offset-[var(--bg)]'
                       : undefined
                   }
                 >
@@ -2041,11 +2313,11 @@ function DeskSetup({
      */
     const paperNames = [...portals, ...customUrls.map(hostLabel)]
     return (
-      <div className="mb-4 border-b border-[var(--rule)] pb-3">
+      <div className="mb-4 rounded-2xl bg-[var(--surface-2)] p-4">
         <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-          <dl className="min-w-0 flex-1 space-y-1">
+          <dl className="min-w-0 flex-1 space-y-1.5">
             <div className="flex gap-2">
-              <dt className="w-16 shrink-0 font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+              <dt className="eyebrow w-16 shrink-0 pt-1">
                 Desk
               </dt>
               <dd className="min-w-0 text-sm font-semibold">
@@ -2054,7 +2326,7 @@ function DeskSetup({
               </dd>
             </div>
             <div className="flex gap-2">
-              <dt className="w-16 shrink-0 font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+              <dt className="eyebrow w-16 shrink-0 pt-1">
                 Papers
               </dt>
               <dd className="min-w-0 text-sm text-ink-2">
@@ -2062,7 +2334,7 @@ function DeskSetup({
               </dd>
             </div>
             <div className="flex gap-2">
-              <dt className="w-16 shrink-0 font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+              <dt className="eyebrow w-16 shrink-0 pt-1">
                 Words
               </dt>
               <dd className="min-w-0 text-sm text-ink-2">
@@ -2080,7 +2352,7 @@ function DeskSetup({
           <div className="flex shrink-0 items-center gap-2">
             <button
               onClick={() => setEditing(true)}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-[3px] border border-[var(--border)] px-2.5 font-mono text-[10px] font-medium uppercase tracking-[0.07em] text-ink-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-xs font-semibold text-ink-2 shadow-[var(--e1)] hover:border-[var(--border-interactive)] hover:text-[var(--accent)]"
             >
               <Pencil size={11} />
               Edit
@@ -2150,11 +2422,11 @@ function DeskSetup({
                   onClick={() => onTogglePortal(p.label)}
                   aria-pressed={on}
                   className={cn(
-                    'inline-flex min-h-9 items-center gap-1.5 rounded-[3px] border px-2.5',
-                    'font-mono text-[10px] font-medium uppercase tracking-[0.07em]',
+                    'inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3',
+                    'text-xs font-semibold',
                     on
                       ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
-                      : 'border-[var(--border)] bg-[var(--surface-2)] text-ink-2 hover:border-[var(--accent)]',
+                      : 'border-[var(--border-strong)] bg-[var(--surface)] text-ink-2 hover:border-[var(--border-interactive)]',
                   )}
                 >
                   {on ? <Check size={11} /> : <Newspaper size={11} />}
@@ -2178,7 +2450,7 @@ function DeskSetup({
                   key={u}
                   onClick={() => onRemoveCustom(u)}
                   aria-label={`Remove ${u}`}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-[3px] border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 font-mono text-[10px] font-medium uppercase tracking-[0.07em] text-[var(--accent)]"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-xs font-semibold text-[var(--accent)]"
                 >
                   <Check size={11} />
                   {hostLabel(u)}
@@ -2206,7 +2478,7 @@ function DeskSetup({
               ] as const
             ).map(([group, list]) => (
               <div key={group} className="flex flex-wrap items-center gap-1.5">
-                <span className="w-14 shrink-0 font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+                <span className="eyebrow w-14 shrink-0">
                   {group}
                 </span>
                 {list.map((t) => {
@@ -2217,11 +2489,11 @@ function DeskSetup({
                       onClick={() => onToggleTag(t)}
                       aria-pressed={on}
                       className={cn(
-                        'inline-flex min-h-9 items-center gap-1 rounded-[3px] border px-2.5',
-                        'font-mono text-[10px] font-medium uppercase tracking-[0.07em]',
+                        'inline-flex min-h-11 items-center gap-1 rounded-full border px-3',
+                        'text-xs font-semibold',
                         on
                           ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
-                          : 'border-[var(--border)] bg-[var(--surface-2)] text-ink-2 hover:border-[var(--accent)]',
+                          : 'border-[var(--border-strong)] bg-[var(--surface)] text-ink-2 hover:border-[var(--border-interactive)]',
                       )}
                     >
                       {on && <Check size={10} />}
@@ -2244,7 +2516,7 @@ function DeskSetup({
 
           {tags.length > 0 && (
             <div className="mt-3">
-              <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+              <p className="eyebrow">
                 Watching for {tags.length} {pluralise(tags.length, 'word')}
               </p>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -2253,7 +2525,7 @@ function DeskSetup({
                     key={t}
                     onClick={() => onToggleTag(t)}
                     aria-label={`Stop watching for ${t}`}
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-[3px] border border-[var(--accent)] bg-[var(--accent-soft)] px-2 font-mono text-[10px] font-medium uppercase tracking-[0.07em] text-[var(--accent)]"
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-transparent bg-[var(--accent-soft)] px-2.5 text-xs font-semibold text-[var(--accent)]"
                   >
                     {t}
                     <X size={10} />
@@ -2349,7 +2621,7 @@ function PortalInput({ onAdd, existing }: { onAdd: (url: string) => void; existi
 
   return (
     <div className="mt-3">
-      <label className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+      <label className="eyebrow">
         Add a paper: its address, or the section you read
       </label>
       <div className="mt-1.5 flex gap-2">
@@ -2370,7 +2642,7 @@ function PortalInput({ onAdd, existing }: { onAdd: (url: string) => void; existi
           autoCorrect="off"
           placeholder="indianexpress.com"
           aria-label="Add a news paper by address"
-          className="min-h-11 min-w-0 flex-1 rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+          className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)]"
         />
         <Button size="sm" variant="outline" onClick={commit} disabled={!value.trim()}>
           <Plus size={14} />
@@ -2403,7 +2675,7 @@ function TagInput({ onAdd, existing }: { onAdd: (tag: string) => void; existing:
 
   return (
     <div className="mt-3">
-      <label className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
+      <label className="eyebrow">
         Add your own: a mandal, a scheme, an officer
       </label>
       <div className="mt-1.5 flex gap-2">
@@ -2418,7 +2690,7 @@ function TagInput({ onAdd, existing }: { onAdd: (tag: string) => void; existing:
           }}
           placeholder="Denduluru, Amma Vodi, 22A land…"
           aria-label="Add a word to watch for"
-          className="min-h-11 min-w-0 flex-1 rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+          className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)]"
         />
         <Button size="sm" variant="outline" onClick={commit} disabled={!trimmed || duplicate}>
           <Plus size={14} />
@@ -2474,7 +2746,7 @@ function RegionPicker({
             onCity('')
             setQuery('')
           }}
-          className="mt-2 min-h-11 w-full rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+          className={cn(selectClass, 'mt-2 w-full')}
         >
           <option value="">Choose a state…</option>
           {ALL_STATES.map((s) => (
@@ -2517,11 +2789,11 @@ function RegionPicker({
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={`Type to find one of ${cities.length}`}
                   aria-label="Search districts and cities"
-                  className="min-h-11 w-full rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] pl-9 pr-3 text-sm outline-none focus:border-[var(--accent)]"
+                  className="min-h-11 w-full rounded-full border border-[var(--border-strong)] bg-[var(--surface)] pl-9 pr-4 text-sm shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)]"
                 />
               </div>
 
-              <div className="mt-2 max-h-48 overflow-y-auto rounded-[--radius-sm] border border-[var(--rule)]">
+              <div className="mt-2 max-h-48 overflow-y-auto rounded-2xl border border-[var(--border)]">
                 {shown.length === 0 ? (
                   <p className="px-3 py-3 text-xs leading-relaxed text-ink-2">
                     Nothing matches “{typed}”. This list is a starting point, not the
@@ -2639,24 +2911,27 @@ function IntakePanel({
   return (
     <m.div variants={fadeUp}>
       <Card>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold tracking-[-0.011em]">Add news links</h2>
-            <p className="mt-0.5 text-xs text-ink-3">
-              One per line. Paste the whole list from the group at once. Each link is reported on
-              its own, so a dead one costs you that link and nothing else.
-            </p>
-          </div>
-          {canHide && (
-            <button
-              onClick={onHide}
-              aria-label="Hide the link box"
-              className="-mr-1 -mt-1 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-2)]"
-            >
-              <X size={18} />
-            </button>
-          )}
-        </div>
+        <CardHead
+          icon={<Newspaper size={16} />}
+          title="Add news links"
+          sub="Paste the whole list from the group at once"
+          tint="blue"
+          action={
+            canHide ? (
+              <button
+                onClick={onHide}
+                aria-label="Hide the link box"
+                className="-my-1 grid size-11 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-2)]"
+              >
+                <X size={18} />
+              </button>
+            ) : undefined
+          }
+        />
+        <p className="text-xs leading-relaxed text-ink-3">
+          One per line. Each link is reported on its own, so a dead one costs you that link and
+          nothing else.
+        </p>
 
         <div className="mt-4">
           <DeskSetup
@@ -2687,7 +2962,7 @@ function IntakePanel({
           autoCorrect="off"
           aria-label="News links, one per line"
           placeholder={'https://www.eenadu.net/…\nhttps://www.sakshi.com/…'}
-          className="mt-2 w-full resize-y rounded-[--radius-md] border border-[var(--border-interactive)] bg-[var(--surface-2)] p-3 text-sm leading-relaxed outline-none focus:border-[var(--accent)]"
+          className="mt-2 w-full resize-y rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-2)] p-3.5 text-sm leading-relaxed outline-none transition-colors focus:border-[var(--accent)]"
         />
 
         {/* The list of recognised publishers used to sit here as well, which
@@ -2789,22 +3064,22 @@ function EmptyDesk() {
   return (
     <m.div variants={fadeUp}>
       <Card>
-        <div className="flex gap-3">
-          <Inbox size={20} className="mt-0.5 shrink-0 text-ink-3" />
-          <div>
-            <p className="font-medium">Nothing read yet</p>
-            <p className="mt-1 text-sm leading-relaxed text-ink-2">
-              This page turns a day of news links into records you can search: what the complaint
-              is, which constituency it came from, how serious it is, who is named, whether it looks
-              fabricated, and what the office can say back.
-            </p>
-            <p className="mt-2 text-sm leading-relaxed text-ink-2">
-              Paste the links from the office group into the box above, the whole list at once. You
-              can then pull out only the ones you need, such as everything about water in Nuzvid, or
-              every story naming one officer.
-            </p>
-          </div>
-        </div>
+        <CardHead
+          icon={<Inbox size={16} />}
+          title="Nothing read yet"
+          sub="Paste the morning’s links to fill the desk"
+          tint="blue"
+        />
+        <p className="text-sm leading-relaxed text-ink-2">
+          This page turns a day of news links into records you can search: what the complaint
+          is, which constituency it came from, how serious it is, who is named, whether it looks
+          fabricated, and what the office can say back.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-ink-2">
+          Paste the links from the office group into the box above, the whole list at once. You
+          can then pull out only the ones you need, such as everything about water in Nuzvid, or
+          every story naming one officer.
+        </p>
       </Card>
     </m.div>
   )
@@ -2843,7 +3118,7 @@ function ChipToggle({
       aria-pressed={on}
       aria-label={label}
       onClick={onClick}
-      className="inline-flex min-h-11 shrink-0 items-center rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+      className="inline-flex min-h-11 shrink-0 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
     >
       <Chip
         tone={on ? tone : 'neutral'}
@@ -3134,7 +3409,9 @@ function RecordRow({
       onClick={onOpen}
       aria-current={active ? 'true' : undefined}
       className={cn(
-        'flex w-full items-stretch gap-3 overflow-hidden rounded-[--radius-md] border text-left',
+        // Hand-rolled card face rather than the .card class, so the active
+        // accent wash is not fought by the shared card background.
+        'card-hover flex w-full items-stretch gap-3 overflow-hidden rounded-[var(--radius-lg)] border text-left shadow-[var(--e1)]',
         active
           ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
           : 'border-[var(--border)] bg-[var(--surface)]',
@@ -3222,7 +3499,9 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
           )}
         </p>
 
-        <p className="mt-3 text-sm leading-relaxed text-ink-2">{record.summary}</p>
+        <p className="mt-3 rounded-2xl bg-[var(--surface-2)] px-4 py-3 text-sm leading-relaxed text-ink-2">
+          {record.summary}
+        </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Chip tone="accent">{record.topic}</Chip>
@@ -3256,18 +3535,27 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
       </Card>
 
       <Card>
-        <SectionTitle hint="Taken from the story itself, not looked up elsewhere.">
-          Who and where
-        </SectionTitle>
+        <CardHead
+          icon={<Users size={16} />}
+          title="Who and where"
+          sub="From the story itself, not looked up elsewhere"
+          hint="Taken from the story itself, not looked up elsewhere."
+          tint="blue"
+        />
 
-        <p className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">People named</p>
+        <p className="eyebrow">People named</p>
         {record.namedPersons.length === 0 ? (
           <p className="mt-1 text-sm text-ink-3">Nobody is named in this story.</p>
         ) : (
           <ul className="mt-1.5 space-y-1.5">
             {record.namedPersons.map((person, i) => (
-              <li key={`${person.name}-${i}`} className="flex items-start gap-2 text-sm">
-                <Users size={14} className="mt-1 shrink-0 text-ink-3" />
+              <li key={`${person.name}-${i}`} className="flex items-center gap-2.5 text-sm">
+                <span
+                  className="icon-badge icon-badge-sm"
+                  style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+                >
+                  <Users size={14} />
+                </span>
                 <span>
                   <span className="font-medium">{person.name}</span>
                   <span className="text-ink-3">, {person.role ?? 'role not given'}</span>
@@ -3277,7 +3565,7 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
           </ul>
         )}
 
-        <p className="mt-4 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">Places</p>
+        <p className="eyebrow mt-4">Places</p>
         {record.places.length === 0 ? (
           <p className="mt-1 text-sm text-ink-3">No village, mandal or ward is named.</p>
         ) : (
@@ -3292,7 +3580,7 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
 
         {record.hashtags.length > 0 && (
           <>
-            <p className="mt-4 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
+            <p className="eyebrow mt-4">
               Hashtags
             </p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -3307,9 +3595,13 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
       </Card>
 
       <Card>
-        <SectionTitle hint="Signals, not a verdict. Somebody in the office decides.">
-          Is it real?
-        </SectionTitle>
+        <CardHead
+          icon={<ShieldAlert size={16} />}
+          title="Is it real?"
+          sub="Signals, not a verdict — the office decides"
+          hint="Signals, not a verdict. Somebody in the office decides."
+          tint="orange"
+        />
 
         <div className="flex flex-wrap gap-1.5">
           <Chip tone={SUSPICION_TONE[fake.suspicion]} icon={<ShieldAlert size={11} />}>
@@ -3319,7 +3611,11 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
           <Chip tone="neutral">{fake.debunkStatus}</Chip>
         </div>
 
-        {fake.note && <p className="mt-2.5 text-sm leading-relaxed text-ink-2">{fake.note}</p>}
+        {fake.note && (
+          <p className="mt-3 rounded-2xl bg-[var(--surface-2)] px-4 py-3 text-sm leading-relaxed text-ink-2">
+            {fake.note}
+          </p>
+        )}
 
         {fake.signals.length === 0 ? (
           <p className="mt-3 text-sm text-ink-3">
@@ -3330,10 +3626,10 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
             {fake.signals.map((signal, i) => (
               <li
                 key={`${signal.kind}-${i}`}
-                className="rounded-[--radius-md] bg-[var(--surface-2)] p-3"
+                className="rounded-2xl bg-[var(--surface-2)] p-3.5"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
+                  <span className="eyebrow">
                     {SIGNAL_LABEL[signal.kind]}
                   </span>
                   <Chip tone={SUPPORTS_TONE[signal.supports]}>
@@ -3349,7 +3645,12 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
       </Card>
 
       <Card>
-        <SectionTitle>What to do</SectionTitle>
+        <CardHead
+          icon={<Megaphone size={16} />}
+          title="What to do"
+          sub="Suggested action, priority and channel"
+          tint="violet"
+        />
 
         <div className="flex flex-wrap gap-1.5">
           <Chip tone="accent">{recommendation.action}</Chip>
@@ -3362,10 +3663,12 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
         </div>
 
         {recommendation.rationale && (
-          <p className="mt-2.5 text-sm leading-relaxed text-ink-2">{recommendation.rationale}</p>
+          <p className="mt-3 rounded-2xl bg-[var(--surface-2)] px-4 py-3 text-sm leading-relaxed text-ink-2">
+            {recommendation.rationale}
+          </p>
         )}
 
-        <p className="mt-4 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
+        <p className="eyebrow mt-4">
           Lines you can use
         </p>
         {recommendation.talkingPoints.length === 0 ? (
@@ -3399,7 +3702,7 @@ function TalkingPoints({ points }: { points: string[] }) {
       {points.map((point, i) => (
         <li
           key={i}
-          className="flex items-start gap-2.5 rounded-[--radius-md] bg-[var(--surface-2)] p-3"
+          className="flex items-start gap-2.5 rounded-2xl bg-[var(--surface-2)] p-3.5"
         >
           <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-2xs font-semibold text-[var(--accent)]">
             {i + 1}
@@ -3410,7 +3713,7 @@ function TalkingPoints({ points }: { points: string[] }) {
             whileTap={{ scale: 0.9 }}
             transition={spring.snap}
             aria-label={copied === i ? 'Copied' : 'Copy this line'}
-            className="-m-2 grid size-11 shrink-0 place-items-center rounded-[--radius-sm] text-ink-3 hover:bg-[var(--surface-3)] hover:text-ink"
+            className="-m-2 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-3)] hover:text-ink"
           >
             {copied === i ? (
               <Check size={15} className="text-[var(--pos)]" />
@@ -3473,7 +3776,7 @@ function IssueCard({
           still decides the ORDER, up in the issues memo; what is drawn here
           is simply where the card sits.
         */}
-        <span className="num grid size-9 shrink-0 place-items-center rounded-[--radius-md] bg-[var(--surface-2)] text-sm text-ink-2">
+        <span className="num grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--accent-soft)] text-sm text-[var(--accent)]">
           {position}
         </span>
         <div className="min-w-0">
@@ -3513,17 +3816,17 @@ function IssueCard({
         </div>
       )}
 
-      <p className="mt-4 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
+      <p className="eyebrow mt-4">
         Who is driving it
       </p>
-      <p className="mt-1 text-sm text-ink-2">
+      <p className="mt-1.5 rounded-xl bg-[var(--surface-2)] px-3.5 py-2.5 text-sm leading-relaxed text-ink-2">
         {issue.politicalInvolvement ?? 'Not established from these records.'}
       </p>
 
-      <p className="mt-3 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
+      <p className="eyebrow mt-3">
         What to say back
       </p>
-      <p className="mt-1 text-sm text-ink-2">
+      <p className="mt-1.5 rounded-xl bg-[var(--surface-2)] px-3.5 py-2.5 text-sm leading-relaxed text-ink-2">
         {issue.counterNarrative ?? 'No counter-narrative drafted yet.'}
       </p>
 
@@ -3533,7 +3836,7 @@ function IssueCard({
             <li key={record.id}>
               <button
                 onClick={() => onOpenRecord(record.id)}
-                className="flex w-full items-center gap-2 rounded-[--radius-sm] px-2 py-2.5 text-left hover:bg-[var(--surface-2)]"
+                className="flex min-h-11 w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-[var(--surface-2)]"
               >
                 <span
                   aria-hidden

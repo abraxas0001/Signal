@@ -1,14 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
 import {
   Eye,
   Heart,
   Info,
+  MapPin,
   MessageCircle,
   Quote,
   Repeat2,
-  Download,
   RotateCcw,
   ShieldQuestion,
   Sparkles,
@@ -16,9 +16,12 @@ import {
 } from 'lucide-react'
 import type { Report } from '@shared/types'
 import { Button, Card, Chip, SectionTitle, type ChipTone } from '../ui'
-import { EmotionBars, SentimentMeter, StatTile } from '../charts'
+import { EmotionBars, SentimentMeter } from '../charts'
+import { CardHead, DonutBreakdown, IndiaMap, type MapMarker } from '@/components/kit'
+import { geocodePlace } from '@/components/gazetteer'
+import { INDIA_DOTS, INDIA_BBOX } from '@/components/india-dots'
 import { PostCard } from './PostCard'
-import { DataReport } from './DataReport'
+import { DataReport, MetricStat } from './DataReport'
 import { CommentsPanel } from './CommentsPanel'
 import { CivicPanel } from './CivicPanel'
 import { ExtractionNotice } from './ExtractionNotice'
@@ -90,6 +93,40 @@ export function ReportView({
   const eng = snapshot.engagement
   const metricLabel = snapshot.platform === 'Facebook' ? 'Reactions' : 'Likes'
 
+  // Presentational derivations only — nothing here fetches or changes state, it
+  // just re-shapes fields the report already carries into map pins and a ring.
+  // Placed before the data-only early return so the hook order never varies.
+
+  // The places this post is about, geocoded onto the India map. A place that
+  // will not resolve in the gazetteer is dropped, never guessed onto the map;
+  // tone follows the post's own sentiment so the pins read at a glance.
+  const placeMarkers = useMemo<MapMarker[]>(() => {
+    if (!analysis) return []
+    const s = analysis.sentiment.score
+    const tone: MapMarker['tone'] = s > 12 ? 'positive' : s < -12 ? 'negative' : 'accent'
+    const seen = new Set<string>()
+    const out: MapMarker[] = []
+    const add = (raw: string, detail?: string | null) => {
+      const g = geocodePlace(raw)
+      if (!g || seen.has(g.name)) return
+      seen.add(g.name)
+      out.push({ lon: g.lon, lat: g.lat, label: g.name, detail: detail || g.state, tone, weight: 0.6 })
+    }
+    analysis.reach.places.forEach((p) => add(p))
+    analysis.entities.filter((e) => e.kind === 'place').forEach((e) => add(e.name, e.role))
+    return out
+  }, [analysis])
+
+  // The credibility signals split into for/against, for the ring beside the list.
+  const signalSplit = useMemo(() => {
+    const sig = analysis?.credibility.signals ?? []
+    return {
+      supports: sig.filter((s) => s.direction === 'supports').length,
+      undermines: sig.filter((s) => s.direction === 'undermines').length,
+      total: sig.length,
+    }
+  }, [analysis])
+
   // With no model in the loop there is nothing to interpret, and a page built
   // around interpretation would be mostly holes. DataReport is a different
   // page for a different deliverable, not this one with sections removed.
@@ -106,7 +143,8 @@ export function ReportView({
     >
       {/* ── Verdict ─────────────────────────────────────────────────────── */}
       <m.div ref={heroRef} variants={fadeUp}>
-        <Card tone="accent" className="grain">
+        {/* The one lifted panel on this screen — everything else stays level. */}
+        <Card tone="accent" className="grain" level="lift">
           <div className="flex flex-wrap items-center gap-2">
             <Chip tone="accent" icon={<Sparkles size={12} />}>
               {analysis.topics.primary}
@@ -115,14 +153,17 @@ export function ReportView({
             <ConfidenceChip tier={analysis.confidence} />
           </div>
 
-          <h1 className="hed mt-3 text-3xl">{analysis.headline}</h1>
+          {/* One size down at phone width: a 30px display line at 375px broke
+              long headlines into five rows and pushed the summary below the
+              fold. Scales back up from sm. */}
+          <h1 className="hed mt-3 text-2xl sm:text-3xl">{analysis.headline}</h1>
 
           <p className="mt-3 text-base leading-relaxed text-ink-2">
             {analysis.summary}
           </p>
 
           {analysis.intent && (
-            <div className="mt-4 rounded-[--radius-md] bg-[var(--surface-2)] p-3">
+            <div className="mt-4 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-3">
               <p className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
                 What it is trying to do
               </p>
@@ -143,37 +184,66 @@ export function ReportView({
       </m.div>
 
       {/* ── How it landed ───────────────────────────────────────────────── */}
-      <m.section variants={fadeUp}>
-        <SectionTitle hint="Measured figures are shown plainly. Anything we did not measure says so.">
-          How it landed
-        </SectionTitle>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile
-            label={metricLabel}
-            metric={eng.likes}
-            icon={<Heart size={12} />}
-            onEdit={onEditMetric}
+      <m.section variants={fadeUp} aria-label="How it landed">
+        {/* One card, opened the reference way — icon badge, bold title, quiet
+            sub — with the stat blocks inset on the card. The old section hint
+            survives whole as the card's footnote: CardHead's sub line
+            truncates on a phone, and that sentence is the honesty contract. */}
+        <Card>
+          <CardHead
+            icon={<TrendingUp size={15} />}
+            title="How it landed"
+            sub="Every figure names its source"
+            tint="blue"
           />
-          <StatTile
-            label="Comments"
-            metric={eng.comments}
-            icon={<MessageCircle size={12} />}
-            onEdit={onEditMetric}
-          />
-          <StatTile
-            label="Shares"
-            metric={eng.shares}
-            icon={<Repeat2 size={12} />}
-            onEdit={onEditMetric}
-          />
-          <StatTile label="Views" metric={eng.views} icon={<Eye size={12} />} onEdit={onEditMetric} />
-        </div>
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+            <MetricStat
+              bare
+              label={metricLabel}
+              metric={eng.likes}
+              icon={<Heart size={18} />}
+              tint="pink"
+              onEdit={onEditMetric}
+            />
+            <MetricStat
+              bare
+              label="Comments"
+              metric={eng.comments}
+              icon={<MessageCircle size={18} />}
+              tint="blue"
+              onEdit={onEditMetric}
+            />
+            <MetricStat
+              bare
+              label="Shares"
+              metric={eng.shares}
+              icon={<Repeat2 size={18} />}
+              tint="violet"
+              onEdit={onEditMetric}
+            />
+            <MetricStat
+              bare
+              label="Views"
+              metric={eng.views}
+              icon={<Eye size={18} />}
+              tint="teal"
+              onEdit={onEditMetric}
+            />
+          </div>
 
-        {eng.engagementRate != null && (
-          <p className="mt-2 text-xs text-ink-3">
-            {(eng.engagementRate * 100).toFixed(2)}% of people who saw it interacted with it.
+          <p className="mt-3 text-xs leading-relaxed text-ink-3">
+            Measured figures are shown plainly. Anything we did not measure says so.
           </p>
-        )}
+
+          {eng.engagementRate != null && (
+            <p className="mt-1.5 text-xs text-ink-3">
+              <span className="tnum font-semibold text-ink-2">
+                {(eng.engagementRate * 100).toFixed(2)}%
+              </span>{' '}
+              of people who saw it interacted with it.
+            </p>
+          )}
+        </Card>
       </m.section>
 
       {/* ── Sentiment ───────────────────────────────────────────────────── */}
@@ -199,6 +269,33 @@ export function ReportView({
           <SectionTitle hint="The emotional register the post is written in.">Emotion</SectionTitle>
           <Card>
             <EmotionBars emotions={analysis.emotions} />
+          </Card>
+        </m.section>
+      )}
+
+      {/* ── Themes ──────────────────────────────────────────────────────── */}
+      {(analysis.topics.subtopic ||
+        analysis.topics.secondary.length > 0 ||
+        analysis.topics.tags.length > 0) && (
+        <m.section variants={fadeUp} className="defer-paint">
+          <SectionTitle hint="The threads running through this post.">Themes</SectionTitle>
+          <Card>
+            <div className="flex flex-wrap gap-1.5">
+              <Chip tone="accent" icon={<Sparkles size={12} />}>
+                {analysis.topics.primary}
+              </Chip>
+              {analysis.topics.subtopic && <Chip tone="info">{analysis.topics.subtopic}</Chip>}
+              {analysis.topics.secondary.map((t) => (
+                <Chip key={t} tone="neutral">
+                  {t}
+                </Chip>
+              ))}
+              {analysis.topics.tags.map((tag) => (
+                <Chip key={tag} tone="accent">
+                  {tag.startsWith('#') ? tag : `#${tag}`}
+                </Chip>
+              ))}
+            </div>
           </Card>
         </m.section>
       )}
@@ -268,7 +365,16 @@ export function ReportView({
                     )}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium leading-snug">{e.name}</p>
+                    <p className="text-sm font-medium leading-snug">
+                      {e.kind === 'place' && (
+                        <MapPin
+                          size={12}
+                          aria-hidden
+                          className="-mt-0.5 mr-1 inline-block text-[var(--accent)]"
+                        />
+                      )}
+                      {e.name}
+                    </p>
                     {e.role && (
                       <p className="mt-0.5 text-xs leading-snug text-ink-3">
                         {e.role}
@@ -316,13 +422,37 @@ export function ReportView({
             </p>
           )}
 
+          {/* Where it landed. A pin is dropped only for a name the gazetteer
+              can place; anything it cannot is left off the map but still listed
+              as a chip below, so the map's honesty costs the reader nothing. */}
+          {placeMarkers.length > 0 && (
+            <div className="mt-4 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-3 sm:p-4">
+              <CardHead
+                icon={<MapPin size={14} />}
+                title="Where this landed"
+                sub={`${placeMarkers.length} ${placeMarkers.length === 1 ? 'place' : 'places'} the gazetteer could pin`}
+                tint="teal"
+                className="mb-2"
+              />
+              <IndiaMap
+                dots={INDIA_DOTS}
+                bbox={INDIA_BBOX}
+                markers={placeMarkers}
+                className="mx-auto max-w-[420px]"
+              />
+            </div>
+          )}
+
           {analysis.reach.places.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {analysis.reach.places.map((p) => (
-                <Chip key={p} tone="neutral">
-                  {p}
-                </Chip>
-              ))}
+              {analysis.reach.places.map((p) => {
+                const geo = geocodePlace(p)
+                return (
+                  <Chip key={p} tone="neutral" icon={geo ? <MapPin size={11} /> : undefined}>
+                    {p}
+                  </Chip>
+                )
+              })}
             </div>
           )}
 
@@ -341,40 +471,66 @@ export function ReportView({
           Credibility
         </SectionTitle>
         <Card>
-          <div className="flex items-center justify-between gap-3">
-            <span className="inline-flex items-center gap-2 text-sm text-ink-2">
-              <ShieldQuestion size={15} />
-              Looks false?
-            </span>
-            <Chip
-              tone={
-                analysis.credibility.suspectedFalse === 'Yes'
-                  ? 'negative'
-                  : analysis.credibility.suspectedFalse === 'Likely'
-                    ? 'warning'
-                    : analysis.credibility.suspectedFalse === 'Unsure'
-                      ? 'neutral'
-                      : 'positive'
-              }
-            >
-              {analysis.credibility.suspectedFalse}
-            </Chip>
-          </div>
+          {/* The reference card opening: badge, question, and the verdict chip
+              riding the action slot — same words, same chip, same logic. */}
+          <CardHead
+            icon={<ShieldQuestion size={15} />}
+            title="Looks false?"
+            tint="orange"
+            className="mb-0"
+            action={
+              <Chip
+                tone={
+                  analysis.credibility.suspectedFalse === 'Yes'
+                    ? 'negative'
+                    : analysis.credibility.suspectedFalse === 'Likely'
+                      ? 'warning'
+                      : analysis.credibility.suspectedFalse === 'Unsure'
+                        ? 'neutral'
+                        : 'positive'
+                }
+              >
+                {analysis.credibility.suspectedFalse}
+              </Chip>
+            }
+          />
 
           {analysis.credibility.signals.length > 0 && (
-            <ul className="mt-3 space-y-2 border-t border-[var(--border)] pt-3">
-              {analysis.credibility.signals.map((s, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm">
-                  <span
-                    className={cn(
-                      'mt-1.5 size-1.5 shrink-0 rounded-full',
-                      s.direction === 'supports' ? 'bg-[var(--pos)]' : 'bg-[var(--warn)]',
-                    )}
+            <div className="mt-3 border-t border-[var(--border)] pt-3">
+              {/* Wraps at phone width: ring 88px + a 200px floor for the list
+                  cannot share 375px, so the list drops below the ring instead
+                  of squeezing the signal text into a sliver. */}
+              <div className="flex flex-wrap items-start gap-4">
+                {/* The for/against balance as a ring — the same signals, counted,
+                    so the reader sees the shape before reading each line. */}
+                {(signalSplit.supports > 0 || signalSplit.undermines > 0) && (
+                  <DonutBreakdown
+                    size={88}
+                    thickness={12}
+                    segments={[
+                      { label: 'Supports', value: signalSplit.supports, color: 'var(--pos)' },
+                      { label: 'Undermines', value: signalSplit.undermines, color: 'var(--warn)' },
+                    ]}
+                    centerLabel={String(signalSplit.total)}
+                    centerSub={signalSplit.total === 1 ? 'signal' : 'signals'}
+                    className="mx-auto shrink-0 sm:mx-0"
                   />
-                  <span className="text-ink-2">{s.signal}</span>
-                </li>
-              ))}
-            </ul>
+                )}
+                <ul className="min-w-[200px] flex-1 space-y-2">
+                  {analysis.credibility.signals.map((s, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm">
+                      <span
+                        className={cn(
+                          'mt-1.5 size-1.5 shrink-0 rounded-full',
+                          s.direction === 'supports' ? 'bg-[var(--pos)]' : 'bg-[var(--warn)]',
+                        )}
+                      />
+                      <span className="text-ink-2">{s.signal}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           )}
 
           {analysis.credibility.checkableClaims.length > 0 && (

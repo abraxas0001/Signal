@@ -28,3 +28,8 @@ scripts/_*.ts
 # classifier, so it carries "suspected fake" judgements about named outlets and
 # real people — that must not live in a public git history.
 public/sample-data.json
+
+# Build scaffolding and archived notes — working material, not project source.
+# The redesign specs were written to brief agents during a UI rebuild, and
+# docs/history holds superseded status files from an earlier session.
+docs/

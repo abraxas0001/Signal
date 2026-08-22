@@ -11,54 +11,21 @@ import {
   Users,
 } from 'lucide-react'
 import type { PostSnapshot } from '@shared/types'
-import { Card, Chip, Provenance } from '../ui'
+import { Avatar, Card } from '../ui'
+import { PlatformBadge } from '@/components/kit'
 import { absoluteDate, cn, compact, hostOf, relativeTime } from '@/lib/utils'
-import { ease, spring } from '@/lib/motion'
-
-const PLATFORM_TONE: Record<string, string> = {
-  YouTube: '#FF0033',
-  Facebook: '#0866FF',
-  Instagram: '#E4405F',
-  'Twitter/X': '#000000',
-  Threads: '#000000',
-  LinkedIn: '#0A66C2',
-  Telegram: '#26A5E4',
-  TikTok: '#25F4EE',
-  Reddit: '#FF4500',
-  Bluesky: '#0085FF',
-  Mastodon: '#6364FF',
-  Pinterest: '#E60023',
-  Snapchat: '#FFFC00',
-}
-
-/**
- * Readable initial on a brand colour.
- *
- * The fallback avatar paints the platform's own colour, and those range from
- * black (X, Threads) to Snapchat yellow and TikTok cyan. A hardcoded white
- * initial disappears on the light end, so pick the foreground from the
- * background's luminance instead of assuming.
- */
-function onBrand(hex: string): string {
-  const n = parseInt(hex.slice(1), 16)
-  const lin = (c: number) => {
-    const s = c / 255
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
-  }
-  const L =
-    0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
-  // Contrast against white is (1.05)/(L+0.05); against black it is (L+0.05)/0.05.
-  // They cross at L ≈ 0.179, so that is the switch point.
-  return L > 0.179 ? '#111318' : '#ffffff'
-}
+import { spring } from '@/lib/motion'
 
 /**
  * The post exactly as it was found, before any interpretation.
  *
- * Original script is always shown first and at full size; the English
- * translation sits beneath it as a secondary read. That ordering matters for
- * this audience — staff read the Telugu, but the report travels in English,
- * and the sheet's own rules require allegations be preserved verbatim.
+ * Media-forward, like every card in the reference shots: the image leads when
+ * there is one, with the platform's circle badge riding its corner, and the
+ * author row sits beneath. Original script is always shown first and at full
+ * size; the English translation sits beneath it as a secondary read. That
+ * ordering matters for this audience — staff read the Telugu, but the report
+ * travels in English, and the sheet's own rules require allegations be
+ * preserved verbatim.
  */
 export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
   const [expanded, setExpanded] = useState(false)
@@ -68,7 +35,7 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
   const text = content.text ?? ''
   const isLong = text.length > 320
   const shown = expanded || !isLong ? text : `${text.slice(0, 320).trimEnd()}…`
-  const brand = PLATFORM_TONE[platform]
+  const hasMedia = Boolean(media[0]?.thumbnailUrl)
 
   return (
     <Card padded={false} className="overflow-hidden">
@@ -78,7 +45,7 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
           href={snapshot.canonicalUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="group relative block aspect-video overflow-hidden bg-[var(--surface-2)]"
+          className="group relative block aspect-video overflow-hidden bg-[var(--surface-3)]"
         >
           <img
             src={media[0].thumbnailUrl}
@@ -92,15 +59,20 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
               e.currentTarget.parentElement?.style.setProperty('display', 'none')
             }}
           />
+          {/* Platform identity rides the media, the way every reference
+              thumbnail carries its brand circle. */}
+          <span className="absolute left-3 top-3 drop-shadow-[0_1px_3px_rgb(0_0_0/0.3)]">
+            <PlatformBadge platform={platform} size={28} />
+          </span>
           {media[0].kind === 'video' && (
             <span className="absolute inset-0 grid place-items-center">
-              <span className="grid size-14 place-items-center rounded-full bg-black/55 backdrop-blur-sm">
+              <span className="grid size-14 place-items-center rounded-full bg-black/55 backdrop-blur-sm transition-transform duration-300 group-hover:scale-105">
                 <Play size={22} className="ml-0.5 fill-white text-white" />
               </span>
             </span>
           )}
           {media[0].durationSeconds != null && (
-            <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-2xs font-medium text-white tabular-nums">
+            <span className="absolute bottom-2.5 right-2.5 rounded-full bg-black/70 px-2 py-0.5 text-2xs font-semibold text-white tabular-nums">
               {formatDuration(media[0].durationSeconds)}
             </span>
           )}
@@ -110,24 +82,7 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
       <div className="p-4 sm:p-5">
         {/* Author */}
         <div className="flex items-start gap-3">
-          {author.avatarUrl ? (
-            <img
-              src={author.avatarUrl}
-              alt=""
-              loading="lazy"
-              className="size-11 shrink-0 rounded-full object-cover ring-1 ring-[var(--border)]"
-            />
-          ) : (
-            <div
-              className="grid size-11 shrink-0 place-items-center rounded-full text-lg font-semibold"
-              style={{
-                background: brand ?? 'var(--accent)',
-                color: brand ? onBrand(brand) : '#ffffff',
-              }}
-            >
-              {(author.name ?? platform).charAt(0).toUpperCase()}
-            </div>
-          )}
+          <Avatar src={author.avatarUrl} name={author.name ?? platform} size={44} />
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
@@ -140,7 +95,7 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-3">
               {author.handle && <span className="truncate">@{author.handle}</span>}
               {author.followers.value != null && (
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 tabular-nums">
                   <Users size={11} />
                   {compact(author.followers.value)}
                 </span>
@@ -154,9 +109,8 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
             </div>
           </div>
 
-          <Chip tone="neutral" className="shrink-0">
-            {platform === 'Twitter/X' ? 'X' : platform}
-          </Chip>
+          {/* Without media there is no badge above, so the row carries it. */}
+          {!hasMedia && <PlatformBadge platform={platform} size={28} className="mt-0.5" />}
         </div>
 
         {/* Text - original script, full size, never truncated below the fold
@@ -173,7 +127,7 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
             {isLong && (
               <button
                 onClick={() => setExpanded((v) => !v)}
-                className="mt-1 inline-flex min-h-11 items-center gap-1 pr-2 text-sm font-medium text-[var(--accent)]"
+                className="mt-1 inline-flex min-h-11 items-center gap-1 pr-2 text-sm font-semibold text-[var(--accent)]"
               >
                 {expanded ? 'Show less' : 'Read full post'}
                 <ChevronDown
@@ -223,9 +177,12 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
 
         {/* Hashtags */}
         {content.hashtags.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-3.5 flex flex-wrap gap-1.5">
             {content.hashtags.slice(0, 8).map((h) => (
-              <span key={h} className="text-xs font-medium text-[var(--accent)]">
+              <span
+                key={h}
+                className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs font-semibold leading-none text-[var(--accent)]"
+              >
                 #{h}
               </span>
             ))}
@@ -248,7 +205,7 @@ export function PostCard({ snapshot }: { snapshot: PostSnapshot }) {
             href={snapshot.canonicalUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-ink-2 hover:text-[var(--accent)]"
+            className="inline-flex min-h-11 shrink-0 items-center gap-1 text-xs font-medium text-ink-2 hover:text-[var(--accent)]"
           >
             {hostOf(snapshot.canonicalUrl)}
             <ExternalLink size={12} />

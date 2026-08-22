@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react'
-import { Loader2, Plus, Search } from 'lucide-react'
+import { AtSign, Loader2, Plus, Search } from 'lucide-react'
 import type { Platform } from '@shared/taxonomy'
 import { parseHandleUrl } from '@shared/handle-url'
 import type { Influencer } from '@shared/grievance'
-import { Button, Chip } from './ui'
+import { Button, Chip, selectClass } from './ui'
+import { CardHead, PlatformBadge } from '@/components/kit'
 import { cn, full } from '@/lib/utils'
 
 /**
@@ -84,6 +85,11 @@ interface Candidate {
 const influencerIdOf = (platform: string, handle: string): string =>
   `inf-${`${platform}-${handle}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)}`
 
+/** The pill input every box in this flow wears — one voice, not three. */
+const pillInput =
+  'min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] ' +
+  'px-4 text-sm shadow-[var(--e1)] outline-none transition-colors focus:border-[var(--accent)]'
+
 /**
  * Find channels by subject, and read each one before offering it.
  *
@@ -145,15 +151,22 @@ export function SearchInfluencers({
 
   return (
     <div>
-      <p className="text-sm font-medium">Find channels by subject</p>
-      <p className="mt-1 text-xs leading-relaxed text-ink-2">
+      <CardHead
+        icon={<Search size={16} />}
+        title="Find channels by subject"
+        sub="Every channel is read before it is offered"
+        tint="blue"
+      />
+      <p className="text-xs leading-relaxed text-ink-2">
         Searches YouTube&rsquo;s own index, so every channel below exists. Each one is then read
-        for its subscriber count. <strong className="font-medium">Check that count before you
+        for its subscriber count. <strong className="font-semibold">Check that count before you
         add one</strong>: a lookalike with the right name and two subscribers is the thing worth
         noticing.
       </p>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      {/* Stacked on a phone: side by side, the button left the input ~170px —
+          too short to read back what was typed. */}
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -165,7 +178,7 @@ export function SearchInfluencers({
           }}
           placeholder="Telangana politics · Mahabubnagar news"
           aria-label="Search YouTube for channels on a subject"
-          className="min-h-11 min-w-0 flex-1 rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+          className={pillInput}
         />
         <Button size="sm" variant="outline" onClick={() => void search()} disabled={query.trim().length < 3 || busy}>
           {busy ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> : <Search size={14} />}
@@ -196,36 +209,41 @@ export function SearchInfluencers({
             return (
               <li
                 key={c.handle}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-1)] p-2"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-2)] p-3 shadow-[var(--e1)] transition-colors hover:border-[var(--border-strong)]"
               >
-                <span className="flex min-w-0 items-center gap-2">
-                  <Chip tone="neutral">{c.platform}</Chip>
+                {/* The identity block refuses to shrink below ~12rem, so on a
+                    375px screen the actions wrap under it instead of crushing
+                    the name and the subscriber count into a sliver. */}
+                <span className="flex min-w-[12rem] flex-1 items-center gap-3">
+                  <PlatformBadge platform={c.platform} size={32} />
                   <span className="min-w-0">
-                    <span className="block truncate text-sm text-ink">{c.name ?? c.handle}</span>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-sm font-semibold text-ink">{c.name ?? c.handle}</span>
+                      {tiny && (
+                        <Chip tone="warning" title="Very small for a news channel. Check it is the real one">
+                          tiny
+                        </Chip>
+                      )}
+                    </span>
                     {/* Two lines, not one. On a 360px screen a single line put
                         the handle first and truncated the subscriber count —
                         cutting off the one number this whole screen exists to
                         show. The handle is what may be clipped; the count is
                         never allowed to be. */}
                     <span className="block truncate text-xs text-ink-3">{c.handle}</span>
-                    <span className="block text-xs text-ink-3">
+                    <span className="tnum block text-xs font-medium text-ink-2">
                       {c.followers != null ? `${full(c.followers)} subscribers` : 'no subscriber count'}
                       {c.posts > 0 ? ` · ${c.posts} recent uploads` : ''}
                     </span>
                   </span>
-                  {tiny && (
-                    <Chip tone="warning" title="Very small for a news channel. Check it is the real one">
-                      tiny
-                    </Chip>
-                  )}
                 </span>
 
-                <span className="flex shrink-0 items-center gap-1.5">
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
                   <a
                     href={c.url}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="px-1 text-xs text-[var(--accent)] hover:underline"
+                    className="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-[var(--accent)] hover:underline"
                   >
                     open
                   </a>
@@ -349,14 +367,22 @@ export function AddInfluencer({
 
   return (
     <div>
-      <p className="text-sm font-medium">Watch a particular account</p>
-      <p className="mt-1 text-xs leading-relaxed text-ink-2">
+      <CardHead
+        icon={<AtSign size={16} />}
+        title="Watch a particular account"
+        sub="Read live before anything is stored"
+        tint="violet"
+      />
+      <p className="text-xs leading-relaxed text-ink-2">
         Paste a channel, page or profile link: a YouTube channel, an Instagram page, a Facebook
         creator. Suggest only searches YouTube, because it is the one platform that answers a
         search from a server; everything else has to be named.
       </p>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      {/* Phone: the link box takes the full first line, the platform picker
+          and button share the second. Three controls on one 375px line gave
+          the input ~100px. */}
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
         <input
           value={input}
           onChange={(e) => {
@@ -374,22 +400,24 @@ export function AddInfluencer({
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
-          className="min-h-11 min-w-0 flex-1 rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+          className={pillInput}
         />
-        <select
-          aria-label="Platform, used when you type a bare handle"
-          value={platform}
-          onChange={(e) => setPlatform(e.target.value as Platform)}
-          className="min-h-11 rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-2 text-sm text-ink-2"
-        >
-          {(['YouTube','Instagram','Facebook','Twitter/X','LinkedIn','Bluesky','Mastodon'] as Platform[]).map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
-        <Button size="sm" variant="outline" onClick={() => void look()} disabled={!input.trim() || busy}>
-          {busy ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> : <Search size={14} />}
-          {busy ? 'Reading…' : 'Look it up'}
-        </Button>
+        <div className="flex gap-2">
+          <select
+            aria-label="Platform, used when you type a bare handle"
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value as Platform)}
+            className={cn(selectClass, 'grow sm:grow-0')}
+          >
+            {(['YouTube','Instagram','Facebook','Twitter/X','LinkedIn','Bluesky','Mastodon'] as Platform[]).map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          <Button size="sm" variant="outline" onClick={() => void look()} disabled={!input.trim() || busy}>
+            {busy ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> : <Search size={14} />}
+            {busy ? 'Reading…' : 'Look it up'}
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -400,23 +428,32 @@ export function AddInfluencer({
 
       {/* What was actually read, before anything is filed. */}
       {found && (
-        <div className="mt-3 rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface-2)] p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Chip tone="neutral">{found.platform}</Chip>
-            <span className="text-sm font-semibold text-ink">
-              {found.displayName ?? found.handle}
-            </span>
-            <span className="text-xs text-ink-3">
-              {found.followers != null ? `${full(found.followers)} followers` : 'no follower count published'}
+        <div className="mt-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-2)] p-4 shadow-[var(--e1)]">
+          <div className="flex min-w-0 items-center gap-3">
+            <PlatformBadge platform={found.platform} size={36} />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-bold text-ink">
+                {found.displayName ?? found.handle}
+              </span>
+              <span className="tnum block text-xs text-ink-3">
+                {found.followers != null ? `${full(found.followers)} followers` : 'no follower count published'}
+              </span>
             </span>
           </div>
 
           {view && (
-            <p className={cn('mt-2 text-xs leading-relaxed', view.tone === 'positive' ? 'text-[var(--pos)]' : 'text-[var(--warn)]')}>
+            <p
+              className={cn(
+                'mt-3 rounded-[var(--radius-sm)] px-3 py-2 text-xs leading-relaxed',
+                view.tone === 'positive'
+                  ? 'bg-[var(--pos-soft)] text-[var(--pos)]'
+                  : 'bg-[var(--warn-soft)] text-[var(--warn)]',
+              )}
+            >
               {view.line}
             </p>
           )}
-          {found.note && <p className="mt-1 text-xs leading-relaxed text-ink-3">{found.note}</p>}
+          {found.note && <p className="mt-2 text-xs leading-relaxed text-ink-3">{found.note}</p>}
 
           <div className="mt-3">
             {!resolved(found) ? (

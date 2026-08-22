@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
-import { CircleCheck, CircleX, Loader2, ChevronRight } from 'lucide-react'
+import * as m from 'motion/react-m'
+import { useReducedMotion } from 'motion/react'
+import { ChevronRight, Globe, Loader2, Network, Newspaper, Search, Sparkles } from 'lucide-react'
 import { Card, Chip } from './ui'
+import { CardHead, PlatformBadge, ProgressRow } from '@/components/kit'
+import { listItem, listStaggerFast } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 
 /**
@@ -50,7 +54,71 @@ const COST_LABEL: Record<Capability['cost'], string> = {
   paid: 'costs money',
 }
 
+/* ── Source identity ─────────────────────────────────────────────────────
+   Each row leads with a favicon-ish badge: the platform-shaped sources wear
+   their real brand circle (PlatformBadge — brand colour is identity, not
+   data), everything else a soft-tinted icon square. Purely presentational;
+   the capability payload is untouched. */
+
+const SOURCE_PLATFORM: Record<string, string> = {
+  youtube: 'YouTube',
+  x: 'Twitter/X',
+}
+
+const SOURCE_ICONS: Record<string, { Icon: typeof Newspaper; bg: string; fg: string }> = {
+  news: { Icon: Newspaper, bg: 'var(--accent-soft)', fg: 'var(--accent)' },
+  model: { Icon: Sparkles, bg: 'var(--accent-2-soft)', fg: 'var(--accent-2)' },
+  grounded: { Icon: Search, bg: 'color-mix(in oklab, var(--chart-3) 12%, transparent)', fg: 'var(--chart-3)' },
+  provider: { Icon: Network, bg: 'var(--warn-soft)', fg: 'var(--warn)' },
+}
+
+function SourceBadge({ id }: { id: string }) {
+  if (id === 'meta') {
+    return (
+      <span className="flex shrink-0 -space-x-2.5">
+        <PlatformBadge platform="Facebook" size={32} className="ring-2 ring-[var(--surface)]" />
+        <PlatformBadge platform="Instagram" size={32} className="ring-2 ring-[var(--surface)]" />
+      </span>
+    )
+  }
+  const platform = SOURCE_PLATFORM[id]
+  if (platform) return <PlatformBadge platform={platform} size={40} />
+  const meta = SOURCE_ICONS[id] ?? { Icon: Globe, bg: 'var(--surface-3)', fg: 'var(--text-2)' }
+  const { Icon } = meta
+  return (
+    <span className="icon-badge" style={{ background: meta.bg, color: meta.fg }}>
+      <Icon size={18} aria-hidden />
+    </span>
+  )
+}
+
+/**
+ * A switch that only reports. Whether a source is on is decided by the
+ * server's environment, not by a click here, so this is state made visible —
+ * the row's real affordance stays "expand and read what it would take".
+ */
+function ToggleState({ on }: { on: boolean }) {
+  return (
+    <span
+      role="img"
+      aria-label={on ? 'Switched on' : 'Switched off'}
+      className={cn(
+        'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
+        on ? 'bg-[var(--pos)]' : 'border border-[var(--border)] bg-[var(--surface-3)]',
+      )}
+    >
+      <span
+        className={cn(
+          'absolute size-3.5 rounded-full bg-white shadow-[var(--e1)] transition-transform',
+          on ? 'translate-x-[18px]' : 'translate-x-[3px]',
+        )}
+      />
+    </span>
+  )
+}
+
 export function DataSources() {
+  const reduced = useReducedMotion()
   const [caps, setCaps] = useState<Capability[] | null>(null)
   const [summary, setSummary] = useState<{ on: number; total: number; nextBest: string | null } | null>(
     null,
@@ -108,20 +176,42 @@ export function DataSources() {
   return (
     <div>
       {summary && (
-        <p className="mb-3 text-sm leading-relaxed text-ink-2">
-          <span className="font-semibold text-ink">
-            {summary.on} of {summary.total} sources are switched on.
-          </span>{' '}
-          Everything below that is off is a real limit, not a bug. Each one says what it would
-          take.
-        </p>
+        <Card className="mb-3">
+          {/* The reference card header. The sentence that keeps this screen
+              honest stays as body copy below it — a CardHead sub truncates,
+              and this copy must never be cut. */}
+          <CardHead
+            icon={<Globe size={15} aria-hidden />}
+            title={`${summary.on} of ${summary.total} sources are switched on`}
+            sub="What this deployment can read right now"
+            tint="blue"
+          />
+          <p className="text-sm leading-relaxed text-ink-2">
+            Everything below that is off is a real limit, not a bug. Each one says what it
+            would take.
+          </p>
+          {summary.total > 0 && (
+            <ProgressRow
+              className="mt-3"
+              label="Sources reading"
+              fraction={summary.on / summary.total}
+              detail={`${summary.on} on · ${summary.total - summary.on} off`}
+              color="var(--pos)"
+            />
+          )}
+        </Card>
       )}
 
-      <ul className="space-y-2">
+      <m.ul
+        className="space-y-2.5"
+        variants={listStaggerFast}
+        initial={reduced ? false : 'hidden'}
+        animate="show"
+      >
         {caps.map((cap) => {
           const isOpen = open === cap.id
           return (
-            <li key={cap.id}>
+            <m.li key={cap.id} variants={listItem}>
               <Card
                 padded={false}
                 className={cn(
@@ -132,15 +222,9 @@ export function DataSources() {
                 <button
                   onClick={() => setOpen(isOpen ? null : cap.id)}
                   aria-expanded={isOpen}
-                  className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-[var(--surface-2)]"
+                  className="flex min-h-11 w-full items-start gap-3 p-4 text-left transition-colors hover:bg-[var(--surface-2)]"
                 >
-                  <span className="mt-0.5 shrink-0">
-                    {cap.on ? (
-                      <CircleCheck size={18} className="text-[var(--pos)]" aria-hidden />
-                    ) : (
-                      <CircleX size={18} className="text-ink-3" aria-hidden />
-                    )}
-                  </span>
+                  <SourceBadge id={cap.id} />
 
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-2">
@@ -174,14 +258,17 @@ export function DataSources() {
                     )}
                   </span>
 
-                  <ChevronRight
-                    size={16}
-                    aria-hidden
-                    className={cn(
-                      'mt-1 shrink-0 text-ink-3 transition-transform',
-                      isOpen && 'rotate-90',
-                    )}
-                  />
+                  <span className="flex shrink-0 items-center gap-2 pt-2">
+                    <ToggleState on={cap.on} />
+                    <ChevronRight
+                      size={16}
+                      aria-hidden
+                      className={cn(
+                        'shrink-0 text-ink-3 transition-transform',
+                        isOpen && 'rotate-90',
+                      )}
+                    />
+                  </span>
                 </button>
 
                 {/* A token that is set but wrong is the commonest state during
@@ -261,10 +348,10 @@ export function DataSources() {
                   </div>
                 )}
               </Card>
-            </li>
+            </m.li>
           )
         })}
-      </ul>
+      </m.ul>
     </div>
   )
 }

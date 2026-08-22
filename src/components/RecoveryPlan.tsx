@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
-import { ArrowRight, ListPlus, Loader2, LifeBuoy, TriangleAlert } from 'lucide-react'
+import { ArrowRight, Ban, Check, ListChecks, ListPlus, Loader2, LifeBuoy, Search, TriangleAlert } from 'lucide-react'
 import { Button, Card, Chip, type ChipTone } from './ui'
+import { CardHead } from '@/components/kit'
 import { fileFreeAction } from '@/lib/actions'
 import { actionIdForSource, requestActionFocus } from '@/lib/focus'
 import { readStore } from '@/lib/store'
@@ -82,6 +83,14 @@ const PRIORITY_TONE: Record<RecoveryStep['priority'], ChipTone> = {
   High: 'warning',
   Medium: 'neutral',
   Low: 'neutral',
+}
+
+/** Soft badge tints for the stepper — one voice per priority. */
+const PRIORITY_BADGE: Record<RecoveryStep['priority'], { bg: string; fg: string }> = {
+  Critical: { bg: 'var(--neg-soft)', fg: 'var(--neg)' },
+  High: { bg: 'var(--warn-soft)', fg: 'var(--warn)' },
+  Medium: { bg: 'var(--accent-soft)', fg: 'var(--accent)' },
+  Low: { bg: 'var(--surface-3)', fg: 'var(--text-2)' },
 }
 
 export function RecoveryPlan({
@@ -173,25 +182,26 @@ export function RecoveryPlan({
   if (!plan) {
     return (
       <Card level="quiet">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">The reading is negative. Work out why.</p>
-            <p className="measure mt-1 text-sm leading-relaxed text-ink-3">
-              Reads the criticism above for what is actually driving it, then gives you steps you
-              can put on the task list.
-            </p>
-          </div>
-          <Button onClick={() => void run()} disabled={busy}>
-            {busy ? (
-              <Loader2 size={15} className="animate-spin motion-reduce:animate-none" />
-            ) : (
-              <LifeBuoy size={15} />
-            )}
-            {busy ? 'Working it out…' : 'Make a plan'}
-          </Button>
-        </div>
+        <CardHead
+          icon={<LifeBuoy size={16} aria-hidden />}
+          tint="blue"
+          title="The reading is negative"
+          sub="Work out what is actually driving it"
+        />
+        <p className="measure text-sm leading-relaxed text-ink-3">
+          Reads the criticism above for what is actually driving it, then gives you steps you
+          can put on the task list.
+        </p>
+        <Button className="mt-4" onClick={() => void run()} disabled={busy}>
+          {busy ? (
+            <Loader2 size={15} className="animate-spin motion-reduce:animate-none" />
+          ) : (
+            <LifeBuoy size={15} />
+          )}
+          {busy ? 'Working it out…' : 'Make a plan'}
+        </Button>
         {error && (
-          <p role="alert" className="mt-3 text-sm text-[var(--neg)]">
+          <p role="alert" className="mt-3 text-sm font-medium text-[var(--neg)]">
             {error}
           </p>
         )}
@@ -202,17 +212,30 @@ export function RecoveryPlan({
   return (
     <div className="stack-tight">
       <Card level="lift">
-        <p className="eyebrow">What is actually wrong</p>
-        <p className="measure mt-2 text-base leading-relaxed">{plan.reading}</p>
+        <CardHead
+          icon={<TriangleAlert size={16} aria-hidden />}
+          tint="orange"
+          title="What is actually wrong"
+          sub="The model's reading of the criticism above"
+        />
+        <p className="measure text-base leading-relaxed">{plan.reading}</p>
       </Card>
 
       {plan.causes.length > 0 && (
         <Card>
-          <p className="eyebrow">Root cause of each complaint</p>
-          <ul className="mt-3 space-y-3">
+          <CardHead
+            icon={<Search size={16} aria-hidden />}
+            tint="violet"
+            title="Root cause of each complaint"
+            sub="Substance means do; perception means say"
+          />
+          <ul className="space-y-2.5">
             {plan.causes.map((c) => (
-              <li key={c.issue} className="border-l-2 border-[var(--border)] pl-3">
-                <p className="text-sm font-medium">{c.issue}</p>
+              <li
+                key={c.issue}
+                className="rounded-[var(--radius-md)] bg-[var(--surface-2)] p-3.5"
+              >
+                <p className="text-sm font-semibold text-ink">{c.issue}</p>
                 <p className="mt-1.5 flex flex-wrap gap-1.5">
                   <Chip tone={KIND_TONE[c.kind]}>{KIND_LABEL[c.kind]}</Chip>
                   <Chip tone={FOUNDED_TONE[c.founded]}>{c.founded}</Chip>
@@ -225,23 +248,46 @@ export function RecoveryPlan({
       )}
 
       <Card>
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="eyebrow">What to do</p>
-          <p className="text-xs text-ink-3">Most important first</p>
-        </div>
+        <CardHead
+          icon={<ListChecks size={16} aria-hidden />}
+          tint="blue"
+          title="What to do"
+          sub="Most important first"
+        />
 
-        <ul className="mt-3 space-y-3">
+        {/* The plan as a stepper: numbered badges joined by a line, so the
+            order — most important first — is carried by the drawing, not
+            just the sentence above it. */}
+        <ol className="mt-1">
           {plan.steps.map((step, i) => {
             const answered = step.answers > 0 ? survey.criticism[step.answers - 1]?.label : null
             const done = filed.has(i)
+            const badge = PRIORITY_BADGE[step.priority]
+            const last = i === plan.steps.length - 1
             return (
-              <li
-                key={`${step.action}-${i}`}
-                className="rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface-2)] p-3"
-              >
+              <li key={`${step.action}-${i}`} className={cn('relative pl-[52px]', !last && 'pb-6')}>
+                {/* The connecting line, drawn behind the badges. */}
+                {!last && (
+                  <span
+                    aria-hidden
+                    className="absolute bottom-0 left-[19px] top-11 w-0.5 rounded-full bg-[var(--border)]"
+                  />
+                )}
+                <span
+                  aria-hidden
+                  className="icon-badge absolute left-0 top-0 rounded-full text-sm font-bold"
+                  style={
+                    done
+                      ? { background: 'var(--pos)', color: 'var(--surface)' }
+                      : { background: badge.bg, color: badge.fg }
+                  }
+                >
+                  {done ? <Check size={17} strokeWidth={3} /> : i + 1}
+                </span>
+
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{step.action}</p>
+                    <p className="text-sm font-semibold text-ink">{step.action}</p>
                     <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       <Chip tone={PRIORITY_TONE[step.priority]}>{step.priority}</Chip>
                       {step.channel && <Chip tone="neutral">{step.channel}</Chip>}
@@ -279,7 +325,7 @@ export function RecoveryPlan({
                 </div>
 
                 {step.talkingPoints.length > 0 && (
-                  <div className="mt-3 border-t border-[var(--border)] pt-2.5">
+                  <div className="mt-3 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-3">
                     {/* Drafts, and it says so. See the note at the top of this
                         file: the generator has been caught inventing a figure,
                         and these go out under a member's name. */}
@@ -298,17 +344,28 @@ export function RecoveryPlan({
               </li>
             )
           })}
-        </ul>
+        </ol>
       </Card>
 
       {plan.avoid.length > 0 && (
         <Card>
-          <p className={cn('eyebrow', 'text-[var(--neg)]')}>What not to do</p>
-          <ul className="mt-2.5 space-y-1.5">
+          <CardHead
+            icon={<Ban size={16} aria-hidden />}
+            tint="orange"
+            title="What not to do"
+            sub="Moves that would make it worse"
+          />
+          <ul className="space-y-2.5">
             {plan.avoid.map((a) => (
-              <li key={a} className="flex gap-2 text-sm leading-relaxed text-ink-2">
-                <TriangleAlert size={14} className="mt-0.5 shrink-0 text-[var(--neg)]" aria-hidden />
-                <span className="measure">{a}</span>
+              <li key={a} className="flex items-start gap-2.5 text-sm leading-relaxed text-ink-2">
+                <span
+                  aria-hidden
+                  className="icon-badge icon-badge-sm shrink-0"
+                  style={{ background: 'var(--neg-soft)', color: 'var(--neg)' }}
+                >
+                  <TriangleAlert size={14} />
+                </span>
+                <span className="measure pt-1">{a}</span>
               </li>
             ))}
           </ul>
@@ -325,7 +382,8 @@ export function RecoveryPlan({
           Work it out again
         </Button>
         {filed.size > 0 && (
-          <span className="text-xs text-ink-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--pos-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--pos)]">
+            <Check size={13} aria-hidden />
             {filed.size} {filed.size === 1 ? 'step' : 'steps'} on the task list
           </span>
         )}

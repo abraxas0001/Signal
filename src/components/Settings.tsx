@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
-import { AtSign, Briefcase, CircleCheck, Key, RefreshCw, Search, Share2, Video } from 'lucide-react'
+import { CircleCheck, Key, RefreshCw, Search } from 'lucide-react'
 import { Avatar, Button, Card, Chip, PageHeader } from './ui'
+import { CardHead, PlatformBadge } from '@/components/kit'
 import { fadeUp, listStagger } from '@/lib/motion'
 import { getSettingsKey, setSettingsKey } from '@/lib/settings-key'
 import { IdentityRows } from './IdentityEditor'
@@ -49,10 +50,10 @@ interface StatusResponse {
   meta: MetaStatus
 }
 
-const PLATFORMS: { platform: ConnectionStatus['platform']; slug: string; label: string; Icon: typeof Video }[] = [
-  { platform: 'YouTube', slug: 'youtube', label: 'YouTube', Icon: Video },
-  { platform: 'LinkedIn', slug: 'linkedin', label: 'LinkedIn', Icon: Briefcase },
-  { platform: 'Twitter/X', slug: 'x', label: 'X / Twitter', Icon: AtSign },
+const PLATFORMS: { platform: ConnectionStatus['platform']; slug: string; label: string }[] = [
+  { platform: 'YouTube', slug: 'youtube', label: 'YouTube' },
+  { platform: 'LinkedIn', slug: 'linkedin', label: 'LinkedIn' },
+  { platform: 'Twitter/X', slug: 'x', label: 'X / Twitter' },
 ]
 
 async function fetchStatus(key: string): Promise<StatusResponse | 'unauthorised'> {
@@ -194,7 +195,7 @@ export function Settings({
           application, and burying it under an admin gate is what made the
           screen look like it had nothing on it. */}
       <m.section variants={fadeUp} aria-labelledby="identity-heading">
-        <div className="mb-3 flex items-end justify-between gap-4">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
           <div className="min-w-0">
             <h2 id="identity-heading" className="text-lg font-semibold tracking-[-0.011em]">
               Who this desk is for
@@ -213,8 +214,18 @@ export function Settings({
         {identity ? (
           <>
             <Card className="mb-3">
-              <div className="flex items-start gap-4">
-                <Avatar src={identity.photoUrl} name={identity.name} size={60} />
+              <div className="flex items-start gap-4 sm:items-center">
+                {/* The gradient ring the reference profile cards wear — a
+                    surface gap between ring and photograph so it reads as a
+                    ring, not a border. */}
+                <span
+                  className="grid shrink-0 place-items-center rounded-full p-[3px]"
+                  style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-2))' }}
+                >
+                  <span className="grid place-items-center rounded-full bg-[var(--surface)] p-[3px]">
+                    <Avatar src={identity.photoUrl} name={identity.name} size={72} />
+                  </span>
+                </span>
                 <div className="min-w-0 flex-1">
                   <p className="hed text-[1.4rem] leading-tight">{identity.name}</p>
                   <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
@@ -229,6 +240,25 @@ export function Settings({
                   )}
                 </div>
               </div>
+
+              {/* The words the news scan actually searches on. Shown because a
+                  scan that finds nothing is otherwise indistinguishable from a
+                  quiet week, and the usual cause is a wrong seat here. */}
+              {identity.watchTerms.length > 0 && (
+                <div className="mt-4 border-t border-[var(--border)] pt-4">
+                  <p className="kicker">The news scan searches for</p>
+                  <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                    {identity.watchTerms.map((term) => (
+                      <li key={term}>
+                        <Chip tone="accent">{term}</Chip>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2.5 text-xs leading-relaxed text-ink-3">
+                    Rebuilt from the name, seat and party above whenever you change one.
+                  </p>
+                </div>
+              )}
             </Card>
 
             <Card padded={false}>
@@ -237,25 +267,6 @@ export function Settings({
                 onEdit={(field, next) => saveIdentity(editField(identity, field, next))}
               />
             </Card>
-
-            {/* The words the news scan actually searches on. Shown because a
-                scan that finds nothing is otherwise indistinguishable from a
-                quiet week, and the usual cause is a wrong seat here. */}
-            {identity.watchTerms.length > 0 && (
-              <div className="mt-3">
-                <p className="kicker">The news scan searches for</p>
-                <ul className="mt-2 flex flex-wrap gap-1.5">
-                  {identity.watchTerms.map((term) => (
-                    <li key={term}>
-                      <Chip>{term}</Chip>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-2 text-xs leading-relaxed text-ink-3">
-                  Rebuilt from the name, seat and party above whenever you change one.
-                </p>
-              </div>
-            )}
           </>
         ) : (
           <Card>
@@ -290,155 +301,180 @@ export function Settings({
         <Grievances mode="records" onClose={onClose} />
       </m.section>
 
-      {(!key || refused) && (
-        <m.div variants={fadeUp}>
-          <Card
-            className={
-              refused ? 'border-[color-mix(in_oklab,var(--neg)_30%,transparent)]' : undefined
-            }
-          >
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Key size={16} className={refused ? 'text-[var(--neg)]' : 'text-ink-3'} aria-hidden />
-              {refused ? 'That key was not accepted' : 'Connecting accounts needs a key'}
-            </div>
+      {/* ── The office's own accounts ─────────────────────────────────── */}
+      <m.section variants={fadeUp} aria-labelledby="connections-heading">
+        <div className="mb-3">
+          <h2 id="connections-heading" className="text-lg font-semibold tracking-[-0.011em]">
+            Connected accounts
+          </h2>
+          <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
+            Authorise Signal to read the office&rsquo;s own accounts — real comments and exact
+            counts, straight from each platform.
+          </p>
+        </div>
 
-            {/* What the key actually is, in a sentence, because "admin key
-                required" told an office nothing about whose key, what for, or
-                whether they were supposed to have one. */}
-            <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
-              {refused
-                ? 'It is not your account password. It is a shared value set on the server when this deployment was created.'
-                : 'Everything else on this screen works without one.'}{' '}
-              Connecting a real YouTube, LinkedIn or X account grants this deployment
-              long-lived access to that account, so it is held behind a value only whoever
-              set the server up can hand out:{' '}
-              <code className="rounded bg-[var(--surface-2)] px-1 py-0.5 text-[13px]">
-                SETTINGS_ACCESS_KEY
-              </code>
-              . It stays on this device and is never sent anywhere else.
-            </p>
-            <div className="mt-3 flex gap-2">
-              <input
-                value={keyInput}
-                onChange={(e) => setKeyInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveKey()}
-                type="password"
-                spellCheck={false}
-                autoCapitalize="off"
-                autoCorrect="off"
-                placeholder="Admin key"
-                aria-label="Admin key"
-                className="min-h-11 min-w-0 flex-1 rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+        <div className="space-y-3">
+          {(!key || refused) && (
+            <Card
+              className={
+                refused ? 'border-[color-mix(in_oklab,var(--neg)_30%,transparent)]' : undefined
+              }
+            >
+              {/* The reference card header, with the tint carrying the state:
+                  warm when the key was refused, product blue otherwise. The
+                  refused state's full explanation stays in the body below —
+                  a CardHead sub truncates, and this copy must not. */}
+              <CardHead
+                icon={<Key size={15} aria-hidden />}
+                title={refused ? 'That key was not accepted' : 'Connecting accounts needs a key'}
+                sub={refused ? 'Check it with whoever set the server up' : 'Everything else on this screen works without one'}
+                tint={refused ? 'orange' : 'blue'}
               />
-              <Button size="sm" onClick={saveKey} disabled={!keyInput.trim()}>
-                Continue
-              </Button>
-            </div>
 
-            {key && (
-              <button
-                onClick={forgetKey}
-                className="mt-3 text-xs font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
-              >
-                Forget the stored key
-              </button>
-            )}
-          </Card>
-        </m.div>
-      )}
+              {/* What the key actually is, in a sentence, because "admin key
+                  required" told an office nothing about whose key, what for, or
+                  whether they were supposed to have one. */}
+              <p className="text-sm leading-relaxed text-ink-2">
+                {refused &&
+                  'It is not your account password. It is a shared value set on the server when this deployment was created. '}
+                Connecting a real YouTube, LinkedIn or X account grants this deployment
+                long-lived access to that account, so it is held behind a value only whoever
+                set the server up can hand out:{' '}
+                <code className="rounded bg-[var(--surface-2)] px-1 py-0.5 text-[13px]">
+                  SETTINGS_ACCESS_KEY
+                </code>
+                . It stays on this device and is never sent anywhere else.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveKey()}
+                  type="password"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  placeholder="Admin key"
+                  aria-label="Admin key"
+                  className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)]"
+                />
+                <Button size="sm" onClick={saveKey} disabled={!keyInput.trim()}>
+                  Continue
+                </Button>
+              </div>
 
-      {notice && (
-        <m.div variants={fadeUp}>
-          <Card className="border-[color-mix(in_oklab,var(--pos)_30%,transparent)] bg-[var(--pos-soft)]">
-            <p className="text-sm font-medium text-[var(--pos)]">{notice}</p>
-          </Card>
-        </m.div>
-      )}
-      {error && (
-        <m.div variants={fadeUp}>
-          <Card className="border-[color-mix(in_oklab,var(--neg)_30%,transparent)] bg-[var(--neg-soft)]">
-            <p className="text-sm font-medium text-[var(--neg)]">{error}</p>
-          </Card>
-        </m.div>
-      )}
+              {key && (
+                <button
+                  onClick={forgetKey}
+                  className="mt-3 min-h-11 text-xs font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
+                >
+                  Forget the stored key
+                </button>
+              )}
+            </Card>
+          )}
 
-      {/* The platform cards need `status`, not merely a key.
-          They rendered on `key` alone, so a saved-but-refused key still drew
-          four live Connect buttons — every one of which starts an OAuth
-          redirect the server will reject at the door. A control that cannot
-          work must not look like one that can. */}
-      {status && (
-        <m.div variants={fadeUp} className="space-y-3">
-          {PLATFORMS.map(({ platform, slug, label, Icon }) => {
-            const conn = byPlatform.get(platform)
-            return (
-              <Card key={platform} className="flex items-center justify-between gap-3">
+          {notice && (
+            <Card className="border-[color-mix(in_oklab,var(--pos)_30%,transparent)] bg-[var(--pos-soft)]">
+              <p className="text-sm font-medium text-[var(--pos)]">{notice}</p>
+            </Card>
+          )}
+          {error && (
+            <Card className="border-[color-mix(in_oklab,var(--neg)_30%,transparent)] bg-[var(--neg-soft)]">
+              <p className="text-sm font-medium text-[var(--neg)]">{error}</p>
+            </Card>
+          )}
+
+          {/* The platform cards need `status`, not merely a key.
+              They rendered on `key` alone, so a saved-but-refused key still drew
+              four live Connect buttons — every one of which starts an OAuth
+              redirect the server will reject at the door. A control that cannot
+              work must not look like one that can. */}
+          {status && (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {PLATFORMS.map(({ platform, slug, label }) => {
+                const conn = byPlatform.get(platform)
+                return (
+                  <Card
+                    key={platform}
+                    /* One row on a laptop; at 375px the button drops below the
+                       account line as a full-width bar instead of crushing the
+                       text against the badge. */
+                    className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <PlatformBadge platform={platform} size={40} />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold">{label}</span>
+                          {conn ? (
+                            <Chip tone={conn.lastError ? 'warning' : 'positive'} icon={<CircleCheck size={11} />}>
+                              Connected
+                            </Chip>
+                          ) : (
+                            <Chip tone="neutral">Not connected</Chip>
+                          )}
+                        </div>
+                        {/* Two lines, not truncate: at 375px a one-line clamp
+                            cut the failure reason — the only part worth
+                            reading — clean off. */}
+                        <p className="mt-0.5 line-clamp-2 text-xs text-ink-3">
+                          {conn?.lastError
+                            ? `Reconnect. The last refresh failed: ${conn.lastError}`
+                            : conn
+                              ? (conn.ownerName ?? conn.ownerId)
+                              : 'No account connected yet.'}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={conn ? 'outline' : 'primary'}
+                      disabled={loading}
+                      className="w-full shrink-0 sm:w-auto"
+                      onClick={() => (conn ? disconnect(platform) : connect(slug))}
+                    >
+                      {conn ? 'Disconnect' : 'Connect'}
+                    </Button>
+                  </Card>
+                )
+              })}
+
+              <Card className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
-                  <Icon size={20} className="shrink-0 text-ink-3" aria-hidden />
+                  <span className="flex shrink-0 -space-x-2">
+                    <PlatformBadge platform="Facebook" size={40} className="ring-2 ring-[var(--surface)]" />
+                    <PlatformBadge platform="Instagram" size={40} className="ring-2 ring-[var(--surface)]" />
+                  </span>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">{label}</span>
-                      {conn ? (
-                        <Chip tone={conn.lastError ? 'warning' : 'positive'} icon={<CircleCheck size={11} />}>
-                          Connected
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold">Facebook / Instagram</span>
+                      {status?.meta.configured ? (
+                        <Chip tone={status.meta.working ? 'positive' : 'warning'} icon={<CircleCheck size={11} />}>
+                          {status.meta.working ? 'Connected' : 'Configured'}
                         </Chip>
                       ) : (
                         <Chip tone="neutral">Not connected</Chip>
                       )}
                     </div>
-                    <p className="truncate text-xs text-ink-3">
-                      {conn?.lastError
-                        ? `Reconnect. The last refresh failed: ${conn.lastError}`
-                        : conn
-                          ? (conn.ownerName ?? conn.ownerId)
-                          : 'No account connected yet.'}
+                    <p className="mt-0.5 line-clamp-2 text-xs text-ink-3">
+                      {status?.meta.working
+                        ? `${status.meta.page ?? 'Page connected'}${status.meta.instagramLinked ? ' · Instagram linked' : ''}`
+                        : status?.meta.why
+                          ? status.meta.why
+                          : 'Set META_PAGE_TOKEN on the server to connect. See README.'}
                     </p>
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant={conn ? 'outline' : 'primary'}
-                  disabled={loading}
-                  onClick={() => (conn ? disconnect(platform) : connect(slug))}
-                >
-                  {conn ? 'Disconnect' : 'Connect'}
-                </Button>
               </Card>
-            )
-          })}
 
-          <Card className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex shrink-0 text-ink-3">
-                <Share2 size={20} aria-hidden />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold">Facebook / Instagram</span>
-                  {status?.meta.configured ? (
-                    <Chip tone={status.meta.working ? 'positive' : 'warning'} icon={<CircleCheck size={11} />}>
-                      {status.meta.working ? 'Connected' : 'Configured'}
-                    </Chip>
-                  ) : (
-                    <Chip tone="neutral">Not connected</Chip>
-                  )}
-                </div>
-                <p className="truncate text-xs text-ink-3">
-                  {status?.meta.working
-                    ? `${status.meta.page ?? 'Page connected'}${status.meta.instagramLinked ? ' · Instagram linked' : ''}`
-                    : status?.meta.why
-                      ? status.meta.why
-                      : 'Set META_PAGE_TOKEN on the server to connect. See README.'}
-                </p>
+              <div className={cn('flex justify-end lg:col-span-2', loading ? 'opacity-100' : 'opacity-0')}>
+                <RefreshCw size={14} className="animate-spin text-ink-3" aria-hidden />
               </div>
             </div>
-          </Card>
-
-          <div className={cn('flex justify-end', loading ? 'opacity-100' : 'opacity-0')}>
-            <RefreshCw size={14} className="animate-spin text-ink-3" aria-hidden />
-          </div>
-        </m.div>
-      )}
+          )}
+        </div>
+      </m.section>
     </m.div>
   )
 }

@@ -26,8 +26,18 @@ import {
  *   public     — everything the platform genuinely serves to anyone. YouTube,
  *                Bluesky, Mastodon and the open web are fully readable this
  *                way; Meta is not.
+ *   stored     — one of the three above, read earlier and kept. The batch sync
+ *                walks the tracked accounts slowly enough not to be blocked,
+ *                which is the only way a gated platform yields a post list at
+ *                all; the cost is that what comes back is as old as the last
+ *                sync. That is worth a route of its own rather than being
+ *                folded into `public`, on the same principle as the rest of
+ *                this file: a figure read a moment ago and a figure read on
+ *                Tuesday are not the same evidence, and a screen that renders
+ *                them identically is telling the office its numbers are live
+ *                when they are not.
  *
- * There is a fourth route and it is deliberately absent: signing in as a
+ * There is one further route and it is deliberately absent: signing in as a
  * fabricated user and reading through that session. That is what most scrapers
  * do, it is what the "but bots manage it" observation is actually describing,
  * and it is not on the table here. It is a terms violation that gets accounts
@@ -36,14 +46,14 @@ import {
  * which is roughly fortnightly. A product an office runs its reputation through
  * cannot rest on it.
  *
- * WHAT THIS FILE GUARANTEES: every value that comes back says which of the
- * three routes produced it. A comment obtained from a licensed reseller and a
+ * WHAT THIS FILE GUARANTEES: every value that comes back says which
+ * route produced it. A comment obtained from a licensed reseller and a
  * comment read from the platform's own API are not the same evidence, and a
  * screen that renders them identically is lying by omission — on a product
  * whose entire pitch is telling an office which claims are supported.
  */
 
-export type SourceRoute = 'owned' | 'licensed' | 'public' | 'none'
+export type SourceRoute = 'owned' | 'licensed' | 'public' | 'stored' | 'none'
 
 export interface Sourced<T> {
   data: T

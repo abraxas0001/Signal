@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as m from 'motion/react-m'
-import { ListPlus, RefreshCw, Table2, User, ArrowRight } from 'lucide-react'
+import { ArrowRight, Info, Lightbulb, ListPlus, Radar, RefreshCw, Table2, User } from 'lucide-react'
 import type { Identity } from '@shared/identity'
 import { Button, Card, Chip, SectionTitle } from './ui'
+import { Legend, RadarChart } from '@/components/kit'
 import { cn } from '@/lib/utils'
 import { fadeUp } from '@/lib/motion'
 import { fileFreeAction, hasOpenAction } from '@/lib/actions'
@@ -35,22 +36,20 @@ import { readStore } from '@/lib/store'
  * Colour: categorical, by PERSON, fixed. The subject is always blue and the
  * rival always amber, whoever happens to be ahead on a given row. Colouring by
  * who leads would repaint the chart every time a bar moved, and the reader
- * would learn nothing from the colour at all. Both pairs were run through the
- * palette validator rather than eyeballed:
+ * would learn nothing from the colour at all. The pair lives in the
+ * `--vs-subject` / `--vs-rival` tokens in index.css — validated there per
+ * surface, with the dark pair a separate selection, not a lightened copy of
+ * the light one. Status colours were deliberately not used: green/red here
+ * would say the subject is good and the rival bad, which is not what the data
+ * measures.
  *
- *   light  #2b6cb0 / #c07214 — ΔE 28.0 normal, 23.0 protan, 25.5 tritan
- *   dark   #4d89cc / #bb7d1a — ΔE 25.0 normal, 23.3 protan, 22.8 tritan
- *
- * Both clear the lightness band and chroma floor for their own surface — the
- * dark pair is a separate selection, not a lightened copy of the light one.
- * Status colours were deliberately not used: green/red here would say the
- * subject is good and the rival bad, which is not what the data measures.
- *
- * No number is printed on any bar. The scores are a model's placement of two
- * people on a scale, and printing "68" beside a bar lends them a precision they
- * do not have. Length carries the comparison, the evidence line carries the
- * substance, and anyone who wants the figures can open the table — where they
- * appear once, in a context that shows them for what they are.
+ * The figure is printed beside each bar, and a radar across the same dimensions
+ * sits above them, so the reader takes in the SHAPE and the numbers at once.
+ * The numbers are a model's placement of two people on one 0–100 scale, not a
+ * measurement of anything — so they are labelled as placements wherever they
+ * appear, and the evidence line, not the figure, still carries the substance.
+ * The full placement table stays one press away for anyone who wants every
+ * number lined up in a single column.
  */
 
 /* ── the shape the endpoint returns ──────────────────────────────────────── */
@@ -192,10 +191,15 @@ function Portrait({
     >
       {/* The ring is the identity channel that survives a missing photograph,
           and it is the same colour as this person's bars — so the reader learns
-          which side of the chart is which before reading a single label. */}
+          which side of the chart is which before reading a single label. A
+          surface gap between photo and ring is the avatar-ring treatment every
+          reference profile card wears. */}
       <span
         className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-full lg:size-16"
-        style={{ boxShadow: `0 0 0 2px ${colour}`, background: 'var(--surface-2)' }}
+        style={{
+          boxShadow: `0 0 0 2px var(--surface), 0 0 0 4px ${colour}`,
+          background: 'var(--surface-2)',
+        }}
       >
         {showPhoto ? (
           <img
@@ -211,7 +215,7 @@ function Portrait({
       </span>
 
       <span className="min-w-0 max-w-full">
-        <span className="block truncate text-sm font-semibold text-ink lg:text-[15px]">{name}</span>
+        <span className="block truncate text-sm font-bold text-ink lg:text-base">{name}</span>
         {lines.map((line) => (
           <span key={line} className="block truncate text-xs text-ink-3">
             {line}
@@ -255,34 +259,54 @@ function DimensionRow({
   // placement; only genuinely unassessed rows arrive with it false.
   const assessed = dimension.assessed !== false
 
+  /** "Ramesh ahead" as a soft pill in the person's own colour — the same
+      treatment the reference boards give their benchmark labels. The words
+      carry the fact; the tint only repeats it. */
+  const aheadPill = (who: 'subject' | 'rival') => (
+    <span
+      className="inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10.5px] font-bold"
+      style={{
+        background: `color-mix(in oklab, ${SERIES[who]} 12%, transparent)`,
+        color: SERIES[who],
+      }}
+    >
+      <span className="truncate">{who === 'subject' ? subjectName : rivalName} ahead</span>
+    </span>
+  )
+  const levelPill = (
+    <span className="inline-flex items-center rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-[10.5px] font-bold text-ink-3">
+      Level
+    </span>
+  )
+
   return (
     <div className="py-4">
       {/* ── The label, in the gutter on desktop and above the row on a phone.
           Putting it in the centre column is what makes the two sides read as
           one measurement taken twice rather than as two separate readouts. */}
-      <div className={cn(SPLIT, 'items-baseline gap-x-2')}>
-        <p className="hidden text-right text-xs text-ink-3 lg:block">
-          {assessed && edge === 'subject' ? `${subjectName} ahead` : ''}
+      <div className={cn(SPLIT, 'items-center gap-x-2')}>
+        <p className="hidden justify-end lg:flex">
+          {assessed && edge === 'subject' ? aheadPill('subject') : null}
         </p>
-        <p className="col-span-3 text-center text-sm font-medium text-ink lg:col-span-1">
+        <p className="col-span-3 text-center text-sm font-semibold text-ink lg:col-span-1">
           {label}
         </p>
-        <p className="hidden text-left text-xs text-ink-3 lg:block">
-          {assessed && edge === 'rival' ? `${rivalName} ahead` : ''}
+        <p className="hidden justify-start lg:flex">
+          {assessed && edge === 'rival' ? aheadPill('rival') : null}
         </p>
       </div>
 
       {/* On a phone the edge is one centred line under the label, because two
           side labels at 360px leave nothing for the bars. */}
-      <p className="mt-0.5 text-center text-xs text-ink-3 lg:hidden">
+      <p className="mt-1 flex justify-center lg:hidden">
         {!assessed
-          ? 'Not assessed'
+          ? <span className="text-xs text-ink-3">Not assessed</span>
           : edge === 'level'
-            ? 'Level'
-            : `${edge === 'subject' ? subjectName : rivalName} ahead`}
+            ? levelPill
+            : aheadPill(edge)}
       </p>
-      <p className="mt-0.5 hidden text-center text-xs text-ink-3 lg:block">
-        {!assessed ? 'Not assessed' : edge === 'level' ? 'Level' : ''}
+      <p className="mt-1 hidden justify-center lg:flex">
+        {!assessed ? <span className="text-xs text-ink-3">Not assessed</span> : edge === 'level' ? levelPill : null}
       </p>
 
       {/* ── The bars. Mirrored about the centre column, one 0–100 scale.
@@ -292,27 +316,59 @@ function DimensionRow({
           A row nobody assessed draws NOTHING — an even 50/50 under the word
           "Level" is a finding of parity on a question never asked. */}
       {assessed ? (
-        <div className={cn(SPLIT, 'mt-2 items-center')} aria-hidden="true">
-          <span className="flex justify-end overflow-hidden">
+        <div className={cn(SPLIT, 'mt-2.5 items-center')}>
+          {/* Subject: the figure at the outer end, the bar reaching from the
+              centre line toward it, so number and shape read as one thing. The
+              bar itself is a full-width track — the 0–100 scale drawn as a soft
+              rail the way every reference board does — with a fill whose
+              gradient runs soft-at-centre to full-at-tip. The figure is exposed
+              to screen readers (the bars stay aria-hidden); it is the model's
+              placement, named as such in the label. */}
+          <span className="flex items-center gap-2">
             <span
-              className="h-2.5 w-full origin-right rounded-l-[4px] transition-transform duration-500"
-              style={{ transform: `scaleX(${subjectScore / 100})`, background: SERIES.subject }}
-            />
+              className="num w-8 shrink-0 text-right text-sm font-bold text-ink"
+              aria-label={`${subjectName}: placed at ${subjectScore} out of 100`}
+            >
+              {subjectScore}
+            </span>
+            <span className="relative h-3 flex-1 overflow-hidden rounded-full bg-[var(--surface-3)]" aria-hidden="true">
+              <span
+                className="absolute inset-y-0 right-0 w-full origin-right rounded-full transition-transform duration-500"
+                style={{
+                  transform: `scaleX(${subjectScore / 100})`,
+                  background: `linear-gradient(to left, color-mix(in oklab, ${SERIES.subject} 55%, transparent), ${SERIES.subject})`,
+                }}
+              />
+            </span>
           </span>
-          <span className="flex justify-center">
-            <span className="h-4 w-0.5 bg-[var(--rule)]" />
+          <span className="flex justify-center" aria-hidden="true">
+            <span className="h-5 w-0.5 rounded-full bg-[var(--rule)]" />
           </span>
-          <span className="flex justify-start overflow-hidden">
+          <span className="flex items-center gap-2">
+            <span className="relative h-3 flex-1 overflow-hidden rounded-full bg-[var(--surface-3)]" aria-hidden="true">
+              <span
+                className="absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-500"
+                style={{
+                  transform: `scaleX(${rivalScore / 100})`,
+                  background: `linear-gradient(to right, color-mix(in oklab, ${SERIES.rival} 55%, transparent), ${SERIES.rival})`,
+                }}
+              />
+            </span>
             <span
-              className="h-2.5 w-full origin-left rounded-r-[4px] transition-transform duration-500"
-              style={{ transform: `scaleX(${rivalScore / 100})`, background: SERIES.rival }}
-            />
+              className="num w-8 shrink-0 text-left text-sm font-bold text-ink"
+              aria-label={`${rivalName}: placed at ${rivalScore} out of 100`}
+            >
+              {rivalScore}
+            </span>
           </span>
         </div>
       ) : (
-        <p className="mt-2 text-center text-xs leading-relaxed text-ink-3">
-          The search returned no placement for either of them on this, so no bars are drawn.
-        </p>
+        <div className="mt-2.5 flex items-start justify-center gap-2 rounded-xl bg-[var(--surface-2)] px-3 py-2.5">
+          <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+          <p className="text-xs leading-relaxed text-ink-3">
+            The search returned no placement for either of them on this, so no bars are drawn.
+          </p>
+        </div>
       )}
 
       {/* ── The evidence. The reason the row exists; the bars only say which of
@@ -340,13 +396,11 @@ function DimensionRow({
             ].map((side) => (
               <div
                 key={side.who}
-                className="border-l-2 pl-2.5"
+                className="rounded-r-xl border-l-2 bg-[var(--surface-2)] py-2.5 pl-3 pr-3"
                 style={{ borderColor: side.colour }}
               >
-                <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
-                  {side.who}
-                </p>
-                <p className="mt-0.5 text-sm leading-relaxed text-ink-2">
+                <p className="kicker">{side.who}</p>
+                <p className="mt-1 text-sm leading-relaxed text-ink-2">
                   {side.note || <span className="text-ink-3">Nothing found on this.</span>}
                 </p>
               </div>
@@ -392,13 +446,18 @@ function VsControl({
         className={cn(
           // 48px, because this is the primary control on a screen used on a
           // phone held in one hand.
-          'grid size-12 place-items-center rounded-full font-mono text-xs font-semibold uppercase tracking-[0.08em]',
-          'border-2 transition-colors',
+          'grid size-12 place-items-center rounded-full text-[11px] font-bold uppercase tracking-[0.08em]',
+          'transition-[filter,background-color]',
           'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]',
           state === 'busy'
-            ? 'cursor-wait border-[var(--border)] text-ink-3'
-            : 'border-[var(--accent)] bg-[var(--surface)] text-[var(--accent)] hover:bg-[var(--accent-soft)]',
+            ? 'cursor-wait bg-[var(--surface-3)] text-ink-3'
+            : 'text-white shadow-[var(--e2)] hover:brightness-110',
         )}
+        style={
+          state === 'busy'
+            ? undefined
+            : { background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 130%)' }
+        }
       >
         {state === 'busy' ? (
           <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" aria-hidden />
@@ -406,7 +465,7 @@ function VsControl({
           'vs'
         )}
       </button>
-      <span className="text-center text-[11px] leading-tight text-ink-3">{label}</span>
+      <span className="text-center text-[11px] font-medium leading-tight text-ink-3">{label}</span>
     </span>
   )
 }
@@ -443,6 +502,18 @@ export function HeadToHead({
   const rivalLines = useMemo(
     () => [rival.role, rival.constituency, rival.party].filter((x): x is string => Boolean(x)),
     [rival],
+  )
+
+  /**
+   * The dimensions the radar can plot — only the ones the search actually placed
+   * both people on. An unassessed row has no score, and a needle pinned to zero
+   * would read as "measured at zero" rather than "never asked". A radar also
+   * needs a closed shape, so the chart is drawn only when at least three
+   * dimensions survived; below that the mirrored bars carry it alone.
+   */
+  const radarDims = useMemo(
+    () => (result?.dimensions ?? []).filter((d) => d.assessed !== false),
+    [result],
   )
 
   /**
@@ -692,6 +763,7 @@ export function HeadToHead({
   return (
     <m.section variants={fadeUp} className="space-y-4">
       <SectionTitle
+        eyebrow="Head to head"
         hint="Read from published coverage on both people, not from follower counts."
       >
         {identity.name} against {rival.name}
@@ -706,12 +778,12 @@ export function HeadToHead({
             portrait ties both back to the bars. */}
         <div className={cn(SPLIT, 'items-center gap-x-2')}>
           <div className="min-w-0">
-            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
-              Yours
-            </p>
+            <p className="kicker mb-2">Yours</p>
             <span
-              className="mb-2 block h-[3px] w-full rounded-full"
-              style={{ background: SERIES.subject }}
+              className="mb-2.5 block h-[3px] w-full rounded-full"
+              style={{
+                background: `linear-gradient(to right, ${SERIES.subject}, color-mix(in oklab, ${SERIES.subject} 35%, transparent))`,
+              }}
               aria-hidden
             />
             <Portrait
@@ -731,12 +803,12 @@ export function HeadToHead({
           </div>
 
           <div className="min-w-0">
-            <p className="mb-1.5 text-right font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3">
-              Against
-            </p>
+            <p className="kicker mb-2 text-right">Against</p>
             <span
-              className="mb-2 block h-[3px] w-full rounded-full"
-              style={{ background: SERIES.rival }}
+              className="mb-2.5 block h-[3px] w-full rounded-full"
+              style={{
+                background: `linear-gradient(to left, ${SERIES.rival}, color-mix(in oklab, ${SERIES.rival} 35%, transparent))`,
+              }}
               aria-hidden
             />
             <Portrait
@@ -750,16 +822,16 @@ export function HeadToHead({
         </div>
 
         {busy && (
-          <div className="mt-5 space-y-2">
-            <p className="flex items-center gap-2 text-sm text-ink-2">
-              <RefreshCw size={14} className="animate-spin" />
+          <div className="mt-5 space-y-2 rounded-2xl bg-[var(--surface-2)] p-4">
+            <p className="flex items-center gap-2 text-sm font-medium text-ink-2">
+              <RefreshCw size={14} className="animate-spin motion-reduce:animate-none" aria-hidden />
               {phase === 'searching'
                 ? reading
                   ? `Reading what has been published about ${reading}…`
                   : `Reading the published record…`
                 : 'Weighing it up…'}
             </p>
-            <p className="text-xs text-ink-3">
+            <p className="text-xs leading-relaxed text-ink-3">
               {/* Named rather than vague. The two people are read one after the
                   other, so a blank minute is really two halves, and saying
                   whose half is running is the difference between waiting and
@@ -770,8 +842,8 @@ export function HeadToHead({
         )}
 
         {error && !busy && (
-          <div className="mt-5">
-            <p role="alert" className="text-sm text-[var(--neg)]">
+          <div className="mt-5 rounded-2xl bg-[var(--neg-soft)] p-4">
+            <p role="alert" className="text-sm leading-relaxed text-[var(--neg)]">
               {error}
             </p>
             <Button size="sm" variant="outline" className="mt-3" onClick={() => void run()}>
@@ -784,30 +856,74 @@ export function HeadToHead({
         {result && !busy && (
           <>
             {result.verdict && (
-              <p className="mt-5 border-l-2 border-[var(--accent)] pl-3 text-[15px] leading-relaxed text-ink">
-                {result.verdict}
-              </p>
+              <div className="mt-5 rounded-2xl border-l-[3px] border-[var(--accent)] bg-[var(--accent-soft)] p-4">
+                <p className="text-[15px] leading-relaxed text-ink">{result.verdict}</p>
+              </div>
+            )}
+
+            {/* ── The shape, above the bars ──────────────────────────────
+                A radar across every assessed dimension at once. The bars below
+                say each figure precisely; this says the overall shape — where
+                one person bulges and the other caves — in a single read. Two
+                series only, in the same two colours as everything else on the
+                screen, so no new key has to be learned. Its own premium panel
+                because the shape is a finding in its own right, not a footnote
+                to the bars. */}
+            {radarDims.length >= 3 && (
+              <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--e1)] sm:p-5">
+                <div className="flex items-start gap-3">
+                  <span
+                    className="icon-badge"
+                    style={{ background: 'var(--accent-2-soft)', color: 'var(--accent-2)' }}
+                  >
+                    <Radar size={18} aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-bold text-ink">The shape of it</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
+                      Both people across every dimension at once. The figures are the model's
+                      0–100 placements from the coverage it read — comparable with each other,
+                      not measurements of anything.
+                    </p>
+                  </div>
+                </div>
+                <div className="mx-auto mt-2 max-w-[340px]">
+                  <RadarChart
+                    axes={radarDims.map((d) => d.label)}
+                    max={100}
+                    series={[
+                      {
+                        name: identity.name,
+                        color: SERIES.subject,
+                        values: radarDims.map((d) => d.subjectScore),
+                      },
+                      {
+                        name: rival.name,
+                        color: SERIES.rival,
+                        values: radarDims.map((d) => d.rivalScore),
+                      },
+                    ]}
+                  />
+                </div>
+              </div>
             )}
 
             {/* Legend. Always present for two series — identity must never
                 depend on matching a colour to a photograph ring alone. */}
             <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-              {[
-                { name: identity.name, colour: SERIES.subject },
-                { name: rival.name, colour: SERIES.rival },
-              ].map((s) => (
-                <span key={s.name} className="flex items-center gap-1.5 text-xs text-ink-2">
-                  <span className="size-2.5 rounded-sm" style={{ background: s.colour }} />
-                  {s.name}
-                </span>
-              ))}
+              <Legend
+                items={[
+                  { label: identity.name, color: SERIES.subject },
+                  { label: rival.name, color: SERIES.rival },
+                ]}
+              />
               <button
                 type="button"
                 onClick={() => setShowTable((v) => !v)}
-                className="ml-auto flex items-center gap-1.5 text-xs text-ink-3 hover:text-ink"
+                className="ml-auto flex min-h-11 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-ink-3 transition-colors hover:bg-[var(--surface-2)] hover:text-ink"
               >
-                <Table2 size={13} />
-                {showTable ? 'Hide the figures' : 'Show the figures'}
+                <Table2 size={13} aria-hidden />
+                {showTable ? 'Hide the table' : 'Show the table'}
               </button>
             </div>
 
@@ -826,9 +942,9 @@ export function HeadToHead({
                 length, and it is where the numbers live — printed once, in a
                 place that shows them for the estimates they are. */}
             {showTable && (
-              <div className="mt-3 overflow-x-auto">
+              <div className="mt-3 overflow-x-auto rounded-2xl bg-[var(--surface-2)] p-4">
                 <table className="w-full text-left text-xs">
-                  <caption className="pb-2 text-left text-xs text-ink-3">
+                  <caption className="pb-2.5 text-left text-xs leading-relaxed text-ink-3">
                     Placements on a 0 to 100 scale, assigned by the model from the coverage it
                     read. Comparable with each other; not measurements of anything.
                   </caption>
@@ -862,17 +978,17 @@ export function HeadToHead({
 
             {/* ── What each of them has that the other does not ─────────── */}
             {(result.subject.strengths.length > 0 || result.rival.strengths.length > 0) && (
-              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 sm:gap-4">
                 {[
                   { who: identity.name, list: result.subject.strengths, colour: SERIES.subject },
                   { who: rival.name, list: result.rival.strengths, colour: SERIES.rival },
                 ].map((side) => (
-                  <div key={side.who}>
-                    <p className="flex items-center gap-1.5 text-xs font-medium text-ink-2">
-                      <span className="size-2.5 rounded-sm" style={{ background: side.colour }} />
+                  <div key={side.who} className="rounded-2xl bg-[var(--surface-2)] p-4">
+                    <p className="flex items-center gap-1.5 text-xs font-bold text-ink">
+                      <span className="size-2.5 shrink-0 rounded-full" style={{ background: side.colour }} />
                       {side.who} has
                     </p>
-                    <ul className="mt-1.5 space-y-1">
+                    <ul className="mt-2 space-y-1.5">
                       {side.list.length === 0 ? (
                         <li className="text-xs text-ink-3">Nothing the record separates them on.</li>
                       ) : (
@@ -894,13 +1010,23 @@ export function HeadToHead({
       {/* ── What to do about it ────────────────────────────────────────── */}
       {result && !busy && (result.gaps.length > 0 || result.move) && (
         <Card tone="accent">
-          <p className="text-[15px] font-semibold">What to do about it</p>
+          <div className="flex items-center gap-3">
+            <span
+              className="icon-badge"
+              style={{ background: 'var(--accent-2-soft)', color: 'var(--accent-2)' }}
+            >
+              <Lightbulb size={18} aria-hidden />
+            </span>
+            <p className="text-[15px] font-bold">What to do about it</p>
+          </div>
 
           {result.gaps.length > 0 && (
-            <ol className="mt-2 space-y-1.5">
+            <ol className="mt-3 space-y-2">
               {result.gaps.map((gap, i) => (
-                <li key={gap} className="flex gap-2 text-sm leading-relaxed text-ink">
-                  <span className="num shrink-0 text-ink-3">{i + 1}.</span>
+                <li key={gap} className="flex gap-2.5 text-sm leading-relaxed text-ink">
+                  <span className="num grid size-6 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[11px] text-[var(--accent)]">
+                    {i + 1}
+                  </span>
                   {gap}
                 </li>
               ))}
@@ -908,15 +1034,18 @@ export function HeadToHead({
           )}
 
           {result.move && (
-            <div className="mt-4 rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface)] p-3">
-              <p className="text-sm font-medium text-ink">{result.move.action}</p>
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <p className="text-sm font-semibold text-ink">{result.move.action}</p>
               {result.move.rationale && (
                 <p className="mt-1 text-xs leading-relaxed text-ink-2">{result.move.rationale}</p>
               )}
               {result.move.talkingPoints.length > 0 && (
-                <ul className="mt-2 space-y-1">
+                <ul className="mt-2.5 space-y-1.5">
                   {result.move.talkingPoints.map((p) => (
-                    <li key={p} className="text-xs leading-relaxed text-ink-2">
+                    <li
+                      key={p}
+                      className="rounded-xl bg-[var(--surface-2)] px-3 py-2 text-xs leading-relaxed text-ink-2"
+                    >
                       “{p}”
                     </li>
                   ))}
@@ -965,6 +1094,7 @@ export function HeadToHead({
       {/* ── Where it came from, and what it is not ─────────────────────── */}
       {result && !busy && (
         <Card>
+          <p className="kicker mb-3">Where this came from</p>
           <div className="flex flex-wrap items-center gap-2">
             <Chip tone={result.confidence === 'well-covered' ? 'positive' : 'warning'}>
               {result.confidence === 'well-covered'
@@ -999,9 +1129,13 @@ export function HeadToHead({
             </ul>
           )}
 
-          <ul className="mt-3 space-y-1">
+          <ul className="mt-3 space-y-1.5">
             {result.caveats.map((c) => (
-              <li key={c} className="text-xs leading-relaxed text-ink-3">
+              <li
+                key={c}
+                className="flex items-start gap-2 rounded-xl bg-[var(--surface-2)] px-3 py-2 text-xs leading-relaxed text-ink-3"
+              >
+                <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
                 {c}
               </li>
             ))}

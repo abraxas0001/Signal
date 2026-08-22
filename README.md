@@ -129,6 +129,69 @@ none of it reaches a rival's page.
 | `META_PAGE_TOKEN` / `META_IG_USER_ID` | A Facebook Page/Instagram Business account's own posts, real comments, share counts and reel plays — via the Graph API. Pasted once, manually; see `meta-graph.ts`. |
 | `SETTINGS_ACCESS_KEY`, `CONNECTIONS_ENCRYPTION_KEY`, `OAUTH_STATE_SECRET`, `YOUTUBE_OAUTH_CLIENT_ID`/`_SECRET`, `LINKEDIN_OAUTH_CLIENT_ID`/`_SECRET`/`_SCOPE`, `X_OAUTH_CLIENT_ID`/`_SECRET` | The same idea for YouTube, LinkedIn and X, but connected from the app's own Settings screen via OAuth instead of a pasted token. YouTube ships full rich reads; LinkedIn and X ship identity-confirmation only for now — LinkedIn's post access needs a separate manual platform approval, and X's needs a paid API tier. See `.env.example` for the full setup, gotchas, and what each buys. |
 
+### The sync, and the one thing it is for
+
+Everything above reads an account *now*, on demand, and for YouTube, Bluesky and
+Mastodon that is the whole story — those platforms serve a post list to anyone
+and the dashboard fetches it while you wait.
+
+Facebook, Instagram, LinkedIn and X do not. Without an owned token or a licensed
+provider, the only thing that gets a post list out of them is going slowly:
+roughly one Instagram account a minute, spread over several minutes. That cannot
+happen inside a page load, so it happens on a schedule, and what it finds is
+kept.
+
+```
+Dashboard "Sync now"  ──▶  POST /api/batch-track-all   (streams progress)
+                           POST /api/sync-profiles     (one JSON reply)
+                                    │
+                                    ├─ registers the accounts the caller sent
+                                    ├─ readHandle() each, paced per platform
+                                    └─ stores posts + a dated follower count
+                                                 │
+Dashboard "Refresh all"  ──▶  GET /api/handle ───┘
+                              live read first; falls back to what was stored,
+                              and labels it `route: "stored"` with its age
+```
+
+**A pass is not the whole sync.** Netlify kills a function at 60 seconds and a
+real sync needs minutes, so each request does as much as its budget allows and
+replies with `done` plus how many accounts are left. The client calls again
+until `done`. Each account is committed before the next is started, so an
+interrupted pass loses only the time it had left. This is the architecture, not
+a refinement — a single request that promised to do all of it would be killed
+mid-way every time.
+
+**The tracked list travels with the request.** The dashboard's accounts live in
+`localStorage` for the reasons `src/lib/store.ts` sets out at length, so the
+server cannot read them; pressing "Sync now" is what hands them over. What
+crosses the wire is a platform, a public handle, a display name, and whether the
+office runs the account — no grievance record, no comment text, no measured
+standing.
+
+**A stored figure is never dressed up as a live one.** `SourceRoute` gained a
+fifth value, `stored`, beside `owned`, `licensed`, `public` and `none`, and the
+note beside it says when the sync ran. An account read on Tuesday and one read a
+moment ago are not the same evidence.
+
+Requires Firebase, and degrades rather than breaks without it: with no
+credentials the gated platforms still report their follower count and still say
+plainly why there are no posts, they just never accumulate any. `.env.example`
+has the ten-minute setup; `GET /api/diag` reports whether it actually works, by
+doing a real round trip rather than checking that the credentials parse.
+
+| Endpoint | What it does |
+|---|---|
+| `POST /api/sync-profiles` | One budgeted pass. Returns `done`, `remaining`, and a row per account. |
+| `GET /api/sync-profiles` | What is tracked, its post count, and its follower change over 30 days. |
+| `POST /api/batch-track-all` | The same pass, streamed as SSE so the screen can name the account being read. |
+| `GET /api/comparison-all-platforms` | The tracked accounts side by side, each labelled with its route and age. |
+| `GET/POST /api/configure-tracking` | Add, remove, enable or disable a tracked account. Gated by `SETTINGS_ACCESS_KEY`. |
+| `GET /api/instagram-cache-status` | Whether Instagram is answering, in backoff, or being served from cache. |
+
+`scripts/setup-tracking.sh --file accounts.tsv` registers a list from the command
+line, for seeding a fresh deploy or a scheduled job.
+
 ---
 
 ## What can actually be extracted
@@ -311,6 +374,16 @@ netlify/
                    web (linkedin, telegram, tiktok, reddit, news, blogs)
       schema     the JSON Schema handed to the model, generated from taxonomy
       analyse    the Claude call
+      firebase   the only place Firebase is initialised; returns null, never
+                 throws, when the deploy has no credentials
+      handles    reading an ACCOUNT rather than a post — the four routes, and
+                 the fallback to whatever the sync stored
+      competitor-tracker
+                 the sync: register accounts, read them paced, keep the posts
+                 and a dated follower count
+      rate-limiter-advanced
+                 the per-platform pacing ledger, in Firestore because Netlify
+                 gives every invocation its own container
 src/             React interface
 scripts/         extraction and endpoint tests that hit real URLs
 ```
@@ -389,7 +462,21 @@ npm run test:schema    # validates the JSON Schema the model is held to
 npm run test:contrast  # WCAG AA for every colour pair, both themes
 npm run test:extract   # runs every adapter against real, live posts
 npm run test:endpoint  # calls the SSE endpoint and prints the event stream
+npm run test:sync      # the sync, written to and read back from real Firestore
 ```
+
+**`test:sync` writes to the real database and cleans up after itself.** It skips
+with a note when no Firebase credentials are present, because most contributors
+will not have them and a test that fails for everyone without a secret is a test
+everyone learns to ignore. What it catches is the class of bug that passes a
+typecheck and fails in production: a document id with a slash in it (`Twitter/X`
+is a platform name, and a slash in a Firestore id is a path separator, not an
+error), an `update()` on a document that does not exist yet, a subcollection
+orphaned by deleting its parent, and a re-sync that duplicates every post
+instead of updating it. It uses YouTube and Bluesky, whose post lists are
+public, so a failure is our storage bug rather than a platform declining to be
+read — and then writes one row for a gated platform directly, because that is
+the only way to exercise the `stored` route the whole feature exists for.
 
 **`test:sheet` is the one that answers "does this work for us".** It runs all 28
 links from `Eluru_Social_Listening.xlsx`, prints a field-by-field coverage

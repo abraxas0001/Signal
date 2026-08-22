@@ -3,6 +3,8 @@ import { extractPost } from './lib/extract/index'
 import { resolveProviders } from './lib/provider'
 import { metaCredentials, whoAmI, facebookPagePosts, instagramMedia } from './lib/meta-graph'
 import { listConnections } from './lib/connections'
+import { firestoreError, firestorePing } from './lib/firebase'
+import { getTrackedProfiles } from './lib/competitor-tracker'
 
 /**
  * GET /api/diag — what actually happens from the deployed server.
@@ -107,6 +109,34 @@ export default async (_req: Request, _ctx: Context): Promise<Response> => {
     }
   }
 
+  /**
+   * Whether the sync has anywhere to write, proved by a real round trip.
+   *
+   * Credentials that merely parse are not the same as a database that answers:
+   * a project without Firestore provisioned, a service account missing the
+   * datastore role and a network that cannot reach Google all pass the first
+   * check and fail the second. Without this the failure surfaces minutes into
+   * a sync, as a stack trace in a function log nobody is reading, after the
+   * accounts have already been read and the waiting already paid for.
+   */
+  const ping = await firestorePing()
+  const firestore: Record<string, unknown> = {
+    configured: ping.ok || firestoreError() === null,
+    reachable: ping.ok,
+    note: ping.note,
+    ...(firestoreError() ? { why: firestoreError() } : {}),
+  }
+  if (ping.ok) {
+    const tracked = await getTrackedProfiles().catch(() => [])
+    firestore['trackedAccounts'] = tracked.length
+    firestore['syncedAccounts'] = tracked.filter((p) => p.lastTrackedAt).length
+    // The oldest last-sync is the number that says whether the schedule is
+    // actually running. A newest one only proves somebody pressed the button.
+    const stamps = tracked.map((p) => p.lastTrackedAt).filter((s): s is string => Boolean(s)).sort()
+    firestore['oldestSyncAt'] = stamps[0] ?? null
+    firestore['newestSyncAt'] = stamps[stamps.length - 1] ?? null
+  }
+
   const providers = resolveProviders()
 
   // Office-owned OAuth connections. Status only, from listConnections() —
@@ -124,6 +154,7 @@ export default async (_req: Request, _ctx: Context): Promise<Response> => {
       },
       crawlerUaAllowed: process.env['ALLOW_CRAWLER_UA'] !== 'false',
       meta,
+      firestore,
       connections,
       // The deadline the running function is actually using. Netlify injects
       // environment variables at deploy time, so a dashboard change that has

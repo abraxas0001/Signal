@@ -93,6 +93,55 @@
   # each, sequentially.
   timeout = 60
 
+# The sync, and the endpoints that read what it stored.
+
+[functions."sync-profiles"]
+  # A pass is budgeted at 45s in the function itself, which is the number that
+  # matters — this only has to be comfortably above it so the platform is never
+  # the thing that stops a pass. The 15s of headroom is for the accounts
+  # already read to be committed and the response assembled; a kill in that
+  # window would discard a minute of deliberate waiting.
+  timeout = 60
+
+[functions."batch-track-all"]
+  # The same pass, streamed. Same budget, same reasoning.
+  timeout = 60
+
+[functions."comparison-all-platforms"]
+  # Two paths with very different costs. The default reads stored posts and
+  # follower history out of Firestore and aggregates them — a handful of reads,
+  # nowhere near this budget. `?live=1` instead reads each account through
+  # readHandle, which is upstream requests, and a gated account lets itself
+  # spend close to 30s before giving up. That path is capped at eight accounts
+  # in the endpoint itself, but eight concurrent reads whose slowest member is
+  # allowed 30s do not fit in 30s of function.
+  #
+  # This said 30 with a comment claiming the function made no network reads at
+  # all. That was true when it was written and stopped being true in the same
+  # change that added live=1 — which is how a timeout ends up sized for a
+  # version of the code that no longer exists.
+  timeout = 60
+
+[functions."configure-tracking"]
+  # Removing an account walks its posts and snapshots in pages of 400 and
+  # deletes them, because Firestore does not delete subcollections with their
+  # parent. An account with a long history is several round trips.
+  timeout = 30
+
+[functions."multi-platform-search"]
+  # One search per platform, then a verification read of each candidate — the
+  # verification is the point, and it is what makes this slower than a guess.
+  timeout = 60
+
+[functions."batch-multi-platform"]
+  # Search plus extraction across several platforms in one request.
+  timeout = 60
+
+[functions."instagram-cache-status"]
+  # A handful of Firestore reads. Nowhere near the default, listed only so the
+  # sync-related endpoints are all accounted for in one place.
+  timeout = 10
+
 [functions."standing"]
   # readHandle, then several live post extractions, then a model call.
   timeout = 60

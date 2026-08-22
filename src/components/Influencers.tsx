@@ -1,15 +1,20 @@
 import { useCallback, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
 import {
   Check,
   ChevronRight,
   ExternalLink,
+  Info,
+  Megaphone,
+  MessagesSquare,
   Plus,
   RefreshCw,
   ScanEye,
   Search,
   TriangleAlert,
+  Users,
   X,
 } from 'lucide-react'
 import type {
@@ -31,9 +36,19 @@ import {
 import type { Platform } from '@shared/taxonomy'
 import { readStore, update, useStore } from '@/lib/store'
 import { Mascot } from './Mascot'
-import { Button, Card, Chip, PageHeader, SectionTitle, selectClass, type ChipTone } from './ui'
+import {
+  Button,
+  Card,
+  Chip,
+  Empty,
+  PageHeader,
+  SectionTitle,
+  selectClass,
+  type ChipTone,
+} from './ui'
+import { CardHead, DonutBreakdown, Legend, PlatformBadge, RankRow } from '@/components/kit'
 import { AddInfluencer, SearchInfluencers } from './AddInfluencer'
-import { cn, relativeTime } from '@/lib/utils'
+import { cn, compact, full, relativeTime } from '@/lib/utils'
 import { fadeUp, listItem, listStagger } from '@/lib/motion'
 
 /**
@@ -238,23 +253,186 @@ function toMention(raw: unknown): InfluencerMention | null {
 
 /** The profile page for a bare handle, so a card can still link out. */
 
-/** The platform's own mark, so a row is identifiable before it is read. */
-function PlatformDot({ platform }: { platform: Platform }) {
-  const tone: Record<string, string> = {
-    YouTube: '#FF0033',
-    Instagram: '#C13584',
-    Facebook: '#0866FF',
-    LinkedIn: '#0A66C2',
-    Bluesky: '#1185FE',
-    Mastodon: '#6364FF',
-    'Twitter/X': '#71767B',
-  }
+/* ── Profile-card atoms ──────────────────────────────────────────────────── */
+
+/**
+ * One small stat cell inside a profile card — the violet-badged mini tiles of
+ * the influencer-profile reference. Not an IconStat: these live INSIDE a card
+ * and a card-in-a-card reads as a rendering bug.
+ */
+function MiniStat({
+  icon,
+  label,
+  value,
+  title,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  title?: string
+}) {
+  /**
+   * Stacked, not side-by-side.
+   *
+   * Three of these sit in a row inside a card that is itself one of three
+   * across, so a horizontal badge-then-text layout left about forty pixels for
+   * the label and every one of them truncated to "Follo…". The badge sits above
+   * the number instead, which gives the label the full width of the tile.
+   */
   return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-full"
-      style={{ background: tone[platform] ?? 'var(--text-3)' }}
-    />
+    <div
+      className="flex min-w-0 flex-col gap-1.5 rounded-[var(--radius-sm)] bg-[var(--surface-2)] p-2.5"
+      title={title}
+    >
+      <span
+        className="icon-badge icon-badge-sm"
+        style={{ background: 'var(--accent-2-soft)', color: 'var(--accent-2)' }}
+        aria-hidden
+      >
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="tnum block truncate text-[15px] font-bold leading-none text-ink">{value}</span>
+        <span className="mt-1 block text-[10.5px] font-medium leading-tight text-ink-3">{label}</span>
+      </span>
+    </div>
+  )
+}
+
+/**
+ * One watched account as a profile card: ringed avatar, name and handle,
+ * the platform's own badge, and whatever numbers this device actually holds
+ * about it — never more. There is no engagement tile because nothing here
+ * measures engagement; inventing one would be the dishonesty this product
+ * exists to avoid.
+ */
+function InfluencerCard({
+  influencer,
+  mentions,
+}: {
+  influencer: Influencer
+  mentions: InfluencerMention[]
+}) {
+  const name = influencer.displayName ?? influencer.handle
+
+  /**
+   * The account's own coverage, over the posts a model actually read.
+   *
+   * `judged !== false` on purpose: an unfiltered listing carries struct-default
+   * "Neutral" and no `mentionsSubject`, so counting those would invent a calm
+   * — and an about-you tally — that nothing measured. The same rule the global
+   * donut uses, applied to one account.
+   */
+  const judged = mentions.filter((x) => x.judged !== false)
+  const aboutYou = judged.filter((x) => x.mentionsSubject).length
+  const pos = judged.filter((x) => SENTIMENT_TONE[x.sentiment] === 'positive').length
+  const neg = judged.filter((x) => SENTIMENT_TONE[x.sentiment] === 'negative').length
+  const mid = judged.length - pos - neg
+
+  /**
+   * No photo hero.
+   *
+   * A watched page stores no picture, so a tall 4:5 panel had nothing to put
+   * in it but a monogram on a wash — a huge empty rectangle above three small
+   * numbers, which is the opposite of a dense board. The name simply heads the
+   * card that carries the figures, which is where a reader is looking anyway.
+   */
+  const heading = (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <PlatformBadge platform={influencer.platform} size={34} />
+      <div className="min-w-0">
+        <p className="truncate text-[14px] font-bold leading-tight">{name}</p>
+        <p className="truncate text-[11.5px] text-ink-3">
+          @{influencer.handle.replace(/^@/, '')}
+          {influencer.followers != null && ` · ${compact(influencer.followers)} followers`}
+        </p>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="card card-hover flex flex-col gap-4 p-4">
+      {/* The name heads the figures. The whole row is the tap target out to
+          the profile when we hold a link for it. */}
+      {influencer.url ? (
+        <a
+          href={influencer.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label={`Open ${name} on ${influencer.platform}`}
+          className="group flex items-center justify-between gap-2 rounded-xl transition-colors hover:bg-[var(--surface-2)]"
+        >
+          {heading}
+          <ExternalLink size={15} className="shrink-0 text-ink-3 transition-colors group-hover:text-[var(--accent)]" aria-hidden />
+        </a>
+      ) : (
+        heading
+      )}
+
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-3 gap-2">
+          <MiniStat
+            icon={<Users size={15} />}
+            label="Followers"
+            value={influencer.followers != null ? compact(influencer.followers) : '—'}
+            title={
+              influencer.followers != null
+                ? `${full(influencer.followers)} followers, read from the platform`
+                : 'No follower reading yet'
+            }
+          />
+          <MiniStat
+            icon={<MessagesSquare size={15} />}
+            label="Posts read"
+            value={String(mentions.length)}
+            title="Posts a check has brought back from this account"
+          />
+          <MiniStat
+            icon={<Megaphone size={15} />}
+            label="About you"
+            value={String(aboutYou)}
+            title="Posts a model judged to be about this office"
+          />
+        </div>
+
+        {/* This account's sentiment, drawn only from posts a model read. Gated
+            pages never reach a check, so most cards never show this — which is
+            the honest outcome, not an empty ring. */}
+        {judged.length > 0 && (
+          // Wraps rather than squeezes: when the tile is too narrow for ring
+          // plus legend side by side, the legend takes its own row.
+          <div className="flex flex-wrap items-center gap-4">
+            <DonutBreakdown
+              segments={[
+                { label: 'Positive', value: pos, color: 'var(--chart-pos)' },
+                { label: 'Neutral or mixed', value: mid, color: 'var(--chart-mid)' },
+                { label: 'Negative', value: neg, color: 'var(--chart-neg)' },
+              ]}
+              size={96}
+              thickness={15}
+              centerLabel={String(judged.length)}
+              centerSub="read"
+            />
+            <div className="min-w-[9rem] flex-1">
+              <p className="kicker">How it reads</p>
+              <Legend
+                className="mt-1.5"
+                items={[
+                  { label: 'Positive', color: 'var(--chart-pos)' },
+                  { label: 'Neutral or mixed', color: 'var(--chart-mid)' },
+                  { label: 'Negative', color: 'var(--chart-neg)' },
+                ]}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Why this page is on the list — provenance, kept in the account's own words. */}
+        {influencer.note && (
+          <p className="text-[11px] leading-relaxed text-ink-3">{influencer.note}</p>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -309,14 +487,20 @@ function WatchTerms() {
 
   return (
     <Card>
-      <p className="text-sm font-medium">Words that mean a post is about you</p>
-      <p className="mt-1 text-xs leading-relaxed text-ink-2">
+      <CardHead
+        icon={<Search size={16} />}
+        title="Words that mean a post is about you"
+        sub="Shared with the grievance desk"
+        hint="One list for the whole office — editing it here edits it everywhere a check runs."
+        tint="violet"
+      />
+      <p className="text-xs leading-relaxed text-ink-2">
         We flag a post when it uses one of these words. Add the member&rsquo;s name, the Telugu
         spelling, the constituency, a scheme &mdash; whatever the channels actually say. Leave
         this empty and we will simply show you everything these accounts post.
       </p>
 
-      <div className="mt-3 flex gap-2">
+      <div className="mt-4 flex gap-2">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -328,7 +512,7 @@ function WatchTerms() {
           }}
           placeholder="Eluru, ఏలూరు, the member's name…"
           aria-label="Add a word to look for"
-          className="min-h-11 min-w-0 flex-1 rounded-[--radius-sm] border border-[var(--border-interactive)] bg-[var(--surface-2)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+          className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm shadow-[var(--e1)] outline-none transition-colors focus:border-[var(--accent)]"
         />
         <Button size="sm" variant="outline" onClick={add} disabled={!draft.trim()}>
           <Plus size={14} />
@@ -337,21 +521,21 @@ function WatchTerms() {
       </div>
 
       {terms.length > 0 ? (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-1.5">
           {terms.map((t) => (
             <button
               key={t}
               onClick={() => write(terms.filter((x) => x !== t))}
               aria-label={`Stop looking for ${t}`}
-              className="inline-flex min-h-8 items-center gap-1.5 rounded-[3px] border border-[var(--accent)] bg-[var(--accent-soft)] px-2 font-mono text-[10px] font-medium uppercase tracking-[0.07em] text-[var(--accent)]"
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-3 text-xs font-semibold text-[var(--accent)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--accent-fg)]"
             >
               {t}
-              <X size={10} />
+              <X size={11} />
             </button>
           ))}
         </div>
       ) : (
-        <p className="mt-2.5 flex items-center gap-1.5 text-xs text-[var(--warn)]">
+        <p className="mt-3 flex items-center gap-1.5 text-xs text-[var(--warn)]">
           <TriangleAlert size={13} />
           No search words yet, so Check now will show you everything these accounts post.
         </p>
@@ -445,6 +629,42 @@ export function Influencers({
     for (const inf of store.influencers) map.set(inf.id, inf)
     return map
   }, [store.influencers])
+
+  /** Every stored post, grouped by the account that published it. */
+  const mentionsByInfluencer = useMemo(() => {
+    const map = new Map<string, InfluencerMention[]>()
+    for (const x of store.mentions) {
+      const list = map.get(x.influencerId)
+      if (list) list.push(x)
+      else map.set(x.influencerId, [x])
+    }
+    return map
+  }, [store.mentions])
+
+  /**
+   * How the judged coverage splits by sentiment — for the one donut.
+   *
+   * Only posts a model actually read count. An unfiltered listing holds its
+   * struct-default "Neutral", and charting defaults as findings would invent a
+   * calm the data never measured.
+   */
+  const sentimentSplit = useMemo(() => {
+    const judged = store.mentions.filter((x) => x.judged !== false)
+    const pos = judged.filter((x) => SENTIMENT_TONE[x.sentiment] === 'positive').length
+    const neg = judged.filter((x) => SENTIMENT_TONE[x.sentiment] === 'negative').length
+    return { judged: judged.length, pos, neg, mid: judged.length - pos - neg }
+  }, [store.mentions])
+
+  /** The accounts producing the most of what is on this screen, ranked. */
+  const topVoices = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const x of store.mentions) counts.set(x.influencerId, (counts.get(x.influencerId) ?? 0) + 1)
+    return [...counts.entries()]
+      .map(([id, count]) => ({ influencer: byInfluencer.get(id) ?? null, count }))
+      .filter((r): r is { influencer: Influencer; count: number } => r.influencer !== null)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5)
+  }, [store.mentions, byInfluencer])
 
   /* ── What is new ───────────────────────────────────────────────────────── */
 
@@ -747,29 +967,30 @@ export function Influencers({
 
       {/* Two ways onto the roster, and both end in a live read before anything
           is stored. Search covers YouTube, which is the only platform that
-          answers a query from a server; everything else has to be named. */}
-      <m.div
-        variants={fadeUp}
-        className="mt-4 space-y-4 rounded-[--radius-md] border border-[var(--border)] p-3"
-      >
-        <SearchInfluencers
-          constituency={store.identity?.constituency ?? null}
-          suggestedQuery={
-            [store.identity?.constituency, store.identity?.state].find(Boolean)
-              ? `${[store.identity?.constituency, store.identity?.state].find(Boolean)} politics`
-              : ''
-          }
-          isTracked={tracked}
-          onAdd={addInfluencer}
-        />
-
-        <div className="border-t border-[var(--border)] pt-4">
-          <AddInfluencer
+          answers a query from a server; everything else has to be named. This
+          is the screen's one lifted panel: the roster fills itself, so the
+          thing worth a reader's first look is how to steer it. */}
+      <m.div variants={fadeUp} className="mt-4">
+        <Card level="lift" className="space-y-5">
+          <SearchInfluencers
             constituency={store.identity?.constituency ?? null}
+            suggestedQuery={
+              [store.identity?.constituency, store.identity?.state].find(Boolean)
+                ? `${[store.identity?.constituency, store.identity?.state].find(Boolean)} politics`
+                : ''
+            }
             isTracked={tracked}
             onAdd={addInfluencer}
           />
-        </div>
+
+          <div className="border-t border-[var(--border)] pt-5">
+            <AddInfluencer
+              constituency={store.identity?.constituency ?? null}
+              isTracked={tracked}
+              onAdd={addInfluencer}
+            />
+          </div>
+        </Card>
       </m.div>
 
       <m.div variants={fadeUp} className="mt-4 flex flex-wrap items-center gap-2">
@@ -817,6 +1038,110 @@ export function Influencers({
         </m.p>
       )}
 
+      {/* ── The roster, as profile cards ─────────────────────────────────────
+          Read-only on purpose. The curated watch list went away because
+          `seedInfluencers` in lib/morning-scan.ts maintains the roster itself;
+          what remains worth showing is who is on it and what this device
+          actually knows about each of them. */}
+      {store.influencers.length > 0 && (
+        <m.section variants={fadeUp} className="mt-6">
+          <SectionTitle hint="Filled by the morning scan and by anything you add above. Follower counts come from the platforms themselves.">
+            Who you are watching
+            <span className="ml-2 text-sm font-normal text-ink-3">{store.influencers.length}</span>
+          </SectionTitle>
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
+            {store.influencers.map((inf) => (
+              <InfluencerCard
+                key={inf.id}
+                influencer={inf}
+                mentions={mentionsByInfluencer.get(inf.id) ?? []}
+              />
+            ))}
+          </div>
+        </m.section>
+      )}
+
+      {/* ── What the coverage adds up to ─────────────────────────────────────
+          One donut, one ranked board — both derived from the same stored posts
+          the list below shows, so they can never disagree with it. */}
+      {(sentimentSplit.judged > 0 || topVoices.length > 0) && (
+        <m.div
+          variants={fadeUp}
+          // Two columns only when both cards exist — a lone card in a half-width
+          // track left the other half of the row as orphan white space.
+          className={cn(
+            'mt-6 grid items-start gap-4',
+            sentimentSplit.judged > 0 && topVoices.length > 0 && 'lg:grid-cols-2',
+          )}
+        >
+          {sentimentSplit.judged > 0 && (
+            <Card>
+              {/* The sub keeps the honesty mark short enough to survive a 375px
+                  head; the full provenance sentence rides the hint. */}
+              <CardHead
+                icon={<MessagesSquare size={16} />}
+                title="How the coverage reads"
+                sub="Unjudged listings are not counted"
+                hint="Sentiment across the posts a model has actually read — unjudged listings are not counted."
+                tint="violet"
+              />
+              {/* Ring above legend on a phone; ring beside a stacked legend
+                  from sm up, the reference-5 arrangement. */}
+              <div className="flex flex-col items-center gap-4 pt-2 sm:flex-row sm:justify-center sm:gap-8">
+                <DonutBreakdown
+                  segments={[
+                    { label: 'Positive', value: sentimentSplit.pos, color: 'var(--chart-pos)' },
+                    { label: 'Neutral or mixed', value: sentimentSplit.mid, color: 'var(--chart-mid)' },
+                    { label: 'Negative', value: sentimentSplit.neg, color: 'var(--chart-neg)' },
+                  ]}
+                  size={150}
+                  centerLabel={String(sentimentSplit.judged)}
+                  centerSub="posts read"
+                />
+                <Legend
+                  className="justify-center sm:flex-col sm:items-start sm:gap-y-2"
+                  items={[
+                    { label: 'Positive', color: 'var(--chart-pos)' },
+                    { label: 'Neutral or mixed', color: 'var(--chart-mid)' },
+                    { label: 'Negative', color: 'var(--chart-neg)' },
+                  ]}
+                />
+              </div>
+            </Card>
+          )}
+
+          {topVoices.length > 0 && (
+            <Card>
+              <CardHead
+                icon={<Megaphone size={16} />}
+                title="Most heard from"
+                sub="Ranked by posts we have read"
+                hint="The accounts behind the posts on this screen, by how many we have read."
+                tint="blue"
+              />
+              <div>
+                {topVoices.map((r, i) => (
+                  <RankRow
+                    key={r.influencer.id}
+                    rank={i + 1}
+                    tint={i === 0 ? 'violet' : 'blue'}
+                    label={
+                      <span className="flex min-w-0 items-center gap-2">
+                        <PlatformBadge platform={r.influencer.platform} size={20} />
+                        <span className="truncate">
+                          {r.influencer.displayName ?? r.influencer.handle}
+                        </span>
+                      </span>
+                    }
+                    value={`${r.count} ${r.count === 1 ? 'post' : 'posts'}`}
+                  />
+                ))}
+              </div>
+            </Card>
+          )}
+        </m.div>
+      )}
+
       {/* One column.
 
           The right-hand column was the watch list — a roster of accounts added
@@ -842,18 +1167,21 @@ export function Influencers({
         </SectionTitle>
 
         {capped.length > 0 && (
-          <Card className="mb-3">
-            <p className="text-sm font-medium">
-              {unfilteredRead ? 'About this check' : 'What this check missed'}
-            </p>
-            <ul className="mt-1.5 space-y-1">
-              {capped.map((line) => (
-                <li key={line} className="text-sm leading-relaxed text-ink-2">
-                  {line}
-                </li>
-              ))}
-            </ul>
-          </Card>
+          <div className="mb-3 flex gap-2.5 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-4">
+            <Info size={15} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">
+                {unfilteredRead ? 'About this check' : 'What this check missed'}
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {capped.map((line) => (
+                  <li key={line} className="text-sm leading-relaxed text-ink-2">
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         )}
 
         {/* Same row pattern as the grievance filters: one line that scrolls
@@ -888,16 +1216,17 @@ export function Influencers({
         )}
 
         {mentions.length === 0 ? (
-          <Card>
-            <p className="text-sm font-medium">Nothing yet</p>
-            <p className="mt-1 text-sm leading-relaxed text-ink-3">
-              {store.influencers.length === 0
+          <Empty
+            icon={<ScanEye size={18} />}
+            title="Nothing yet"
+            body={
+              store.influencers.length === 0
                 ? 'You are not watching anything yet. Tap Suggest to find the channels people follow around here.'
                 : view === 'about' && store.mentions.length > 0
                   ? 'None of the posts we read mention you. Switch to “Everything we read” above to see what these accounts did post.'
-                  : 'These accounts have not posted anything that mentions you. Tap Check now to read them again.'}
-            </p>
-          </Card>
+                  : 'These accounts have not posted anything that mentions you. Tap Check now to read them again.'
+            }
+          />
         ) : (
           <m.ul className="space-y-3" variants={listStagger}>
             {mentions.map((mention) => (
@@ -958,27 +1287,25 @@ function MentionRow({
     // is invalid markup and ran the stagger variant twice on every card.
     <article
         className={cn(
-          'rounded-[--radius-md] border p-3',
-          // Colour alone never carries this: the accent tint is reinforced by
-          // the left rule and by the "not acknowledged" chip below.
-          open
-            ? 'border-l-4 border-[var(--accent)] bg-[var(--accent-soft)]'
-            : 'border-[var(--border)] bg-[var(--surface-2)]',
+          'card p-4 sm:p-5',
+          // Colour alone never carries "unread": the left rule is reinforced
+          // by the "New" chip in the header row.
+          open && 'border-l-4 border-l-[var(--accent)]',
         )}
       >
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="flex items-center gap-2 text-sm font-medium">
-              {influencer && <PlatformDot platform={influencer.platform} />}
-              <span className="truncate">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {influencer && <PlatformBadge platform={influencer.platform} size={30} />}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-ink">
                 {influencer?.displayName ?? influencer?.handle ?? 'Account removed'}
-              </span>
-            </p>
-            <p className="mt-0.5 text-xs text-ink-3">
-              {mention.postedAt
-                ? relativeTime(mention.postedAt)
-                : `No date on this one. We read it ${relativeTime(mention.seenAt)}`}
-            </p>
+              </p>
+              <p className="mt-0.5 text-xs text-ink-3">
+                {mention.postedAt
+                  ? relativeTime(mention.postedAt)
+                  : `No date on this one. We read it ${relativeTime(mention.seenAt)}`}
+              </p>
+            </div>
           </div>
           {open && (
             <Chip tone="accent" className="shrink-0">
@@ -994,13 +1321,13 @@ function MentionRow({
             thing that cannot have happened, because with no words set nothing
             was matched. Those values are struct defaults, not findings. */}
         {unjudged ? (
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             <Chip tone="neutral" title="This came from a check with no search words set, so it was listed rather than read.">
               Not read yet
             </Chip>
           </div>
         ) : (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-1.5">
           <Chip tone={STANCE_TONE[mention.stance]}>{STANCE_LABEL[mention.stance]}</Chip>
           <Chip tone={SENTIMENT_CHIP[SENTIMENT_TONE[mention.sentiment]] ?? 'neutral'}>
             {mention.sentiment}
@@ -1028,17 +1355,17 @@ function MentionRow({
         <button
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="mt-2 block w-full text-left"
+          className="mt-2.5 block w-full text-left"
         >
           <span
             className={cn(
-              'block text-sm text-ink-2',
+              'block text-sm leading-relaxed text-ink-2',
               expanded ? 'whitespace-pre-line' : 'line-clamp-4',
             )}
           >
             {mention.excerpt}
           </span>
-          <span className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)]">
+          <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent)]">
             {/* Nothing worked out what this says about anyone, so the link
                 does not offer to tell you. */}
             {expanded ? 'Show less' : unjudged ? 'Show the whole post' : 'What this says about you'}
@@ -1058,7 +1385,7 @@ function MentionRow({
                   is not a finding — it is three struct defaults read aloud, and
                   an office would take it for an assessment. */}
               <p className="kicker">{unjudged ? 'What we know' : 'How it reads'}</p>
-              <p className="mt-1 text-sm leading-relaxed text-ink-2">
+              <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
                 {unjudged ? (
                   <>
                     Nobody has read this one yet. It came back from a check with no search
@@ -1124,17 +1451,21 @@ function MentionRow({
         )}
 
         {fake?.note && (
-          <p className="mt-2 border-l-2 border-[var(--border-strong)] pl-3 text-xs text-ink-3">
-            {fake.note} Nobody has checked this yet, so someone should take a look.
+          <p className="mt-3 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--warn-soft)] px-3 py-2 text-xs leading-relaxed text-ink-2">
+            <TriangleAlert size={13} className="mt-0.5 shrink-0 text-[var(--warn)]" aria-hidden />
+            <span>{fake.note} Nobody has checked this yet, so someone should take a look.</span>
           </p>
         )}
 
-        <div className="mt-3 flex items-center justify-between gap-2">
+        {/* Wraps: on a 375px card an unread row carries the link plus two
+            buttons, which is wider than the card — squeezing them shrank the
+            tap targets instead of moving one to the next line. */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           <a
             href={mention.postUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-[var(--accent)]"
+            className="inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold text-[var(--accent)]"
           >
             <ExternalLink size={13} />
             Open the post

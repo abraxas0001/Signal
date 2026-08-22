@@ -9,11 +9,18 @@ import {
   ListChecks,
   MapPin,
   Megaphone,
+  Minus,
+  Newspaper,
+  PieChart,
   Plus,
   RefreshCw,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
+  TrendingUp,
   TriangleAlert,
   UserSearch,
+  Users,
 } from 'lucide-react'
 import type { ActionItem, FakeAssessment, FakeSignal, Recommendation } from '@shared/grievance'
 import {
@@ -30,7 +37,10 @@ import {
 import type { ActionPriority, ConfidenceTier, Sentiment } from '@shared/taxonomy'
 import { makeId, readStore, update, useStore } from '@/lib/store'
 import { PORTALS } from '@shared/regions'
-import { Bar, Button, Card, Chip, PageHeader, SectionTitle, type ChipTone } from './ui'
+import { Avatar, Bar, Button, Card, Chip, PageHeader, SectionTitle, type ChipTone } from './ui'
+import { CardHead, DonutBreakdown, IconStat, IndiaMap, Legend, Sparkline, type MapMarker } from '@/components/kit'
+import { geocodePlace, type Place } from './gazetteer'
+import { INDIA_BBOX, INDIA_DOTS } from './india-dots'
 import { LevelPips } from './charts'
 import { absoluteDate, cn, hostOf, pluralise, relativeTime } from '@/lib/utils'
 import { fadeUp, listItem, listStagger } from '@/lib/motion'
@@ -740,6 +750,11 @@ export function Persona({ onClose }: { onClose: () => void }) {
   /* ── Render ────────────────────────────────────────────────────────────── */
 
   const total = store.personaMentions.length
+  /** Rows whose fake-news check was not a clean "No" — same test FakeMarker uses. */
+  const flagged = useMemo(
+    () => store.personaMentions.filter((x) => x.fake != null && x.fake.suspicion !== 'No').length,
+    [store.personaMentions],
+  )
 
   return (
     <m.div
@@ -750,6 +765,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
     >
       <m.header variants={fadeUp}>
         <PageHeader
+          kicker="Names, not topics"
           title="Persona tracker"
           subtitle={
             personas.length
@@ -764,33 +780,76 @@ export function Persona({ onClose }: { onClose: () => void }) {
         />
       </m.header>
 
+      {/* ── The headline numbers ──────────────────────────────────────────
+          Counted from what this device already holds. No delta chips: these
+          totals are recomputed on every visit, so there is no second reading
+          to claim a change against. */}
+      {personas.length > 0 && (
+        <m.div variants={fadeUp} className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+          <IconStat
+            icon={<Users size={18} />}
+            label="People followed"
+            value={personas.length}
+            tint="blue"
+            deltaLabel="Checked by hand — no server watches for you"
+          />
+          <IconStat
+            icon={<Newspaper size={18} />}
+            label="Mentions on file"
+            value={total}
+            tint="violet"
+            deltaLabel="Stored on this device only"
+          />
+          <IconStat
+            icon={<TriangleAlert size={18} />}
+            label="Flagged as suspect"
+            value={flagged}
+            tint="orange"
+            deltaLabel={
+              flagged > 0
+                ? 'Stories whose fake-news check was not a clean no'
+                : 'No fabrication flags right now'
+            }
+            /* Three tiles in a two-column phone grid leave an orphan cell;
+               the third spans the row instead of sitting beside a hole. */
+            className="col-span-2 sm:col-span-1"
+          />
+        </m.div>
+      )}
+
       {/* ── What this actually does ───────────────────────────────────────── */}
       <m.div variants={fadeUp} className="mt-4">
         <Card>
-          <div className="flex gap-3">
-            <BellOff size={18} aria-hidden className="mt-0.5 shrink-0 text-ink-3" />
-            <div className="min-w-0 text-sm text-ink-2">
-              <p className="font-medium text-ink">Nothing runs while this screen is shut.</p>
-              <p className="mt-1.5">
-                There is no server holding this list and no job reading the papers on your behalf,
-                so Signal cannot alert you and will never send a notification. Following someone
-                means opening this screen and tapping Check now: it searches the papers set on the
-                intake screen for that name, reads the first {READ_LIMIT} stories it finds, and puts
-                them below. Everything here stays on this device.
+          <CardHead
+            icon={<BellOff size={16} aria-hidden />}
+            tint="blue"
+            title="Nothing runs while this screen is shut"
+            sub="No server watches on your behalf"
+          />
+          <div className="text-sm leading-relaxed text-ink-2">
+            <p>
+              There is no server holding this list and no job reading the papers on your behalf,
+              so Signal cannot alert you and will never send a notification. Following someone
+              means opening this screen and tapping Check now: it searches the papers set on the
+              intake screen for that name, reads the first {READ_LIMIT} stories it finds, and puts
+              them below. Everything here stays on this device.
+            </p>
+            {!canSearch && (
+              <p className="mt-2.5 rounded-[var(--radius-md)] bg-[var(--warn-soft)] px-3 py-2 font-medium text-[var(--warn)]">
+                No papers are set yet, so a check has nothing to search. Pick the state and tick
+                the mastheads on the intake screen first.
               </p>
-              {!canSearch && (
-                <p className="mt-1.5 text-[var(--warn)]">
-                  No papers are set yet, so a check has nothing to search. Pick the state and tick
-                  the mastheads on the intake screen first.
-                </p>
-              )}
-            </div>
+            )}
           </div>
         </Card>
       </m.div>
 
       {error && (
-        <m.p variants={fadeUp} role="alert" className="mt-3 text-sm text-[var(--neg)]">
+        <m.p
+          variants={fadeUp}
+          role="alert"
+          className="mt-3 rounded-[var(--radius-md)] bg-[var(--neg-soft)] px-4 py-3 text-sm font-medium text-[var(--neg)]"
+        >
           {error}
         </m.p>
       )}
@@ -816,7 +875,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="As the English papers print it"
-                className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm text-ink outline-none focus:border-[var(--accent)]"
+                className="mt-1.5 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2 text-sm text-ink outline-none transition-colors focus:border-[var(--accent)] focus:bg-[var(--surface)]"
               />
             </div>
             <div>
@@ -831,7 +890,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
                 value={aliases}
                 onChange={(e) => setAliases(e.target.value)}
                 placeholder="Telugu spelling, initials, short form"
-                className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm text-ink outline-none focus:border-[var(--accent)]"
+                className="mt-1.5 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2 text-sm text-ink outline-none transition-colors focus:border-[var(--accent)] focus:bg-[var(--surface)]"
               />
             </div>
           </div>
@@ -882,6 +941,13 @@ export function Persona({ onClose }: { onClose: () => void }) {
         </m.div>
       )}
 
+      {/* ── The person on screen, drawn from what this device already holds ─ */}
+      {current && mentions.length > 0 && (
+        <m.section variants={fadeUp} className="mt-6">
+          <PersonaProfilePanel person={current} mentions={mentions} />
+        </m.section>
+      )}
+
       {/* ── The mentions, and the one that is open ────────────────────────── */}
       {current && (
         <div className="mt-6 grid items-start gap-6 lg:grid-cols-2">
@@ -899,8 +965,8 @@ export function Persona({ onClose }: { onClose: () => void }) {
             </SectionTitle>
 
             {mentions.length === 0 ? (
-              <Card>
-                <p className="text-sm text-ink-2">
+              <Card level="quiet">
+                <p className="text-sm leading-relaxed text-ink-2">
                   {current.lastCheckedAt
                     ? 'The last check found nothing carrying this name. Add the Telugu spelling and the short form the papers use, then check again.'
                     : `Nothing read for ${current.name} yet. Tap Check now on their card above.`}
@@ -941,8 +1007,8 @@ export function Persona({ onClose }: { onClose: () => void }) {
                 onMakeAction={() => makeAction(openMention, current)}
               />
             ) : (
-              <Card>
-                <p className="text-sm text-ink-3">
+              <Card level="quiet">
+                <p className="text-sm leading-relaxed text-ink-3">
                   Open a mention to read the summary, what the fake-news check found, and what it
                   suggests doing about it.
                 </p>
@@ -976,31 +1042,34 @@ function EmptyRoster({ subject }: { subject: string | null }) {
 
   return (
     <Card>
-      <div className="flex gap-3">
-        <UserSearch size={18} aria-hidden className="mt-0.5 shrink-0 text-ink-3" />
-        <div className="min-w-0 text-sm text-ink-2">
-          <p className="font-medium text-ink">Nobody is being followed yet.</p>
-          <p className="mt-1.5">
-            A persona tracker follows one named person through the papers this desk already reads.
-            It collects what was written about them, whether the story reads as supportive or
-            critical, and whether anything about it looks fabricated, so the office hears it here
-            rather than in a phone call at ten at night.
-          </p>
-          <p className="mt-3 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
-            Who to add first
-          </p>
-          <ul className="mt-1.5 space-y-1.5">
-            {first.map((line) => (
-              <li key={line} className="flex gap-2">
-                <span aria-hidden className="text-ink-3">
-                  ·
-                </span>
-                <span>{line}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3">Add each of them in both scripts, or you will only see half of it.</p>
-        </div>
+      <CardHead
+        icon={<UserSearch size={16} aria-hidden />}
+        tint="violet"
+        title="Nobody is being followed yet"
+        sub="Who this screen is for"
+      />
+      <div className="text-sm leading-relaxed text-ink-2">
+        <p>
+          A persona tracker follows one named person through the papers this desk already reads.
+          It collects what was written about them, whether the story reads as supportive or
+          critical, and whether anything about it looks fabricated, so the office hears it here
+          rather than in a phone call at ten at night.
+        </p>
+        <p className="mt-4 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
+          Who to add first
+        </p>
+        <ul className="mt-2 space-y-2">
+          {first.map((line) => (
+            <li key={line} className="flex gap-2.5">
+              <span
+                aria-hidden
+                className="mt-[7px] size-1.5 shrink-0 rounded-full bg-[var(--accent)]"
+              />
+              <span>{line}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3">Add each of them in both scripts, or you will only see half of it.</p>
       </div>
     </Card>
   )
@@ -1031,12 +1100,10 @@ function PersonaCard({
     <m.li variants={listItem}>
       <div
         className={cn(
-          'h-full rounded-[--radius-md] border p-3',
-          // The accent tint never carries this alone: the left rule thickens,
-          // and the word "Showing" sits under the button.
-          selected
-            ? 'border-l-4 border-[var(--accent)] bg-[var(--accent-soft)]'
-            : 'border-[var(--border)] bg-[var(--surface-2)]',
+          'card h-full p-4',
+          // The accent ring never carries this alone: the word "Showing"
+          // sits beside the button, so the state survives grayscale.
+          selected ? 'ring-2 ring-[var(--accent)]' : 'card-hover',
         )}
       >
         <div className="flex items-start gap-2">
@@ -1044,28 +1111,31 @@ function PersonaCard({
             type="button"
             onClick={onSelect}
             aria-pressed={selected}
-            className="min-w-0 flex-1 text-left"
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
           >
-            <p className="truncate text-sm font-medium">{person.name}</p>
-            <p className="mt-0.5 text-xs text-ink-3">
-              {count} {pluralise(count, 'mention')}
-              {person.lastCheckedAt
-                ? ` · checked ${relativeTime(person.lastCheckedAt)}`
-                : ' · not checked yet'}
-            </p>
+            <Avatar name={person.name} size={44} />
+            <span className="min-w-0">
+              <span className="block truncate text-[15px] font-bold text-ink">{person.name}</span>
+              <span className="mt-0.5 block text-xs text-ink-3">
+                {count} {pluralise(count, 'mention')}
+                {person.lastCheckedAt
+                  ? ` · checked ${relativeTime(person.lastCheckedAt)}`
+                  : ' · not checked yet'}
+              </span>
+            </span>
           </button>
           <button
             type="button"
             onClick={onRemove}
             aria-label={`Stop following ${person.name}`}
-            className="-m-1 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-3)] hover:text-[var(--neg)]"
+            className="-m-1 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-[var(--neg-soft)] hover:text-[var(--neg)]"
           >
             <Trash2 size={15} aria-hidden />
           </button>
         </div>
 
         {person.aliases.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {person.aliases.map((alias) => (
               <Chip key={alias} tone="neutral">
                 {alias}
@@ -1075,27 +1145,25 @@ function PersonaCard({
         )}
 
         {progress ? (
-          <div className="mt-3" role="status">
-            <p className="text-xs text-ink-2">
+          <div className="mt-4" role="status">
+            <p className="text-xs font-medium text-ink-2">
               {progress.phase === 'finding'
                 ? 'Searching the papers…'
                 : `Reading story ${Math.min(progress.read + 1, progress.total)} of ${progress.total}…`}
             </p>
             <Bar
-              className="mt-1.5"
+              className="mt-2"
               value={progress.total ? progress.read / progress.total : 0}
               tone="accent"
             />
           </div>
         ) : (
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-4 flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={onCheck} disabled={busy}>
               <RefreshCw size={14} aria-hidden />
               Check now
             </Button>
-            {selected && (
-              <span className="text-2xs uppercase tracking-[0.06em] text-ink-3">Showing</span>
-            )}
+            {selected && <Chip tone="accent">Showing</Chip>}
           </div>
         )}
       </div>
@@ -1108,14 +1176,37 @@ function PersonaCard({
 function CheckSummary({ report, name }: { report: CheckReport; name: string }) {
   return (
     <Card>
-      <p className="text-sm text-ink-2">
-        {report.found === 0
-          ? `Nothing carrying ${name} was published in the papers Signal searched.`
-          : `${report.found} ${pluralise(report.found, 'story', 'stories')} named ${name}. ${report.read} ${report.read === 1 ? 'was' : 'were'} read, ${report.added} classified.`}
-      </p>
+      <CardHead
+        icon={<RefreshCw size={16} aria-hidden />}
+        tint="blue"
+        title="What the last check did"
+        sub="Counted from the run just finished"
+      />
+
+      {report.found === 0 ? (
+        <p className="text-sm leading-relaxed text-ink-2">
+          Nothing carrying {name} was published in the papers Signal searched.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+          {[
+            {
+              value: report.found,
+              label: `${pluralise(report.found, 'story', 'stories')} named ${name}`,
+            },
+            { value: report.read, label: report.read === 1 ? 'was read' : 'were read' },
+            { value: report.added, label: 'classified below' },
+          ].map((stat) => (
+            <div key={stat.label}>
+              <p className="tnum text-[22px] font-bold leading-none text-ink">{stat.value}</p>
+              <p className="mt-1.5 text-[11px] text-ink-3">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {report.sources.length > 0 && (
-        <p className="mt-2 text-xs text-ink-3">Per paper: {report.sources.join(' · ')}.</p>
+        <p className="mt-3 text-xs text-ink-3">Per paper: {report.sources.join(' · ')}.</p>
       )}
 
       {report.notes.map((note) => (
@@ -1125,22 +1216,22 @@ function CheckSummary({ report, name }: { report: CheckReport; name: string }) {
       ))}
 
       {report.unread.length > 0 && (
-        <div className="mt-3">
+        <div className="mt-4 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-3.5">
           <p className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
             Found but not read
           </p>
-          <p className="mt-1 text-xs text-ink-3">
+          <p className="mt-1 text-xs leading-relaxed text-ink-3">
             Signal reads {READ_LIMIT} at a time so the request finishes before the server cuts it
             off. These were left. Open them yourself, or paste them into the grievance desk.
           </p>
-          <ul className="mt-2 space-y-1.5">
+          <ul className="mt-2 space-y-1">
             {report.unread.map((candidate) => (
               <li key={candidate.url}>
                 <a
                   href={candidate.url}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex min-h-11 items-center gap-1.5 text-xs text-[var(--accent)]"
+                  className="inline-flex min-h-11 items-center gap-2 text-xs font-medium text-[var(--accent)] hover:underline"
                 >
                   <ExternalLink size={12} aria-hidden className="shrink-0" />
                   <span className="line-clamp-2">
@@ -1153,6 +1244,258 @@ function CheckSummary({ report, name }: { report: CheckReport; name: string }) {
         </div>
       )}
     </Card>
+  )
+}
+
+/* ── The selected person, as a profile ───────────────────────────────────── */
+
+/**
+ * Reference-5 profile language for whoever is on screen, built entirely from the
+ * mentions this device already holds — no new request, no new field.
+ *
+ * A ringed avatar and the spellings we search under; a violet-badged grid of
+ * what is on file; how the coverage reads as a sentiment donut counting only the
+ * stories a reader could actually score (an unscored story is never coloured in,
+ * for the same reason a missing sentiment is never rendered as "Neutral"); a
+ * coverage-over-time sparkline when the dates spread far enough to mean
+ * something; and a map of where the stories are datelined. The map obeys the
+ * gazetteer's honesty rule to the letter: a place it cannot resolve is left off
+ * and counted in a footnote, never dropped onto a plausible-looking dot.
+ */
+function PersonaProfilePanel({ person, mentions }: { person: TrackedPersona; mentions: PersonaMention[] }) {
+  const stance = useMemo(() => {
+    const counts: Record<PersonaStance, number> = { supportive: 0, critical: 0, neutral: 0, unclear: 0 }
+    for (const mention of mentions) counts[mention.stance] += 1
+    return counts
+  }, [mentions])
+
+  const flagged = useMemo(
+    () => mentions.filter((x) => x.fake != null && x.fake.suspicion !== 'No').length,
+    [mentions],
+  )
+
+  const sentiment = useMemo(() => {
+    const buckets: Record<'positive' | 'neutral' | 'mixed' | 'negative', number> = {
+      positive: 0,
+      neutral: 0,
+      mixed: 0,
+      negative: 0,
+    }
+    let scored = 0
+    for (const mention of mentions) {
+      if (!mention.sentiment) continue
+      buckets[SENTIMENT_TONE[mention.sentiment]] += 1
+      scored += 1
+    }
+    const segments = [
+      { label: 'Positive', value: buckets.positive, color: 'var(--chart-pos)' },
+      { label: 'Neutral', value: buckets.neutral, color: 'var(--chart-mid)' },
+      { label: 'Mixed', value: buckets.mixed, color: 'var(--warn)' },
+      { label: 'Negative', value: buckets.negative, color: 'var(--chart-neg)' },
+    ].filter((s) => s.value > 0)
+    return { segments, scored, unscored: mentions.length - scored }
+  }, [mentions])
+
+  /**
+   * Mentions grouped by the place they name, geocoded. Anything the gazetteer
+   * cannot resolve is dropped from the map and tallied instead — honesty over a
+   * fuller-looking map, exactly as the base contract requires.
+   */
+  const origins = useMemo(() => {
+    const byPlace = new Map<string, { place: Place; count: number; supportive: number; critical: number }>()
+    let unplaced = 0
+    for (const mention of mentions) {
+      if (!mention.place) continue
+      const geo = geocodePlace(mention.place)
+      if (!geo) {
+        unplaced += 1
+        continue
+      }
+      const entry = byPlace.get(geo.name) ?? { place: geo, count: 0, supportive: 0, critical: 0 }
+      entry.count += 1
+      if (mention.stance === 'supportive') entry.supportive += 1
+      else if (mention.stance === 'critical') entry.critical += 1
+      byPlace.set(geo.name, entry)
+    }
+    const list = [...byPlace.values()]
+    const maxCount = Math.max(...list.map((e) => e.count), 1)
+    const markers: MapMarker[] = list.map((e) => {
+      const tone: MapMarker['tone'] =
+        e.critical > e.supportive ? 'negative' : e.supportive > e.critical ? 'positive' : 'violet'
+      return {
+        lon: e.place.lon,
+        lat: e.place.lat,
+        label: e.place.name,
+        detail: `${e.count} ${pluralise(e.count, 'mention')} · ${e.place.state}`,
+        tone,
+        weight: e.count / maxCount,
+      }
+    })
+    const toneLegend = [
+      markers.some((mk) => mk.tone === 'positive') && { label: 'Mostly supportive', color: 'var(--pos)' },
+      markers.some((mk) => mk.tone === 'negative') && { label: 'Mostly critical', color: 'var(--neg)' },
+      markers.some((mk) => mk.tone === 'violet') && { label: 'Mixed or even', color: 'var(--accent-2)' },
+    ].filter((x): x is { label: string; color: string } => Boolean(x))
+    return { markers, unplaced, toneLegend }
+  }, [mentions])
+
+  /**
+   * Coverage volume over time, binned by the date each story ran. Only drawn
+   * when there are enough stories spread across enough days to be a shape rather
+   * than a single spike dressed up as a trend.
+   */
+  const activity = useMemo(() => {
+    const times = mentions
+      .map((mention) => {
+        const t = Date.parse(mention.publishedAt ?? mention.seenAt)
+        return Number.isNaN(t) ? null : t
+      })
+      .filter((t): t is number => t != null)
+    if (times.length < 3) return null
+    const min = Math.min(...times)
+    const max = Math.max(...times)
+    if (max - min < 86_400_000) return null
+    const bins = Math.min(Math.max(Math.round((max - min) / 86_400_000) + 1, 5), 20)
+    const counts = new Array<number>(bins).fill(0)
+    for (const t of times) {
+      const idx = Math.min(bins - 1, Math.floor(((t - min) / (max - min)) * (bins - 1)))
+      counts[idx] = (counts[idx] ?? 0) + 1
+    }
+    return counts
+  }, [mentions])
+
+  return (
+    <div className="space-y-4">
+      {/* Hero. The name may be written in Telugu, so it never wears .hed or tight tracking. */}
+      <Card>
+        <div className="flex items-center gap-4">
+          <Avatar
+            name={person.name}
+            size={60}
+            className="ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface)]"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="eyebrow">Currently showing</p>
+            <p className="mt-0.5 truncate text-xl font-bold leading-snug text-ink">{person.name}</p>
+            <p className="mt-0.5 text-xs text-ink-3">
+              {mentions.length} {pluralise(mentions.length, 'mention')}
+              {person.lastCheckedAt
+                ? ` · checked ${relativeTime(person.lastCheckedAt)}`
+                : ' · not checked yet'}
+            </p>
+          </div>
+        </div>
+        {person.aliases.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">Also</span>
+            {person.aliases.map((alias) => (
+              <Chip key={alias} tone="neutral">
+                {alias}
+              </Chip>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* How this device's mentions decompose by stance, plus the suspect flag.
+          The three stance tiles sum to the total in the hero line above; colour
+          carries meaning on each, so a grayscale reading still separates them. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+        <IconStat
+          icon={<ThumbsUp size={18} />}
+          label="Read as supportive"
+          value={stance.supportive}
+          tint="green"
+          deltaLabel="by the reader"
+        />
+        <IconStat
+          icon={<ThumbsDown size={18} />}
+          label="Read as critical"
+          value={stance.critical}
+          tint="pink"
+          deltaLabel="by the reader"
+        />
+        <IconStat
+          icon={<Minus size={18} />}
+          label="Neutral or unclear"
+          value={stance.neutral + stance.unclear}
+          tint="violet"
+          deltaLabel="no clear lean read"
+        />
+        <IconStat
+          icon={<TriangleAlert size={18} />}
+          label="Flagged as suspect"
+          value={flagged}
+          tint="orange"
+          deltaLabel={flagged > 0 ? 'fake-news check not a clean no' : 'none flagged'}
+        />
+      </div>
+
+      {(sentiment.scored > 0 || activity) && (
+        /* Two columns only when both cards exist — one card beside an empty
+           grid cell reads as something failed to load. */
+        <div className={cn('grid gap-4', sentiment.scored > 0 && activity && 'lg:grid-cols-2')}>
+          {sentiment.scored > 0 && (
+            <Card>
+              <CardHead
+                icon={<PieChart size={16} aria-hidden />}
+                tint="violet"
+                title="How the coverage reads"
+                sub="Scored mentions only — never guessed at"
+                hint="Scored mentions only. A story nobody could score is never coloured in."
+              />
+              <div className="mt-1 flex flex-col items-center gap-5 sm:flex-row">
+                <DonutBreakdown
+                  segments={sentiment.segments}
+                  centerLabel={String(sentiment.scored)}
+                  centerSub={pluralise(sentiment.scored, 'mention')}
+                />
+                <div className="min-w-0 flex-1">
+                  <Legend items={sentiment.segments.map((s) => ({ label: s.label, color: s.color }))} />
+                  {sentiment.unscored > 0 && (
+                    <p className="mt-3 text-xs text-ink-3">
+                      {sentiment.unscored} not scored — carried through, never guessed at.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {activity && (
+            <Card>
+              <CardHead
+                icon={<TrendingUp size={16} aria-hidden />}
+                tint="violet"
+                title="Coverage over time"
+                sub="By the date each story was published"
+              />
+              <Sparkline values={activity} color="var(--accent-2)" height={48} className="mt-2" />
+            </Card>
+          )}
+        </div>
+      )}
+
+      {origins.markers.length > 0 && (
+        <Card>
+          <CardHead
+            icon={<MapPin size={16} aria-hidden />}
+            tint="blue"
+            title="Where the coverage is datelined"
+            sub="Only places Signal can put on the map"
+            hint="Only places Signal can put on the map are shown. Anything it cannot place is counted below, never guessed at."
+          />
+          <IndiaMap dots={INDIA_DOTS} bbox={INDIA_BBOX} markers={origins.markers} className="mt-1" />
+          {origins.toneLegend.length > 1 && <Legend items={origins.toneLegend} className="mt-3" />}
+          {origins.unplaced > 0 && (
+            <p className="mt-3 text-xs text-ink-3">
+              {origins.unplaced} {pluralise(origins.unplaced, 'mention')} named a place Signal has no
+              coordinates for and {origins.unplaced === 1 ? 'is' : 'are'} not shown.
+            </p>
+          )}
+        </Card>
+      )}
+    </div>
   )
 }
 
@@ -1198,16 +1541,21 @@ function MentionRow({
         onClick={onOpen}
         aria-pressed={open}
         className={cn(
-          'w-full rounded-[--radius-md] border p-3 text-left',
-          open
-            ? 'border-l-4 border-[var(--accent)] bg-[var(--accent-soft)]'
-            : 'border-[var(--border)] bg-[var(--surface-2)]',
+          'card w-full p-4 text-left',
+          open ? 'ring-2 ring-[var(--accent)]' : 'card-hover',
         )}
       >
-        <p className="line-clamp-2 text-sm font-medium">{mention.headline}</p>
-        <p className="mt-1 truncate text-xs text-ink-3">{meta.join(' · ')}</p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <p className="line-clamp-2 text-sm font-semibold leading-snug text-ink">
+          {mention.headline}
+        </p>
+        <p className="mt-1.5 truncate text-xs text-ink-3">{meta.join(' · ')}</p>
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
           <Chip tone={STANCE_TONE[mention.stance]}>{STANCE_LABEL[mention.stance]}</Chip>
+          {mention.sentiment && (
+            <Chip tone={SENTIMENT_CHIP[SENTIMENT_TONE[mention.sentiment]]}>
+              {mention.sentiment}
+            </Chip>
+          )}
           {mention.fake && <FakeMarker fake={mention.fake} />}
         </div>
       </button>
@@ -1242,7 +1590,7 @@ function MentionDetail({
             <p className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
               {mention.persona || person.name}
             </p>
-            <h2 className="mt-1 text-lg font-semibold leading-snug">{mention.headline}</h2>
+            <h2 className="mt-1.5 text-xl font-bold leading-snug">{mention.headline}</h2>
           </div>
           <button
             type="button"
@@ -1281,7 +1629,7 @@ function MentionDetail({
         </p>
 
         {mention.excerpt && (
-          <p className="mt-3 border-l-2 border-[var(--border-strong)] pl-3 text-sm text-ink-3">
+          <p className="mt-3 rounded-r-[var(--radius-md)] border-l-2 border-[var(--border-strong)] bg-[var(--surface-2)] py-2.5 pl-3.5 pr-3 text-sm leading-relaxed text-ink-3">
             {mention.excerpt}
           </p>
         )}
@@ -1290,7 +1638,7 @@ function MentionDetail({
           href={mention.url}
           target="_blank"
           rel="noreferrer noopener"
-          className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-[var(--accent)]"
+          className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold text-[var(--accent)] hover:underline"
         >
           <ExternalLink size={13} aria-hidden />
           Open the story
@@ -1299,7 +1647,12 @@ function MentionDetail({
 
       {/* ── Is any of it made up ─────────────────────────────────────────── */}
       <Card>
-        <SectionTitle hint="Signals, not a verdict. A person decides.">Fake-news check</SectionTitle>
+        <CardHead
+          icon={<TriangleAlert size={16} aria-hidden />}
+          tint="orange"
+          title="Fake-news check"
+          sub="Signals, not a verdict. A person decides."
+        />
 
         {!mention.fake ? (
           <p className="text-sm text-ink-3">
@@ -1332,7 +1685,7 @@ function MentionDetail({
                 {mention.fake.signals.map((signal, i) => (
                   <li
                     key={`${signal.kind}-${i}`}
-                    className="rounded-[--radius-md] bg-[var(--surface-2)] p-3"
+                    className="rounded-[var(--radius-md)] bg-[var(--surface-2)] p-3"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
@@ -1354,7 +1707,7 @@ function MentionDetail({
 
       {/* ── And then somebody does something about it ────────────────────── */}
       <Card>
-        <SectionTitle>What to do</SectionTitle>
+        <CardHead icon={<ListChecks size={16} aria-hidden />} tint="blue" title="What to do" />
 
         {!rec ? (
           <p className="text-sm text-ink-3">
@@ -1384,7 +1737,7 @@ function MentionDetail({
                   {rec.talkingPoints.map((point, i) => (
                     <li
                       key={i}
-                      className="flex items-start gap-2.5 rounded-[--radius-md] bg-[var(--surface-2)] p-3"
+                      className="flex items-start gap-2.5 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-3"
                     >
                       <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-2xs font-semibold text-[var(--accent)]">
                         {i + 1}

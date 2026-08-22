@@ -28,6 +28,7 @@ import {
 } from '@/lib/identity'
 import { useStore } from '@/lib/store'
 import { Avatar, Button, Card, Chip, Shell, SignalGlyph } from './ui'
+import { CardHead } from '@/components/kit'
 import { IdentityRows } from './IdentityEditor'
 import { applyDeskPlan, describePlan, planDesk } from '@/lib/autoconfig'
 import { cn } from '@/lib/utils'
@@ -295,9 +296,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             initial={reduce ? false : 'hidden'}
             animate="show"
           >
-            <m.header variants={fadeUp} className="lg:sticky lg:top-[calc(var(--topbar-h)+2rem)]">
-              <p className="kicker">Setting up</p>
-              <h1 className="hed mt-3 text-[clamp(2rem,1.5rem+2.2vw,2.9rem)] leading-[1.05]">
+            {/*
+              On a phone the single column puts the search card first: the card
+              carries its own "Who is this desk for?" label, so leading with the
+              standing text pushed the one control that does the work below the
+              fold. From lg up the written order returns — text left, card right.
+            */}
+            <m.header
+              variants={fadeUp}
+              className="order-2 lg:order-1 lg:sticky lg:top-[calc(var(--topbar-h)+2rem)]"
+            >
+              <StepPills current={1} />
+              <h1 className="hed mt-5 text-[clamp(2rem,1.5rem+2.2vw,2.9rem)] leading-[1.05]">
                 Whose desk is this?
               </h1>
               <p className="mt-4 max-w-[46ch] text-[15px] leading-relaxed text-ink-2">
@@ -318,7 +328,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 </p>
                 <button
                   onClick={skip}
-                  className="mt-4 text-sm font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
+                  className="mt-2 inline-flex min-h-11 items-center text-left text-sm font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
                 >
                   {existing
                     ? `Leave it as it is: keep ${existing.name}`
@@ -327,7 +337,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               </div>
             </m.header>
 
-            <div className="stack min-w-0">
+            <div className="stack order-1 min-w-0 lg:order-2">
 
             {error && step === 'choose' && (
               <m.div variants={fadeUp} role="alert">
@@ -343,10 +353,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               <>
                 {/* ── the two typed routes ──────────────────────────────── */}
                 <m.section variants={fadeUp}>
+                  {/* The hero card: the one lifted panel on this screen, so
+                      the eye lands on the box that does the work. */}
+                  <Card level="lift">
                   <div
                     role="tablist"
                     aria-label="How to identify this desk"
-                    className="inline-flex rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface-2)] p-1"
+                    /* Same guard StepPills wears: two labelled pills brush the
+                       edge of a 375px card, and a strip that cannot scroll
+                       widens the whole page instead. */
+                    className="pill-tabs max-w-full overflow-x-auto"
                   >
                     {(
                       [
@@ -362,19 +378,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                           setMode(id)
                           setError(null)
                         }}
-                        className={cn(
-                          'min-h-10 rounded-[--radius-sm] px-3.5 text-sm font-medium transition-colors',
-                          mode === id
-                            ? 'bg-[var(--surface)] text-ink shadow-[var(--e1)]'
-                            : 'text-ink-2 hover:text-ink',
-                        )}
+                        className="pill-tab min-h-11"
                       >
                         {label}
                       </button>
                     ))}
                   </div>
 
-                  <div className="mt-4">
+                  <div className="mt-5">
                     {mode === 'link' ? (
                       <div>
                         <label htmlFor="person-query" className="text-sm font-medium">
@@ -389,14 +400,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                         <div className="relative mt-3">
                           <div
                             className={cn(
-                              'flex items-stretch overflow-hidden rounded-[--radius-lg] border bg-[var(--surface)]',
+                              'flex items-stretch overflow-hidden rounded-full border bg-[var(--surface)] shadow-[var(--e1)]',
                               'transition-[border-color] duration-200',
                               error
                                 ? 'border-[var(--neg)]'
                                 : 'border-[var(--border-interactive)] focus-within:border-[var(--accent)]',
                             )}
                           >
-                            <span className="grid w-11 shrink-0 place-items-center text-ink-3">
+                            <span className="grid w-12 shrink-0 place-items-center text-ink-3">
                               {searching ? (
                                 <Loader2 size={17} className="animate-spin" aria-hidden />
                               ) : (
@@ -425,7 +436,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                                 if (e.key === 'Escape') setResults(null)
                               }}
                               placeholder="e.g. D. K. Aruna, MP Mahabubnagar"
-                              className="h-14 min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-ink-3"
+                              className="h-14 min-w-0 flex-1 bg-transparent pr-5 text-[16px] outline-none placeholder:text-ink-3"
                             />
                           </div>
 
@@ -440,28 +451,28 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                               id="person-results"
                               role="listbox"
                               aria-label="Matching people"
-                              className="mt-2 overflow-hidden rounded-[--radius-md] border border-[var(--border)] bg-[var(--surface)]"
+                              className="mt-2 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-[var(--e2)]"
                             >
                               {results.length === 0 ? (
-                                <p className="px-4 py-3.5 text-sm leading-relaxed text-ink-2">
+                                <p className="px-3 py-3 text-sm leading-relaxed text-ink-2">
                                   Nobody by that name was found. Many sitting members have no
                                   encyclopaedia article, so press Enter to set the desk up under
                                   the name you typed.
                                 </p>
                               ) : (
-                                <ul className="divide-y divide-[var(--border)]">
+                                <ul className="space-y-0.5">
                                   {results.map((candidate) => (
                                     <li key={candidate.url}>
                                       <button
                                         role="option"
                                         aria-selected={false}
                                         onClick={() => pick(candidate)}
-                                        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-2)]"
+                                        className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
                                       >
                                         <Avatar
                                           src={candidate.thumbnail}
                                           name={candidate.name}
-                                          size={38}
+                                          size={40}
                                         />
                                         <span className="min-w-0 flex-1">
                                           <span className="block truncate text-sm font-semibold">
@@ -482,10 +493,19 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                                             not a person
                                           </Chip>
                                         )}
+                                        {/* Decorative on a phone: the whole row
+                                            is the button, and at 375px this
+                                            pill was eating the name it labels.
+                                            The arrow alone carries the
+                                            affordance there. */}
+                                        <span className="hidden shrink-0 items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-ink-2 shadow-[var(--e1)] sm:inline-flex">
+                                          Choose
+                                          <ArrowRight size={12} aria-hidden />
+                                        </span>
                                         <ArrowRight
                                           size={14}
-                                          className="shrink-0 text-ink-3"
                                           aria-hidden
+                                          className="shrink-0 text-ink-3 sm:hidden"
                                         />
                                       </button>
                                     </li>
@@ -552,6 +572,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                       </div>
                     )}
                   </div>
+                  </Card>
                 </m.section>
 
               </>
@@ -604,8 +625,8 @@ function Review({
       animate="show"
     >
       <m.header variants={fadeUp}>
-        <p className="kicker">Step 2 of 2</p>
-        <h1 className="hed mt-3 text-[clamp(1.9rem,1.5rem+1.8vw,2.6rem)] leading-[1.05]">
+        <StepPills current={2} />
+        <h1 className="hed mt-5 text-[clamp(1.9rem,1.5rem+1.8vw,2.6rem)] leading-[1.05]">
           Is this right?
         </h1>
         <p className="mt-4 max-w-[56ch] text-[15px] leading-relaxed text-ink-2">
@@ -621,7 +642,7 @@ function Review({
       )}
 
       <m.div variants={fadeUp}>
-        <Card>
+        <Card level="lift">
           <div className="flex items-start gap-4">
             <Avatar src={identity.photoUrl} name={identity.name} size={72} />
             <div className="min-w-0 flex-1">
@@ -667,7 +688,7 @@ function Review({
                     href={source.url}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="inline-flex min-h-9 items-center gap-1.5 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 text-xs text-ink-2 hover:text-ink"
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-xs font-medium text-ink-2 shadow-[var(--e1)] hover:border-[var(--border-interactive)] hover:text-ink"
                   >
                     {source.label}
                     <ExternalLink size={12} aria-hidden />
@@ -708,6 +729,49 @@ function Review({
 
 /* ── small parts ─────────────────────────────────────────────────────────── */
 
+/**
+ * Where you are in the two-step setup, worn as the pill vocabulary every
+ * other switcher in the product now uses. Purely presentational: the step
+ * itself lives in the screen's existing state, and these pills are not
+ * buttons — progression here is earned, not tapped.
+ */
+function StepPills({ current }: { current: 1 | 2 }) {
+  const steps = ['Who this is for', 'Confirm the details'] as const
+  return (
+    <div
+      className="pill-tabs max-w-full overflow-x-auto"
+      role="group"
+      aria-label={`Setup step ${current} of 2`}
+    >
+      {steps.map((label, i) => {
+        const n = (i + 1) as 1 | 2
+        return (
+          <span
+            key={label}
+            aria-current={n === current ? 'step' : undefined}
+            className={cn(
+              'pill-tab inline-flex items-center gap-2',
+              n === current && 'is-active',
+            )}
+          >
+            <span
+              className={cn(
+                'grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold',
+                n === current
+                  ? 'bg-[color-mix(in_oklab,var(--accent-fg)_22%,transparent)] text-[var(--accent-fg)]'
+                  : 'bg-[var(--surface-3)] text-ink-3',
+              )}
+            >
+              {n}
+            </span>
+            {label}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
 function Field({
   id,
   label,
@@ -730,8 +794,8 @@ function Field({
       <label htmlFor={id} className="text-sm font-medium">
         {label}
       </label>
-      <div className="mt-1.5 flex items-stretch overflow-hidden rounded-[--radius-md] border border-[var(--border-interactive)] bg-[var(--surface)] focus-within:border-[var(--accent)]">
-        <span className="grid w-10 shrink-0 place-items-center text-ink-3">
+      <div className="mt-1.5 flex items-stretch overflow-hidden rounded-full border border-[var(--border-interactive)] bg-[var(--surface)] shadow-[var(--e1)] transition-colors focus-within:border-[var(--accent)]">
+        <span className="grid w-11 shrink-0 place-items-center text-ink-3">
           <Icon size={16} aria-hidden />
         </span>
         <input
@@ -740,7 +804,7 @@ function Field({
           autoFocus={autoFocus}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="h-12 min-w-0 flex-1 bg-transparent pr-3 text-[16px] outline-none placeholder:text-ink-3"
+          className="h-12 min-w-0 flex-1 bg-transparent pr-4 text-[16px] outline-none placeholder:text-ink-3"
         />
       </div>
     </div>
@@ -751,7 +815,7 @@ function Notice({ tone, children }: { tone: 'warning' | 'negative'; children: Re
   return (
     <p
       className={cn(
-        'flex items-start gap-2.5 rounded-[--radius-md] border px-3.5 py-3 text-sm leading-relaxed',
+        'flex items-start gap-2.5 rounded-[var(--radius-md)] border px-3.5 py-3 text-sm leading-relaxed',
         tone === 'negative'
           ? 'border-[color-mix(in_oklab,var(--neg)_30%,transparent)] bg-[var(--neg-soft)] text-[var(--neg)]'
           : 'border-[color-mix(in_oklab,var(--warn)_30%,transparent)] bg-[var(--warn-soft)] text-[var(--warn)]',
@@ -786,11 +850,13 @@ function Working() {
   }, [steps.length])
 
   return (
-    <Card>
-      <div className="flex items-center gap-3">
-        <Loader2 size={18} className="animate-spin text-[var(--accent)]" aria-hidden />
-        <p className="text-[15px] font-semibold">Finding your details…</p>
-      </div>
+    <Card level="lift">
+      <CardHead
+        icon={<Loader2 size={15} className="animate-spin" aria-hidden />}
+        title="Finding your details…"
+        sub="This genuinely takes ten to twenty seconds"
+        tint="blue"
+      />
       <ol className="mt-4 space-y-2.5">
         {steps.map((label, i) => (
           <li

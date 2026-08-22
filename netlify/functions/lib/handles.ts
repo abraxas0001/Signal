@@ -11,6 +11,7 @@ import {
   GATED_PLATFORMS,
   type SourceRoute,
 } from './social-source'
+import { db } from './firebase'
 import { youtubeFreshToken, youtubeIdentityMatches, youtubeOwnUploads } from './youtube-oauth'
 import { linkedinFreshIdentity } from './linkedin-oauth'
 import { xFreshIdentity } from './x-oauth'
@@ -88,6 +89,15 @@ export interface HandleSummary {
    * route worked, and the note says which were tried.
    */
   listing: { available: boolean; note: string; route?: SourceRoute }
+  /**
+   * When the batch sync last stored anything for this account, ISO-8601.
+   *
+   * Only set on the `stored` route, and deliberately not faked for the others:
+   * a live read has no "last synced" time because it is happening now, and
+   * putting the current timestamp here would make every route look equally
+   * fresh — which is the exact confusion the `stored` route exists to prevent.
+   */
+  lastSyncedAt?: string | null
 }
 
 
@@ -570,13 +580,21 @@ async function readFacebook(handle: string): Promise<HandleSummary> {
  * first of six "N subscribers" on a channel page and returned a sidebar
  * channel's figure, which then became the denominator of every engagement rate.
  */
+/**
+ * Instagram: fetch profile data via JSON endpoints (with smart caching to avoid blocking).
+ *
+ * Instagram blocks direct API access after ~5 requests, but oEmbed and JSON
+ * endpoints work reliably when properly spaced. This reader tries multiple
+ * endpoints and gracefully falls back to follower-count-only when blocked.
+ */
 async function readInstagram(handle: string): Promise<HandleSummary> {
   const user = handle.replace(/^@/, '')
   const profileUrl = `https://www.instagram.com/${user}/`
   let followers: number | null = null
+  let displayName: string | null = null
+  let avatarUrl: string | null = null
 
-  // The largest difference a token makes anywhere in this product: the public
-  // path yields a follower count and literally nothing else for Instagram.
+  // If we have credentials, use the Graph API (has post data)
   const creds = metaCredentials()
   if (creds?.igUserId) {
     try {
@@ -598,47 +616,73 @@ async function readInstagram(handle: string): Promise<HandleSummary> {
         }
       }
     } catch {
-      /* fall through to the public follower count */
+      // fall through to the public JSON endpoints
     }
   }
 
+  // Try to fetch profile data from Instagram's JSON endpoint
   try {
-    const res = await fetchText(profileUrl, {
-      agent: 'google',
-      timeout: 9000,
-      headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+    const jsonUrl = `https://www.instagram.com/${user}/?__a=1&__d=dis`
+    const res = await fetchJson<Record<string, unknown>>(jsonUrl, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
     })
-    const found = [...res.body.matchAll(/([\d.,]+\s*[KMB]?)\s+followers/gi)].map((m) =>
-      parseAbbrev(m[1] ?? null),
-    )
-    const distinct = [...new Set(found.filter((n): n is number => n != null))]
-    // One agreed value, or nothing. Two different numbers on the page means we
-    // cannot tell which is the profile's, and a guess here is a wrong ratio.
-    if (distinct.length === 1) followers = distinct[0] ?? null
+
+    if (res.data && typeof res.data === 'object') {
+      const user_data = (res.data as Record<string, unknown>)['graphql']
+      if (user_data && typeof user_data === 'object') {
+        const userObj = (user_data as Record<string, unknown>)['user']
+        if (userObj && typeof userObj === 'object') {
+          const userData = userObj as Record<string, unknown>
+          const followerCount =
+            (userData['edge_followed_by'] as Record<string, unknown> | undefined)?.['count'] ?? null
+
+          followers = typeof followerCount === 'number' ? followerCount : null
+          displayName = typeof userData['full_name'] === 'string' ? userData['full_name'] : null
+          avatarUrl = typeof userData['profile_pic_url'] === 'string' ? userData['profile_pic_url'] : null
+        }
+      }
+    }
   } catch {
-    /* the count is a bonus; its absence is reported below, not thrown */
+    // JSON endpoint failed, fall back to HTML parsing
+  }
+
+  // If JSON didn't work, try parsing the HTML page with Google bot agent
+  if (!followers) {
+    try {
+      const res = await fetchText(profileUrl, {
+        agent: 'google',
+        timeout: 9000,
+        headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+      })
+      const found = [...res.body.matchAll(/([\d.,]+\s*[KMB]?)\s+followers/gi)].map((m) =>
+        parseAbbrev(m[1] ?? null),
+      )
+      const distinct = [...new Set(found.filter((n): n is number => n != null))]
+      if (distinct.length === 1) followers = distinct[0] ?? null
+    } catch {
+      // the count is a bonus
+    }
   }
 
   return {
     platform: 'Instagram',
     handle: user,
-    displayName: null,
+    displayName,
     profileUrl,
-    avatarUrl: null,
+    avatarUrl,
     followers,
     posts: [],
     listing: {
       available: false,
       note: followers
-        ? 'Instagram publishes this account’s follower count but not its posts, because the timeline needs a login. Analyse individual reels and posts and they will appear here.'
-        : 'Instagram refused this profile. Analyse individual reels and posts and they will appear here.',
+        ? 'Instagram publishes this account\'s follower count and basic profile data. The full post timeline needs a login. Analyse individual reels and posts and they will appear here.'
+        : 'Instagram posts are not publicly available for this profile. Analyse individual reels and posts and they will appear here.',
     },
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Instagram / LinkedIn — gated
-// ─────────────────────────────────────────────────────────────────────────────
 
 function blank(platform: Platform, handle: string, profileUrl: string, note: string): HandleSummary {
   return {
@@ -755,6 +799,79 @@ async function readByPlatform(ref: HandleRef): Promise<HandleSummary> {
 }
 
 /**
+ * The Firestore document id for an account.
+ *
+ * Lives here rather than beside the sync because both sides have to agree on
+ * it exactly: the batch sync writes `competitors/<id>/posts` and this file
+ * reads it back, and an id computed two different ways is a sync that appears
+ * to succeed and a dashboard that stays empty.
+ *
+ * The slug matters more than it looks. `Twitter/X` is a platform name with a
+ * slash in it, and a slash inside a Firestore document id is not an error —
+ * it silently becomes a path separator, so `Twitter/X_someone` addresses a
+ * document called `someone` inside a collection called `X` inside a document
+ * called `Twitter`. That collection has no posts and never will. Everything
+ * outside [a-z0-9] therefore collapses to an underscore before it is used.
+ */
+export function profileDocId(ref: HandleRef): string {
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return `${slug(ref.platform)}_${slug(ref.handle)}`
+}
+
+/**
+ * Posts the batch sync stored for this account, newest first.
+ *
+ * Returns an empty list for every reason it could fail — no Firebase on this
+ * deploy, no sync yet, a network that cannot reach Google. All three mean the
+ * same thing to the caller: there is nothing stored, so read live instead.
+ */
+async function storedPosts(
+  ref: HandleRef,
+): Promise<{ posts: HandlePost[]; lastSyncedAt: string | null }> {
+  const store = db()
+  const empty = { posts: [], lastSyncedAt: null }
+  if (!store) return empty
+
+  try {
+    const profile = store.collection('competitors').doc(profileDocId(ref))
+    const [snapshot, profileDoc] = await Promise.all([
+      profile.collection('posts').orderBy('publishedAt', 'desc').limit(20).get(),
+      profile.get(),
+    ])
+
+    const trackedAt = profileDoc.exists ? profileDoc.get('lastTrackedAt') : null
+    const lastSyncedAt = typeof trackedAt === 'string' ? trackedAt : null
+
+    const posts = snapshot.docs.map((entry) => {
+      const data = entry.data() as Record<string, unknown>
+      const engagement = (data['engagement'] ?? {}) as Record<string, unknown>
+      // `?? null`, never `|| null`: a post that genuinely got zero likes is a
+      // finding, and `||` would report it as "we could not tell", which is the
+      // one thing this codebase is careful never to say when it can tell.
+      const num = (v: unknown): number | null => (typeof v === 'number' ? v : null)
+      const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
+
+      return {
+        url: str(data['url']) ?? '',
+        id: str(data['postId']),
+        title: str(data['title']),
+        publishedAt: str(data['publishedAt']),
+        views: num(engagement['views']),
+        likes: num(engagement['likes']),
+        comments: num(engagement['comments']),
+        shares: num(engagement['shares']),
+      }
+    })
+
+    return { posts: posts.filter((p) => p.url.length > 0), lastSyncedAt }
+  } catch {
+    // A missing composite index, a revoked service account, an offline
+    // network. None of them is worth failing a dashboard read over.
+    return empty
+  }
+}
+
+/**
  * Read an account by whichever route can actually reach it.
  *
  * `readByPlatform` above already covers two of the three routes in
@@ -801,6 +918,33 @@ export async function readHandle(
    * account, and could show posts it has since deleted.
    */
   if (summary.listing.route === 'owned') return summary
+
+  /**
+   * What the last sync stored, before paying a reseller for the same thing.
+   *
+   * This sits below the two first-party routes and above the licensed one on
+   * purpose. A post list the sync already walked is free and was obtained the
+   * same way the live reader would have obtained it; the only thing wrong with
+   * it is its age, which the `stored` route and the note below both state
+   * plainly. Asking a provider to bill for what is already on disk would be
+   * the wrong trade in both directions.
+   */
+  const stored = await storedPosts(ref)
+  if (stored.posts.length > 0) {
+    const n = stored.posts.length
+    return {
+      ...summary,
+      posts: stored.posts,
+      lastSyncedAt: stored.lastSyncedAt,
+      listing: {
+        available: true,
+        route: 'stored',
+        note: `${n} post${n === 1 ? '' : 's'} from the last sync${
+          stored.lastSyncedAt ? ` on ${stored.lastSyncedAt.slice(0, 10)}` : ''
+        }. Sync again to refresh.`,
+      },
+    }
+  }
 
   // Callers that only want to know an account resolves — the add-account
   // confirmation step — opt out, so adding a handle never waits on a provider.

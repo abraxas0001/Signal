@@ -6,14 +6,7 @@ import { Avatar } from './ui'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { ease, spring } from '@/lib/motion'
 import { cn } from '@/lib/utils'
-import {
-  OVERFLOW_GROUPS,
-  NAV_ACTIVE,
-  NAV_FOCUS,
-  NAV_IDLE,
-  badgeOf,
-  type Tab,
-} from '@/lib/nav'
+import { OVERFLOW_GROUPS, badgeOf, type Tab } from '@/lib/nav'
 
 /**
  * The rest of the app, on a phone.
@@ -40,6 +33,21 @@ import {
  * The four daily screens and the primary action are untouched. This adds a
  * door, it does not re-rank anything.
  */
+
+/**
+ * The pill grammar, matching SideNav row for row so the phone and the laptop
+ * disagree about nothing but width. Stated here rather than imported from
+ * lib/nav because lib/* is shared surface this redesign does not touch — if
+ * the two ever drift, SideNav is the reference.
+ */
+const PILL_FOCUS =
+  'focus-visible:rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
+const PILL_ROW =
+  'flex min-h-12 w-full items-center gap-3 rounded-full text-left transition-colors duration-200'
+const PILL_ACTIVE =
+  'bg-[var(--accent)] text-[var(--accent-fg)] shadow-[0_1px_2px_rgb(16_24_40/0.1),0_8px_20px_-6px_color-mix(in_oklab,var(--accent)_55%,transparent)]'
+const PILL_IDLE = 'text-ink-2 hover:bg-[var(--surface-2)] hover:text-ink'
+
 export function MoreSheet({
   open,
   active,
@@ -106,7 +114,7 @@ export function MoreSheet({
             role="dialog"
             aria-modal="true"
             aria-label="Your desk"
-            className="scroller fixed inset-x-0 bottom-0 z-50 max-h-[86svh] overflow-y-auto rounded-t-[--radius-2xl] border-t border-[var(--border)] bg-[var(--surface)] lg:hidden"
+            className="scroller fixed inset-x-0 bottom-0 z-50 max-h-[86svh] overflow-y-auto rounded-t-[var(--radius-xl)] bg-[var(--surface)] shadow-[var(--e4)] lg:hidden"
             initial={reduced ? false : { y: '100%' }}
             animate={{ y: 0 }}
             exit={reduced ? { opacity: 0 } : { y: '100%' }}
@@ -115,7 +123,7 @@ export function MoreSheet({
             transition={reduced ? { duration: 0 } : spring.settle}
           >
             <div className="sticky top-0 z-10 flex justify-center bg-[var(--surface)] pb-1 pt-3">
-              <div className="h-1 w-9 rounded-full bg-[var(--text-3)]/40" aria-hidden />
+              <div className="h-1.5 w-10 rounded-full bg-[var(--border-strong)]" aria-hidden />
             </div>
 
             <div className="px-4 pb-[calc(var(--sab)+20px)] pt-2">
@@ -126,7 +134,9 @@ export function MoreSheet({
                 <div className="flex min-w-0 items-center gap-3">
                   <Avatar src={person?.photoUrl} name={person?.name ?? 'Signal'} size={44} />
                   <div className="min-w-0">
-                    <h2 className="truncate text-lg font-semibold">{person?.name ?? 'Your desk'}</h2>
+                    <h2 className="truncate text-lg font-bold tracking-[-0.011em]">
+                      {person?.name ?? 'Your desk'}
+                    </h2>
                     {subtitle && (
                       <p className="truncate text-xs text-ink-3">{subtitle}</p>
                     )}
@@ -135,21 +145,21 @@ export function MoreSheet({
                 <button
                   onClick={onClose}
                   aria-label="Close"
-                  className={cn('-mr-1 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-2)]', NAV_FOCUS)}
+                  className={cn(
+                    '-mr-1 grid size-11 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-ink-3 shadow-[var(--e1)] transition-colors hover:bg-[var(--surface-2)]',
+                    PILL_FOCUS,
+                  )}
                 >
                   <X size={19} />
                 </button>
               </div>
 
               {OVERFLOW_GROUPS.map((group) => (
-                <div key={group.heading} className="mt-5">
-                  <p
-                    aria-hidden
-                    className="tracking-kicker px-1 pb-2 text-2xs font-semibold uppercase text-ink-3"
-                  >
+                <div key={group.heading} className="mt-6">
+                  <p aria-hidden className="kicker px-4 pb-2">
                     {group.heading}
                   </p>
-                  <ul aria-label={group.heading} className="grid grid-cols-2 gap-2">
+                  <ul aria-label={group.heading} className="space-y-1">
                     {group.items.map((item) => {
                       const badge = badgeOf(counts?.[item.id])
                       const isActive = active === item.id
@@ -163,35 +173,41 @@ export function MoreSheet({
                             aria-current={isActive ? 'page' : undefined}
                             aria-label={badge ? `${item.label}, ${badge}` : undefined}
                             className={cn(
-                              // 72px tiles: two columns at 360px gives 160px of
-                              // width each, which fits every label here without
-                              // truncating.
-                              'flex min-h-[72px] w-full flex-col items-start justify-center gap-1.5 rounded-xl border px-3 py-2 text-left transition-colors',
-                              NAV_FOCUS,
-                              isActive
-                                ? cn(NAV_ACTIVE, 'border-[color-mix(in_oklab,var(--accent)_35%,transparent)]')
-                                : cn(NAV_IDLE, 'border-[var(--border)]'),
+                              PILL_ROW,
+                              PILL_FOCUS,
+                              'pl-4 pr-3',
+                              isActive ? PILL_ACTIVE : PILL_IDLE,
                             )}
                           >
-                            <span className="flex w-full items-center gap-2">
-                              <item.Icon size={18} strokeWidth={isActive ? 2.4 : 1.9} aria-hidden />
-                              {badge && (
-                                <span
-                                  aria-hidden
-                                  className="tnum ml-auto grid min-w-5 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-2xs font-semibold leading-5 text-[var(--accent-fg)]"
-                                >
-                                  {badge}
-                                </span>
-                              )}
-                            </span>
+                            <item.Icon
+                              size={18}
+                              strokeWidth={isActive ? 2.4 : 1.9}
+                              className="shrink-0"
+                              aria-hidden
+                            />
                             <span
                               className={cn(
-                                'block truncate text-sm',
+                                'min-w-0 flex-1 truncate text-sm',
                                 isActive ? 'font-semibold' : 'font-medium',
                               )}
                             >
                               {item.label}
                             </span>
+                            {badge && (
+                              <span
+                                aria-hidden
+                                className={cn(
+                                  'tnum grid min-w-5 shrink-0 place-items-center rounded-full px-1.5 text-2xs font-bold leading-5',
+                                  // Inverted on the filled pill, or the count
+                                  // would vanish into its own colour.
+                                  isActive
+                                    ? 'bg-[var(--accent-fg)] text-[var(--accent)]'
+                                    : 'bg-[var(--accent)] text-[var(--accent-fg)]',
+                                )}
+                              >
+                                {badge}
+                              </span>
+                            )}
                           </button>
                         </li>
                       )
@@ -203,16 +219,13 @@ export function MoreSheet({
               {/* The way out of the desk, where the sidebar also puts it —
                   last, under a rule, away from the destinations. */}
               {onLock && (
-                <div className="mt-5 border-t border-[var(--border)] pt-3">
+                <div className="mt-6 border-t border-[var(--border)] pt-3">
                   <button
                     onClick={() => {
                       onClose()
                       onLock()
                     }}
-                    className={cn(
-                      'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium text-ink-2 hover:bg-[var(--surface-2)] hover:text-ink',
-                      NAV_FOCUS,
-                    )}
+                    className={cn(PILL_ROW, PILL_FOCUS, 'px-4 text-sm font-medium', PILL_IDLE)}
                   >
                     <Lock size={16} strokeWidth={1.9} className="shrink-0" aria-hidden />
                     Lock

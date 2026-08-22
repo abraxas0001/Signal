@@ -118,7 +118,10 @@ function EditableRow({
   }
 
   return (
-    <div className="flex min-h-14 items-center gap-3 px-4 py-2">
+    // The row itself is the hover surface: a quiet tint under the pointer and
+    // a pencil that answers to it, so "you can edit this" survives on a phone
+    // where there is no hover at all — the pencil is always drawn.
+    <div className="group flex min-h-14 items-center gap-3 px-4 py-2 transition-colors hover:bg-[var(--surface-2)]">
       <span className="w-28 shrink-0 text-xs font-medium uppercase tracking-[0.08em] text-ink-3 sm:w-36">
         {label}
       </span>
@@ -137,7 +140,7 @@ function EditableRow({
             }
           }}
           placeholder={placeholder}
-          className="min-w-0 flex-1 border-b border-[var(--accent)] bg-transparent py-1 text-[15px] outline-none"
+          className="min-h-11 min-w-0 flex-1 rounded-[10px] border border-[var(--accent)] bg-[var(--surface)] px-3 py-1 text-[15px] shadow-[var(--e1)] outline-none"
         />
       ) : (
         <button
@@ -145,7 +148,7 @@ function EditableRow({
             setBuffer(value ?? '')
             setEditing(true)
           }}
-          className="group flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
+          className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-2 text-left"
         >
           <span
             className={cn(
@@ -166,11 +169,12 @@ function EditableRow({
               yours
             </Chip>
           )}
-          <Pencil
-            size={14}
+          <span
             aria-hidden
-            className="shrink-0 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100"
-          />
+            className="grid size-7 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-ink-3 transition-colors group-hover:border-[var(--border-interactive)] group-hover:text-[var(--accent)]"
+          >
+            <Pencil size={12} />
+          </span>
         </button>
       )}
     </div>

@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   Check,
   Copy,
+  Landmark,
   Megaphone,
+  Quote,
   ShieldAlert,
   Target,
   Zap,
@@ -12,6 +14,7 @@ import {
 import type { CivicReading } from '@shared/types'
 import { ACTION_PRIORITIES, RISK_LEVELS, SEVERITIES } from '@shared/taxonomy'
 import { Card, Chip, SectionTitle, type ChipTone } from '../ui'
+import { CardHead } from '@/components/kit'
 import { LevelPips } from '../charts'
 import { listItem, listStagger, spring } from '@/lib/motion'
 import { haptic } from '@/lib/motion'
@@ -57,7 +60,7 @@ export function CivicPanel({ civic }: { civic: CivicReading }) {
           </Chip>
         </div>
 
-        <p className="mt-3 text-lg font-medium leading-snug">
+        <p className="mt-3 text-lg font-semibold leading-snug tracking-[-0.011em]">
           {civic.issueDescription}
         </p>
 
@@ -66,8 +69,11 @@ export function CivicPanel({ civic }: { civic: CivicReading }) {
         </p>
       </Card>
 
-      {/* Severity and risk, as ordered pips rather than a colour to decode. */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Severity and risk, as ordered pips rather than a colour to decode.
+          Stacked at phone width: four 16px pips plus the level word need
+          ~135px, and half a 375px card offers ~90px — side by side they
+          clipped the one word the meter exists to show. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Card>
           <LevelPips
             label="Severity"
@@ -87,9 +93,11 @@ export function CivicPanel({ civic }: { civic: CivicReading }) {
       </div>
 
       {civic.riskRationale && (
-        <Card>
+        <Card level="quiet">
           <div className="flex gap-2.5">
-            <ShieldAlert size={16} className="mt-0.5 shrink-0 text-[var(--warn)]" />
+            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-[var(--warn-soft)]">
+              <ShieldAlert size={15} className="text-[var(--warn)]" />
+            </span>
             <p className="text-sm leading-relaxed text-ink-2">
               {civic.riskRationale}
             </p>
@@ -97,12 +105,19 @@ export function CivicPanel({ civic }: { civic: CivicReading }) {
         </Card>
       )}
 
-      {/* Recommended action */}
+      {/* Recommended action — the step itself as a tinted row, so the eye
+          lands on what to do before it reads why. */}
       <Card>
-        <p className="mb-1 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
-          Recommended action
-        </p>
-        <p className="text-base font-medium leading-snug">{civic.suggestedAction}</p>
+        <CardHead icon={<Zap size={15} />} title="Recommended action" sub="The step, then the channels" tint="blue" />
+
+        <div className="flex items-start gap-3 rounded-[var(--radius-md)] bg-[var(--accent-soft)] p-3.5">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white">
+            <Zap size={15} aria-hidden />
+          </span>
+          <p className="min-w-0 flex-1 text-[15px] font-semibold leading-snug text-ink">
+            {civic.suggestedAction}
+          </p>
+        </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Chip tone="accent">{civic.actionCategory}</Chip>
@@ -120,27 +135,42 @@ export function CivicPanel({ civic }: { civic: CivicReading }) {
 
       {civic.counterNarrative && (
         <Card>
-          <p className="mb-1 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
-            Suggested counter-narrative
-          </p>
-          <p className="text-sm leading-relaxed text-ink-2">
-            {civic.counterNarrative}
-          </p>
+          <CardHead icon={<Quote size={15} />} title="Suggested counter-narrative" tint="violet" />
+          <div className="rounded-[var(--radius-md)] bg-[var(--accent-2-soft)] p-3.5">
+            <p className="text-sm leading-relaxed text-ink-2">
+              {civic.counterNarrative}
+            </p>
+          </div>
         </Card>
       )}
 
       {civic.governmentResponse.status !== 'Not checked' && (
         <Card>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-ink-2">Official response</span>
-            <Chip tone={civic.governmentResponse.status === 'Yes' ? 'positive' : 'warning'}>
-              {civic.governmentResponse.status}
-            </Chip>
-          </div>
+          <CardHead
+            icon={<Landmark size={15} />}
+            title="Official response"
+            tint="green"
+            className="mb-0"
+            action={
+              <Chip tone={civic.governmentResponse.status === 'Yes' ? 'positive' : 'warning'}>
+                {civic.governmentResponse.status}
+              </Chip>
+            }
+          />
           {civic.governmentResponse.respondent && (
             <p className="mt-1.5 text-sm text-ink-3">
               {civic.governmentResponse.respondent}
             </p>
+          )}
+          {civic.governmentResponse.adequacy && (
+            <div className="mt-2.5 flex items-center gap-2 border-t border-[var(--border)] pt-2.5">
+              <span className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
+                Adequacy
+              </span>
+              <span className="text-sm font-semibold text-ink-2">
+                {civic.governmentResponse.adequacy}
+              </span>
+            </div>
           )}
         </Card>
       )}
@@ -164,29 +194,39 @@ function TalkingPoints({ points }: { points: string[] }) {
 
   return (
     <Card>
-      <p className="mb-2.5 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
-        Lines you can use
-      </p>
+      <CardHead
+        icon={<Megaphone size={15} />}
+        title="Lines you can use"
+        sub="Each one copies on its own"
+        tint="violet"
+        action={
+          <span className="tnum shrink-0 rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-xs font-semibold text-ink-2">
+            {points.length}
+          </span>
+        }
+      />
 
       <m.ul className="space-y-2" variants={listStagger} initial="hidden" animate="show">
         {points.map((point, i) => (
           <m.li
             key={i}
             variants={listItem}
-            className="group flex items-start gap-2.5 rounded-[--radius-md] bg-[var(--surface-2)] p-3"
+            className="group flex items-start gap-2.5 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-3"
           >
-            <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-2xs font-semibold text-[var(--accent)]">
+            <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-2xs font-bold text-[var(--accent)]">
               {i + 1}
             </span>
 
             <p className="flex-1 text-sm leading-relaxed">{point}</p>
 
+            {/* size-11: the copy target was 36px, under the 44px floor a
+                thumb needs; negative margin keeps the row's optical height. */}
             <m.button
               onClick={() => copy(point, i)}
               whileTap={{ scale: 0.9 }}
               transition={spring.snap}
               aria-label={copied === i ? 'Copied' : 'Copy this line'}
-              className="relative -m-2 grid size-9 shrink-0 place-items-center rounded-[--radius-sm] text-ink-3 hover:bg-[var(--surface-3)] hover:text-ink"
+              className="relative -m-2.5 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-3)] hover:text-ink"
             >
               {copied === i ? (
                 <m.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={spring.pop}>

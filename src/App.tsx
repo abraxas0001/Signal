@@ -526,7 +526,14 @@ export default function App() {
       case 'actions':
         return <Actions key="actions" onClose={go('dashboard')} />
       case 'accounts':
-        return <Dashboard key="accounts" mode="accounts" onClose={go('dashboard')} />
+        return (
+          <Dashboard
+            key="accounts"
+            mode="accounts"
+            onClose={go('dashboard')}
+            onRead={(postUrl) => readPost(postUrl, 'dashboard')}
+          />
+        )
       case 'compare':
         return (
           <Dashboard
@@ -589,7 +596,10 @@ export default function App() {
           so the wordmark shares a left edge with the first heading of every
           screen instead of the two disagreeing by 250px.
         */}
-        <header className="no-print sticky top-0 z-30 border-b border-[var(--rule)] bg-[color-mix(in_oklab,var(--surface)_86%,transparent)] backdrop-blur-xl">
+        {/* .glass carries the frost: translucent surface, 16px blur, its own
+            hairline border. The budget in index.css allows two glass panes on
+            screen; this bar is the first and usually the only one. */}
+        <header className="glass no-print sticky top-0 z-30">
           <Shell
             width="wide"
             className="flex h-[var(--topbar-h)] items-center justify-between gap-3"
@@ -620,13 +630,16 @@ export default function App() {
                 `lg:hidden`, so above that width this is the only child and
                 justify-between left it hard against the sidebar instead of at
                 the far edge where a toolbar belongs. */}
-            <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            {/* Every control here is a bordered pill on the frost — the same
+                grammar as the reference topbar's account and export pills —
+                and 44px square, the tap floor this app holds everywhere. */}
+            <div className="ml-auto flex shrink-0 items-center gap-2">
               {history.entries.length > 0 && (
                 <button
                   onClick={() => setHistoryOpen(true)}
                   aria-label={`History, ${history.entries.length}`}
                   title="History"
-                  className="relative grid size-10 place-items-center rounded-full text-ink-2 transition-colors hover:bg-[var(--surface-2)]"
+                  className="relative grid size-11 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-ink-2 shadow-[var(--e1)] transition-colors hover:bg-[var(--surface-2)]"
                 >
                   <Clock size={18} aria-hidden />
                   <span
@@ -642,7 +655,7 @@ export default function App() {
                 onClick={toggleTheme}
                 aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
                 title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                className="grid size-10 place-items-center rounded-full text-ink-2 transition-colors hover:bg-[var(--surface-2)]"
+                className="grid size-11 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-ink-2 shadow-[var(--e1)] transition-colors hover:bg-[var(--surface-2)]"
               >
                 {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
               </button>
@@ -666,12 +679,12 @@ export default function App() {
                 aria-haspopup="dialog"
                 aria-expanded={moreOpen}
                 title={store.identity?.name ?? 'Your desk'}
-                className="ml-1 grid size-10 shrink-0 place-items-center rounded-full transition-colors hover:bg-[var(--surface-2)] lg:hidden"
+                className="grid size-11 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] shadow-[var(--e1)] transition-colors hover:bg-[var(--surface-2)] lg:hidden"
               >
                 <Avatar
                   src={store.identity?.photoUrl}
                   name={store.identity?.name ?? 'Signal'}
-                  size={30}
+                  size={32}
                 />
               </button>
 

@@ -33,6 +33,7 @@ import {
 } from '@shared/grievance'
 import { ACTION_PRIORITIES, PRIORITY_RANK, type ActionPriority } from '@shared/taxonomy'
 import { Button, Card, Chip, PageHeader, type ChipTone } from './ui'
+import { CardHead, DonutGauge, ProgressRow } from '@/components/kit'
 import { makeId, update, useStore } from '@/lib/store'
 import { takeActionFocus } from '@/lib/focus'
 import { Mascot } from './Mascot'
@@ -209,11 +210,27 @@ const STATUS_META: Record<ActionStatus, { icon: LucideIcon; tone: ChipTone; blur
   Declined: { icon: Ban, tone: 'neutral', blurb: 'Not being taken up' },
 }
 
+/** Soft badge tints per status — the icon-badge language of the references. */
+const STATUS_BADGE: Record<ActionStatus, { bg: string; fg: string }> = {
+  Planned: { bg: 'var(--surface-3)', fg: 'var(--text-2)' },
+  'In Progress': { bg: 'var(--info-soft)', fg: 'var(--info)' },
+  Completed: { bg: 'var(--pos-soft)', fg: 'var(--pos)' },
+  Declined: { bg: 'var(--surface-3)', fg: 'var(--text-3)' },
+}
+
 const PRIORITY_TONE: Record<ActionPriority, ChipTone> = {
   Critical: 'negative',
   High: 'warning',
   Medium: 'accent',
   Low: 'neutral',
+}
+
+/** The tint bar down the card's left edge — urgency readable at a glance. */
+const PRIORITY_BAR: Record<ActionPriority, string> = {
+  Critical: 'var(--neg)',
+  High: 'var(--warn)',
+  Medium: 'var(--accent)',
+  Low: 'var(--border-strong)',
 }
 
 /**
@@ -233,9 +250,9 @@ function nextEscalation(level: EscalationLevel): EscalationLevel | null {
 }
 
 const FIELD =
-  'w-full min-h-11 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm text-ink-1 outline-none placeholder:text-ink-3 focus:border-[var(--accent)]'
+  'w-full min-h-11 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-[var(--accent)] focus:bg-[var(--surface)]'
 
-const LABEL = 'block text-xs font-medium text-ink-2'
+const LABEL = 'block text-xs font-semibold text-ink-2'
 
 /* ── A field that cannot lose what was typed into it ─────────────────────── */
 
@@ -316,7 +333,7 @@ function LiveField({
           placeholder={placeholder}
           onChange={(e) => change(e.target.value)}
           onBlur={flush}
-          className={cn(FIELD, 'mt-1 resize-y leading-relaxed')}
+          className={cn(FIELD, 'mt-1.5 resize-y leading-relaxed')}
         />
       ) : (
         <input
@@ -325,7 +342,7 @@ function LiveField({
           placeholder={placeholder}
           onChange={(e) => change(e.target.value)}
           onBlur={flush}
-          className={cn(FIELD, 'mt-1')}
+          className={cn(FIELD, 'mt-1.5')}
         />
       )}
     </div>
@@ -349,7 +366,7 @@ function StatusPills({
   onSelect: (next: ActionStatus) => void
 }) {
   return (
-    <div role="group" aria-label="Status" className="flex flex-wrap gap-1">
+    <div role="group" aria-label="Status" className="flex flex-wrap gap-1.5">
       {ACTION_STATUSES.map((status) => {
         const active = status === current
         const Icon = STATUS_META[status].icon
@@ -360,10 +377,10 @@ function StatusPills({
             aria-pressed={active}
             onClick={() => onSelect(status)}
             className={cn(
-              'inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-[--radius-sm] px-2.5',
-              'text-[11px] font-medium whitespace-nowrap transition-transform active:scale-[0.97]',
+              'inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full px-3',
+              'text-[11px] font-semibold whitespace-nowrap transition-[background-color,color,transform] active:scale-[0.96]',
               active
-                ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+                ? 'bg-[var(--accent)] text-[var(--accent-fg)] shadow-[var(--e1)]'
                 : 'bg-[var(--surface-2)] text-ink-2 hover:bg-[var(--surface-3)]',
             )}
           >
@@ -414,6 +431,13 @@ function ActionCard({
   const found = linked.filter((r): r is GrievanceRecord => r != null)
   const missing = linked.length - found.length
 
+  const steps = item.steps ?? []
+  const doneSteps = steps.filter((x) => x.done).length
+
+  const done = item.status === 'Completed'
+  const StatusIcon = STATUS_META[item.status].icon
+  const statusBadge = STATUS_BADGE[item.status]
+
   const setStatus = (next: ActionStatus) => {
     if (next === item.status) return
     if (next === 'Completed') haptic.success()
@@ -442,7 +466,7 @@ function ActionCard({
       id={`action-${item.id}`}
       padded={false}
       className={cn(
-        'p-3.5 scroll-mt-24',
+        'relative scroll-mt-24 p-4 pl-5 sm:pl-6',
         breached && 'ring-1 ring-[color-mix(in_oklab,var(--neg)_45%,transparent)]',
         // The task somebody was just sent to. Held rather than flashed:
         // a highlight that fades before the eye lands on it is worse than
@@ -450,7 +474,48 @@ function ActionCard({
         focused && 'ring-2 ring-[var(--accent)]',
       )}
     >
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* Priority down the left edge — readable before a single word is. */}
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-1.5"
+        style={{ background: PRIORITY_BAR[item.priority] }}
+      />
+
+      <div className="flex items-start justify-between gap-3">
+        <span className="icon-badge" style={{ background: statusBadge.bg, color: statusBadge.fg }}>
+          <StatusIcon size={18} aria-hidden />
+        </span>
+
+        {/* The one control this screen exists for, made the easiest to hit:
+            a pill checkbox riding the same status handler as the pills below. */}
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={done}
+          aria-label="Completed"
+          onClick={() => setStatus(done ? 'Planned' : 'Completed')}
+          className={cn(
+            'inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold',
+            'transition-[background-color,border-color,color,transform] active:scale-[0.95]',
+            done
+              ? 'border-transparent bg-[var(--pos)] text-white shadow-[var(--e1)]'
+              : 'border-[var(--border-strong)] bg-[var(--surface)] text-ink-2 hover:border-[var(--pos)] hover:text-[var(--pos)]',
+          )}
+        >
+          <span
+            aria-hidden
+            className={cn(
+              'grid size-[18px] place-items-center rounded-full border-2 transition-colors',
+              done ? 'border-white/80 bg-white/20' : 'border-current',
+            )}
+          >
+            {done && <Check size={11} strokeWidth={3.5} />}
+          </span>
+          {done ? 'Done' : 'Mark done'}
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <Chip tone={PRIORITY_TONE[item.priority]}>{item.priority}</Chip>
         {breached && (
           // Colour alone would fail anyone reading this outdoors or with a
@@ -466,10 +531,10 @@ function ActionCard({
         )}
       </div>
 
-      <p className="mt-2 text-[15px] leading-snug font-medium text-ink-1">{item.description}</p>
+      <p className="mt-2 text-[15px] leading-snug font-semibold text-ink">{item.description}</p>
 
       {(item.department || item.owner) && (
-        <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
+        <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-ink-3">
           {item.department && (
             <span className="inline-flex items-center gap-1">
               <Building2 size={12} aria-hidden />
@@ -498,7 +563,7 @@ function ActionCard({
       </p>
 
       {breached && (
-        <div className="mt-3 space-y-2 rounded-[--radius-sm] bg-[var(--neg-soft)] p-2.5">
+        <div className="mt-3 space-y-2 rounded-[var(--radius-md)] bg-[var(--neg-soft)] p-3">
           {raiseTo ? (
             <button
               type="button"
@@ -506,13 +571,13 @@ function ActionCard({
                 haptic.tap()
                 onPatch({ escalation: raiseTo })
               }}
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-[--radius-sm] bg-[var(--neg)] px-3 text-xs font-medium text-white transition-transform active:scale-[0.97]"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-[var(--neg)] px-4 text-xs font-semibold text-white shadow-[var(--e1)] transition-transform active:scale-[0.96]"
             >
               <ArrowUp size={13} aria-hidden />
               Raise to {raiseTo}
             </button>
           ) : (
-            <p className="text-xs text-[var(--neg)]">
+            <p className="text-xs font-medium text-[var(--neg)]">
               Already at the top of the escalation list. Chase it directly.
             </p>
           )}
@@ -532,7 +597,7 @@ function ActionCard({
 
       <div className="mt-2 flex items-center gap-2">
         <label
-          className="inline-flex shrink-0 items-center gap-1.5 text-xs text-ink-3"
+          className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-ink-3"
           htmlFor={`${item.id}-escalation`}
         >
           <Flag size={13} aria-hidden />
@@ -545,7 +610,7 @@ function ActionCard({
             const next = asEscalation(e.target.value)
             if (next) onPatch({ escalation: next })
           }}
-          className="min-h-11 min-w-0 flex-1 rounded-[--radius-sm] border border-[var(--border)] bg-[var(--surface-2)] px-2 text-xs text-ink-2 outline-none focus:border-[var(--accent)]"
+          className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 text-xs font-medium text-ink-2 outline-none transition-colors focus:border-[var(--accent)]"
         >
           {ESCALATION_LEVELS.map((level) => (
             <option key={level} value={level}>
@@ -559,7 +624,7 @@ function ActionCard({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
+        className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-semibold text-ink-3 hover:text-ink-2"
       >
         {open ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
         {open ? 'Less' : 'Date, next step, records'}
@@ -582,7 +647,7 @@ function ActionCard({
               type="date"
               value={dateInputValue(item.dueAt)}
               onChange={(e) => onPatch({ dueAt: dueIsoFrom(e.target.value) })}
-              className={cn(FIELD, 'mt-1')}
+              className={cn(FIELD, 'mt-1.5')}
             />
           </div>
 
@@ -597,7 +662,7 @@ function ActionCard({
                 const next = asPriority(e.target.value)
                 if (next) onPatch({ priority: next })
               }}
-              className={cn(FIELD, 'mt-1')}
+              className={cn(FIELD, 'mt-1.5')}
             >
               {ACTION_PRIORITIES.map((p) => (
                 <option key={p} value={p}>
@@ -629,23 +694,22 @@ function ActionCard({
               "what do I say" are the two questions per step, and burying the
               answer to the first in a notes paragraph meant it was read once
               and then guessed at. */}
-          {(item.steps ?? []).length > 0 && (
+          {steps.length > 0 && (
             <div>
-              <p className="text-xs font-medium uppercase tracking-[0.08em] text-ink-3">
-                Steps
-                <span className="tnum ml-2 normal-case tracking-normal text-ink-3">
-                  {(item.steps ?? []).filter((x) => x.done).length} of{' '}
-                  {(item.steps ?? []).length} done
-                </span>
-              </p>
+              <ProgressRow
+                label="Steps"
+                fraction={doneSteps / Math.max(steps.length, 1)}
+                detail={`${doneSteps} of ${steps.length} done`}
+                color={doneSteps === steps.length ? 'var(--pos)' : 'var(--accent)'}
+              />
 
               <ul className="mt-2 space-y-1.5">
-                {(item.steps ?? []).map((step) => (
+                {steps.map((step) => (
                   <li key={step.id}>
                     <button
                       onClick={() =>
                         onPatch({
-                          steps: (item.steps ?? []).map((x) =>
+                          steps: steps.map((x) =>
                             x.id === step.id
                               ? {
                                   ...x,
@@ -656,12 +720,12 @@ function ActionCard({
                           ),
                         })
                       }
-                      className="flex w-full items-start gap-2.5 rounded-[--radius-sm] px-2 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
+                      className="flex w-full items-start gap-2.5 rounded-[var(--radius-sm)] px-2 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
                     >
                       <span
                         aria-hidden
                         className={cn(
-                          'mt-0.5 grid size-[18px] shrink-0 place-items-center rounded-[4px] border transition-colors',
+                          'mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border-2 transition-colors',
                           step.done
                             ? 'border-[var(--pos)] bg-[var(--pos)] text-white'
                             : 'border-[var(--border-interactive)]',
@@ -705,7 +769,7 @@ function ActionCard({
           {item.notes || noteOpen ? (
             <LiveField
               id={`${item.id}-notes`}
-              label={(item.steps ?? []).length > 0 ? 'Your notes' : 'Next step'}
+              label={steps.length > 0 ? 'Your notes' : 'Next step'}
               value={item.notes}
               placeholder="Spoke to the collector, he will call back Tuesday"
               multiline
@@ -715,7 +779,7 @@ function ActionCard({
             <button
               type="button"
               onClick={() => setNoteOpen(true)}
-              className="mt-1 text-xs font-medium text-[var(--accent)] hover:underline"
+              className="mt-1 text-xs font-semibold text-[var(--accent)] hover:underline"
             >
               Add a note
             </button>
@@ -765,9 +829,9 @@ function ActionCard({
               onRemove()
             }}
             className={cn(
-              'inline-flex min-h-11 items-center gap-1.5 rounded-[--radius-sm] px-3 text-xs font-medium',
+              'inline-flex min-h-11 items-center gap-1.5 rounded-full px-4 text-xs font-semibold transition-colors',
               armed
-                ? 'bg-[var(--neg)] text-white'
+                ? 'bg-[var(--neg)] text-white shadow-[var(--e1)]'
                 : 'text-ink-3 hover:bg-[var(--surface-2)] hover:text-[var(--neg)]',
             )}
           >
@@ -835,22 +899,23 @@ function Composer({
 
   return (
     <Card>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-ink-1">New action</h2>
-          <p className="mt-0.5 text-xs text-ink-3">
-            One line someone can be held to, with the date you promised.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          aria-label="Cancel"
-          className="-mr-1 -mt-1 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-2)]"
-        >
-          <X size={18} aria-hidden />
-        </button>
-      </div>
+      <CardHead
+        icon={<Plus size={16} aria-hidden />}
+        tint="blue"
+        title="New action"
+        sub="One line someone can be held to"
+        hint="One line someone can be held to, with the date you promised."
+        action={
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Cancel"
+            className="-my-1 grid size-11 place-items-center rounded-full text-ink-3 transition-colors hover:bg-[var(--surface-2)]"
+          >
+            <X size={18} aria-hidden />
+          </button>
+        }
+      />
 
       <div className="mt-4 space-y-3">
         <div>
@@ -867,7 +932,7 @@ function Composer({
               if (error) setError(null)
             }}
             placeholder="Restore the borewell at Pedapadu, ward 4"
-            className={cn(FIELD, 'mt-1 resize-y leading-relaxed')}
+            className={cn(FIELD, 'mt-1.5 resize-y leading-relaxed')}
           />
         </div>
 
@@ -881,7 +946,7 @@ function Composer({
               value={department}
               onChange={(e) => setDepartment(e.target.value)}
               placeholder="Rural Water Supply"
-              className={cn(FIELD, 'mt-1')}
+              className={cn(FIELD, 'mt-1.5')}
             />
           </div>
           <div>
@@ -893,7 +958,7 @@ function Composer({
               value={owner}
               onChange={(e) => setOwner(e.target.value)}
               placeholder="Name or designation"
-              className={cn(FIELD, 'mt-1')}
+              className={cn(FIELD, 'mt-1.5')}
             />
           </div>
         </div>
@@ -908,7 +973,7 @@ function Composer({
               type="date"
               value={due}
               onChange={(e) => setDue(e.target.value)}
-              className={cn(FIELD, 'mt-1')}
+              className={cn(FIELD, 'mt-1.5')}
             />
           </div>
           <div>
@@ -922,7 +987,7 @@ function Composer({
                 const next = asPriority(e.target.value)
                 if (next) setPriority(next)
               }}
-              className={cn(FIELD, 'mt-1')}
+              className={cn(FIELD, 'mt-1.5')}
             >
               {ACTION_PRIORITIES.map((p) => (
                 <option key={p} value={p}>
@@ -942,7 +1007,7 @@ function Composer({
                 const next = asEscalation(e.target.value)
                 if (next) setEscalation(next)
               }}
-              className={cn(FIELD, 'mt-1')}
+              className={cn(FIELD, 'mt-1.5')}
             >
               {ESCALATION_LEVELS.map((level) => (
                 <option key={level} value={level}>
@@ -954,7 +1019,7 @@ function Composer({
         </div>
 
         {!due && (
-          <p className="text-xs text-ink-3">
+          <p className="rounded-[var(--radius-sm)] bg-[var(--surface-2)] px-3 py-2 text-xs text-ink-3">
             Without a date this never appears as late. Set one if the office promised one.
           </p>
         )}
@@ -969,7 +1034,7 @@ function Composer({
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Call the AE, then confirm in writing"
-            className={cn(FIELD, 'mt-1 resize-y leading-relaxed')}
+            className={cn(FIELD, 'mt-1.5 resize-y leading-relaxed')}
           />
         </div>
 
@@ -985,11 +1050,11 @@ function Composer({
               <p className="mt-0.5 text-xs text-ink-3">
                 The complaints this answers. Linking keeps the evidence with the promise.
               </p>
-              <div className="scroller mt-2 max-h-48 space-y-1 overflow-y-auto rounded-[--radius-sm] border border-[var(--border)] p-1">
+              <div className="scroller mt-2 max-h-48 space-y-1 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-1.5">
                 {records.map((r) => (
                   <label
                     key={r.id}
-                    className="flex min-h-11 cursor-pointer items-start gap-2.5 rounded-[--radius-xs] px-2 py-2 hover:bg-[var(--surface-2)]"
+                    className="flex min-h-11 cursor-pointer items-start gap-2.5 rounded-[var(--radius-sm)] px-2 py-2 transition-colors hover:bg-[var(--surface)]"
                   >
                     <input
                       type="checkbox"
@@ -998,7 +1063,9 @@ function Composer({
                       className="mt-0.5 size-4 shrink-0 accent-[var(--accent)]"
                     />
                     <span className="min-w-0">
-                      <span className="line-clamp-2 block text-xs text-ink-1">{r.headline}</span>
+                      <span className="line-clamp-2 block text-xs font-medium text-ink">
+                        {r.headline}
+                      </span>
                       <span className="mt-0.5 block text-2xs text-ink-3">
                         {r.topic}
                         {r.constituency ? ` · ${r.constituency}` : ''}
@@ -1014,7 +1081,7 @@ function Composer({
         {error && (
           <p
             role="alert"
-            className="flex items-start gap-1.5 rounded-[--radius-sm] bg-[var(--neg-soft)] p-2.5 text-xs text-[var(--neg)]"
+            className="flex items-start gap-1.5 rounded-[var(--radius-sm)] bg-[var(--neg-soft)] p-2.5 text-xs font-medium text-[var(--neg)]"
           >
             <TriangleAlert size={14} className="mt-px shrink-0" aria-hidden />
             {error}
@@ -1065,26 +1132,34 @@ function Column({
   const capped = status === 'Completed' || status === 'Declined'
   const shown = capped && !showAll ? items.slice(0, 6) : items
   const meta = STATUS_META[status]
+  const badge = STATUS_BADGE[status]
   const Icon = meta.icon
 
   return (
     <section aria-label={status}>
-      <div className="mb-2.5 flex items-baseline justify-between gap-2">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-ink-1">
-          <Icon size={14} className="text-ink-3" aria-hidden />
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+          <span
+            className="icon-badge icon-badge-sm"
+            style={{ background: badge.bg, color: badge.fg }}
+          >
+            <Icon size={15} aria-hidden />
+          </span>
           {status}
-          <span className="num text-xs text-ink-3">{items.length}</span>
+          <span className="tnum rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-[11px] font-semibold text-ink-2">
+            {items.length}
+          </span>
         </h2>
         {pulled > 0 && (
-          <span className="text-2xs text-[var(--neg)]">
+          <span className="text-2xs font-semibold text-[var(--neg)]">
             {pulled} overdue above
           </span>
         )}
       </div>
-      <p className="mb-2.5 text-2xs text-ink-3">{meta.blurb}</p>
+      <p className="mb-3 text-2xs text-ink-3">{meta.blurb}</p>
 
       {items.length === 0 ? (
-        <p className="rounded-[--radius-md] border border-dashed border-[var(--border)] p-3 text-xs text-ink-3">
+        <p className="rounded-[var(--radius-md)] bg-[var(--surface-2)] p-4 text-xs text-ink-3">
           Nothing here.
         </p>
       ) : (
@@ -1249,6 +1324,67 @@ export function Actions({ onClose }: { onClose: () => void }) {
         />
       </m.div>
 
+      {/* ── Progress across everything tracked ───────────────────────────
+          Reads straight off the counts the summary line already carries. */}
+      {actions.length > 0 && (
+        <m.div variants={fadeUp}>
+          <Card>
+            <CardHead
+              icon={<ListChecks size={16} aria-hidden />}
+              tint="green"
+              title="Progress"
+              sub="Counted from the tasks below"
+            />
+            <div className="flex flex-wrap items-center gap-6 sm:gap-10">
+              <DonutGauge
+                value={doneCount}
+                max={Math.max(actions.length, 1)}
+                size={124}
+                thickness={13}
+                sublabel={`${doneCount} of ${actions.length} done`}
+              />
+              <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 min-[420px]:grid-cols-3">
+              {(
+                [
+                  {
+                    label: 'Overdue',
+                    value: overdue.length,
+                    icon: TriangleAlert,
+                    bg: 'var(--neg-soft)',
+                    fg: 'var(--neg)',
+                  },
+                  {
+                    label: 'Open',
+                    value: openCount,
+                    icon: CircleDashed,
+                    bg: 'var(--accent-soft)',
+                    fg: 'var(--accent)',
+                  },
+                  {
+                    label: 'Done',
+                    value: doneCount,
+                    icon: CircleCheck,
+                    bg: 'var(--pos-soft)',
+                    fg: 'var(--pos)',
+                  },
+                ] satisfies { label: string; value: number; icon: LucideIcon; bg: string; fg: string }[]
+              ).map((s) => (
+                <div key={s.label} className="flex items-center gap-3">
+                  <span className="icon-badge" style={{ background: s.bg, color: s.fg }}>
+                    <s.icon size={18} aria-hidden />
+                  </span>
+                  <div>
+                    <p className="tnum text-xl font-bold leading-none text-ink">{s.value}</p>
+                    <p className="mt-1 text-[11px] font-medium text-ink-3">{s.label}</p>
+                  </div>
+                </div>
+              ))}
+              </div>
+            </div>
+          </Card>
+        </m.div>
+      )}
+
       {composing && (
         <m.div variants={fadeUp}>
           <Composer
@@ -1263,32 +1399,47 @@ export function Actions({ onClose }: { onClose: () => void }) {
       {actions.length === 0 && !composing && (
         <m.div variants={fadeUp}>
           <Card tone="accent" className="grain">
-            <span className="grid size-10 place-items-center rounded-[--radius-md] bg-[var(--accent-soft)] text-[var(--accent)]">
-              <ListChecks size={19} aria-hidden />
-            </span>
-            <h2 className="mt-3 text-base font-semibold text-ink-1">
-              No actions yet
-            </h2>
-            <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
+            <CardHead
+              icon={<ListChecks size={16} aria-hidden />}
+              tint="blue"
+              title="No actions yet"
+              sub="A complaint, turned into somebody's job"
+            />
+            <p className="text-sm leading-relaxed text-ink-2">
               An action is a complaint turned into somebody’s job: what needs doing, which
               department owns it, and the date the office promised. Once it has a date, this
               screen is what tells you it has run out, and what to escalate.
             </p>
-            <ul className="mt-3 space-y-1.5 text-xs text-ink-3">
-              <li className="flex items-start gap-1.5">
-                <CalendarClock size={13} className="mt-0.5 shrink-0" aria-hidden />
+            <ul className="mt-4 space-y-2.5 text-xs text-ink-3">
+              <li className="flex items-center gap-2.5">
+                <span
+                  className="icon-badge icon-badge-sm"
+                  style={{ background: 'var(--neg-soft)', color: 'var(--neg)' }}
+                >
+                  <CalendarClock size={14} aria-hidden />
+                </span>
                 Overdue work is lifted above everything else, so it cannot be scrolled past.
               </li>
-              <li className="flex items-start gap-1.5">
-                <ArrowUp size={13} className="mt-0.5 shrink-0" aria-hidden />
+              <li className="flex items-center gap-2.5">
+                <span
+                  className="icon-badge icon-badge-sm"
+                  style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}
+                >
+                  <ArrowUp size={14} aria-hidden />
+                </span>
                 A late item offers the next escalation level: officer, department, minister.
               </li>
-              <li className="flex items-start gap-1.5">
-                <Link2 size={13} className="mt-0.5 shrink-0" aria-hidden />
+              <li className="flex items-center gap-2.5">
+                <span
+                  className="icon-badge icon-badge-sm"
+                  style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+                >
+                  <Link2 size={14} aria-hidden />
+                </span>
                 Link the records it answers, so the evidence stays with the promise.
               </li>
             </ul>
-            <Button className="mt-4" size="sm" onClick={() => setComposing(true)}>
+            <Button className="mt-5" size="sm" onClick={() => setComposing(true)}>
               <Plus size={15} aria-hidden />
               Create the first one
             </Button>
@@ -1299,12 +1450,17 @@ export function Actions({ onClose }: { onClose: () => void }) {
       {/* ── Overdue, above everything ────────────────────────────────────── */}
       {overdue.length > 0 && (
         <m.section variants={fadeUp} aria-label="Overdue">
-          <div className="rounded-[--radius-lg] border border-[color-mix(in_oklab,var(--neg)_32%,transparent)] bg-[var(--neg-soft)] p-3">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--neg)]">
-              <TriangleAlert size={16} aria-hidden />
+          <div className="rounded-[var(--radius-lg)] border border-[color-mix(in_oklab,var(--neg)_32%,transparent)] bg-[var(--neg-soft)] p-4">
+            <h2 className="flex items-center gap-2.5 text-sm font-bold text-[var(--neg)]">
+              <span
+                className="icon-badge icon-badge-sm"
+                style={{ background: 'var(--neg)', color: 'var(--surface)' }}
+              >
+                <TriangleAlert size={15} aria-hidden />
+              </span>
               {overdue.length} {pluralise(overdue.length, 'action')} overdue
             </h2>
-            <p className="mt-1 text-xs text-[var(--neg)]">
+            <p className="mt-1.5 text-xs font-medium text-[var(--neg)]">
               Past the date the office promised. Taken out of their columns so they cannot be
               missed.
             </p>
@@ -1341,8 +1497,8 @@ export function Actions({ onClose }: { onClose: () => void }) {
               now={now}
               onPatch={patch}
               onRemove={remove}
-                          focusId={focusId}
-/>
+              focusId={focusId}
+            />
           ))}
         </m.div>
       )}

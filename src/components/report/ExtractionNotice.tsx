@@ -1,4 +1,4 @@
-import { CircleAlert, PencilLine, Wrench } from 'lucide-react'
+import { CircleAlert, Info, PencilLine } from 'lucide-react'
 import type { PostSnapshot } from '@shared/types'
 import { Card, Chip } from '../ui'
 import { cn } from '@/lib/utils'
@@ -52,7 +52,10 @@ export function ExtractionNotice({
   if (perfect && !extraction.userAssisted) return null
 
   return (
-    <Card className={cn(missing.length >= 3 && 'border border-[var(--warn)]/30')}>
+    // A quiet card on purpose: this note explains the data, and must never
+    // shout louder than the data itself. Only a mostly-withheld read (three
+    // or more missing figures) earns the warm border.
+    <Card level="quiet" className={cn(missing.length >= 3 && 'border border-[var(--warn)]/30')}>
       <div className="flex items-start gap-3">
         <span
           className={cn(
@@ -63,7 +66,7 @@ export function ExtractionNotice({
           {missing.length >= 3 ? (
             <CircleAlert size={16} className="text-[var(--warn)]" />
           ) : (
-            <Wrench size={15} className="text-ink-3" />
+            <Info size={15} className="text-ink-3" />
           )}
         </span>
 

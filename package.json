@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Signal \u2014 paste any public social media post link and get a full intelligence readout: what it says, what it means, how it landed, and what to do about it.",
+  "description": "Signal — paste any public social media post link and get a full intelligence readout: what it says, what it means, how it landed, and what to do about it.",
   "scripts": {
     "dev": "netlify dev",
     "dev:vite": "vite",
@@ -23,11 +23,12 @@
     "test:export": "tsx scripts/test-export.ts",
     "test:typography": "tsx scripts/test-typography.ts",
     "test:ssrf": "tsx scripts/test-ssrf.ts",
-    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:scoping && npm run test:places && npm run test:autoconfig && npm run test:matching && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:comments && npm run test:export && npm run test:extract && npm run test:news",
+    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:scoping && npm run test:places && npm run test:autoconfig && npm run test:matching && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:sync && npm run test:comments && npm run test:export && npm run test:extract && npm run test:news",
     "test:scoping": "tsx scripts/test-scoping.ts",
     "test:places": "tsx scripts/test-places.ts",
     "test:autoconfig": "tsx scripts/test-autoconfig.ts",
-    "test:matching": "tsx scripts/test-matching.ts"
+    "test:matching": "tsx scripts/test-matching.ts",
+    "test:sync": "tsx scripts/test-sync.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
@@ -37,6 +38,7 @@
     "canvas-confetti": "^1.9.4",
     "cheerio": "^1.2.0",
     "clsx": "^2.1.1",
+    "firebase-admin": "^14.3.0",
     "linkedom": "^0.18.13",
     "lucide-react": "^1.31.0",
     "motion": "^13.1.0",
@@ -56,9 +58,11 @@
     "@vitejs/plugin-react": "^6.0.5",
     "netlify-cli": "^27.1.2",
     "tailwindcss": "^4.3.3",
+    "topojson-client": "^3.1.0",
     "tsx": "^4.23.12",
     "typescript": "^5.9.2",
-    "vite": "^8.2.1"
+    "vite": "^8.2.1",
+    "world-atlas": "^2.0.2"
   },
   "engines": {
     "node": ">=20"
