@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, LazyMotion, domAnimation } from 'motion/react'
 import * as m from 'motion/react-m'
 import {
@@ -1048,7 +1049,22 @@ export function LockButton({ className }: { className?: string }) {
       {signedIn ? (
         <VaultSheet open={open} onClose={() => { setOpen(false); setMode(null) }} />
       ) : (
-        open && (
+        open &&
+        /**
+         * Portalled to <body>, and it has to be.
+         *
+         * This button lives in the header, and the header wears `.glass` —
+         * which means `backdrop-filter`. A filtered element becomes the
+         * CONTAINING BLOCK for its `position: fixed` descendants, so
+         * `fixed inset-0` stopped meaning "the viewport" and started meaning
+         * "the header": the whole sign-in screen was laid out inside a 60px
+         * strip at the top of the page and clipped. `transform`, `filter`,
+         * `perspective`, `contain` and `will-change` do the same thing, so an
+         * overlay rendered from anywhere in the tree cannot rely on being able
+         * to escape its ancestors. Rendering into <body> is the fix that does
+         * not care what any ancestor is doing.
+         */
+        createPortal(
           <div className="fixed inset-0 z-50 overflow-y-auto bg-[var(--bg)]">
             <button
               type="button"
@@ -1062,7 +1078,8 @@ export function LockButton({ className }: { className?: string }) {
               <X size={18} />
             </button>
             <LockScreen onUnlocked={() => { setOpen(false); setMode(null) }} />
-          </div>
+          </div>,
+          document.body,
         )
       )}
     </>
@@ -1164,7 +1181,14 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   // tapped through without reading; a name has to be looked at to be copied.
   const deleteArmed = account !== null && confirmName.trim() === account.name.trim()
 
-  return (
+  /**
+   * Portalled to <body> for the same reason the sign-in overlay is: the
+   * control that opens this sheet sits in the `.glass` header, whose
+   * `backdrop-filter` makes it the containing block for fixed descendants.
+   * Without the portal the scrim and the sheet lay out inside the header
+   * strip instead of over the page.
+   */
+  return createPortal(
     <LazyMotion features={domAnimation} strict>
       <AnimatePresence>
         {open && (
@@ -1387,6 +1411,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           </>
         )}
       </AnimatePresence>
-    </LazyMotion>
+    </LazyMotion>,
+    document.body,
   )
 }
