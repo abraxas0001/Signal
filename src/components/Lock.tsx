@@ -550,10 +550,9 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                     <Lock size={20} />
                   </span>
                   <div className="min-w-0">
-                    <h1 className="text-xl font-bold tracking-[-0.015em]">Who is this?</h1>
+                    <h1 className="text-xl font-bold tracking-[-0.015em]">Sign in</h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                      Each person on this device has their own records and their own passphrase.
-                      Nobody sees anybody else's.
+                      Each account has its own records and passphrase.
                     </p>
                   </div>
                 </div>
@@ -689,24 +688,23 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                   </span>
                   <div className="min-w-0">
                     <h1 className="text-xl font-bold tracking-[-0.015em]">
-                      {hasAccounts() ? 'Add a person to this device' : 'Set up this device'}
+                      {hasAccounts() ? 'Add an account' : 'Create your account'}
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                      Signal keeps grievances, names and unproven allegations on this device and
-                      nowhere else. A passphrase encrypts them, and each person's records are
-                      encrypted separately.
+                      Records stay on this device, encrypted with your passphrase.
                     </p>
                   </div>
                 </div>
 
-                {/* Stated before the fields, not after the button. Somebody who
-                    reads this only once they have already committed has already
-                    lost the thing the warning is about. */}
+                {/* The one warning that survives the trim.
+                    Everything else on this screen was explanation a person can
+                    look up later; this is the only line with a consequence they
+                    cannot undo, and it has to be read BEFORE the fields, not
+                    after the button. */}
                 <div className="mt-5">
                   <Notice tone="warn">
-                    There is no reset. Nobody, including this office, can recover a forgotten
-                    passphrase, and this account's records go with it. Write it down before you
-                    continue.
+                    There is no reset. A forgotten passphrase cannot be recovered by anyone, and
+                    this account&rsquo;s records go with it. Write it down.
                   </Notice>
                 </div>
 
@@ -719,7 +717,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                       setName(v)
                       if (error) setError(null)
                     }}
-                    hint="Whoever picks up this device sees this name before signing in. A first name is enough. Do not describe what is inside."
+                    hint="A first name is enough."
                     autoFocus
                   />
                   <PassphraseField
@@ -731,7 +729,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                       if (error) setError(null)
                     }}
                     autoComplete="new-password"
-                    hint={`At least ${VAULT_PARAMS.minPassphrase} characters. Four ordinary words you will remember beats one short clever one.`}
+                    hint={`At least ${VAULT_PARAMS.minPassphrase} characters.`}
                   />
                   <PassphraseField
                     id="vault-confirm"
