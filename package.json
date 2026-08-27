@@ -32,7 +32,13 @@
     "scraper": "tsx --env-file-if-exists=.env scraper/server.ts",
     "scraper:login": "tsx --env-file-if-exists=.env scraper/login.ts",
     "scraper:test": "tsx --env-file-if-exists=.env scraper/test.ts",
-    "scraper:probe": "tsx --env-file-if-exists=.env scraper/probe.ts"
+    "scraper:probe": "tsx --env-file-if-exists=.env scraper/probe.ts",
+    "scraper:session": "tsx --env-file-if-exists=.env scraper/session-status.ts",
+    "test:counts": "tsx scripts/test-parse-count.ts",
+    "scraper:demo": "tsx --env-file-if-exists=.env scraper/build-demo.ts",
+    "scraper:media": "tsx --env-file-if-exists=.env scraper/fetch-avatars.ts",
+    "scraper:shrink": "tsx scraper/shrink-media.ts",
+    "scraper:opinions": "tsx --env-file-if-exists=.env scraper/read-opinions.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

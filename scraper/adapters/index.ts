@@ -1,5 +1,5 @@
 /**
- * The four adapters, registered.
+ * The five adapters, registered.
  *
  * One file per platform, all implementing `PlatformAdapter`, so a platform
  * that changes its markup is one file to fix and the other three keep
@@ -13,10 +13,12 @@ import { facebook } from './facebook'
 import { instagram } from './instagram'
 import { linkedin } from './linkedin'
 import { twitter } from './twitter'
+import { youtube } from './youtube'
 
 export const adapters: Record<Platform, PlatformAdapter> = {
   Facebook: facebook,
   Instagram: instagram,
   LinkedIn: linkedin,
   'Twitter/X': twitter,
+  YouTube: youtube,
 }

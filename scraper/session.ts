@@ -30,42 +30,78 @@ import type { Page } from 'playwright'
 import type { Platform } from './types'
 
 /**
- * Selectors that appear only for a signed-in viewer, and — importantly —
- * appear on ordinary content pages too, not just the home feed. isLoginWall
- * runs after navigating to a profile, so a marker that only exists on /home
- * would report every profile as a wall.
+ * Selectors that appear only for a signed-in viewer.
+ *
+ * Two rules, both learned the hard way, both from measurement rather than
+ * reasoning:
+ *
+ * 1. NEVER ENGLISH TEXT. The first cut listed things like
+ *    `[aria-label="Your profile"]`. Measured against a real signed-in session
+ *    whose Facebook renders in Hindi, the profile page carried
+ *    `[aria-label="आपकी प्रोफ़ाइल"]` instead and every marker missed — a healthy
+ *    session reported as a login wall. `data-pagelet`, `data-testid`, hrefs and
+ *    class names are build constants and do not translate; aria-labels do.
+ *
+ * 2. IT MUST BE ABSENT WHEN SIGNED OUT, and that has to be checked, not
+ *    assumed. Facebook's profile page renders `ProfileActions`, `ProfileTabs`,
+ *    `ProfileTilesFeed_0` and `TimelineFeedUnit_0` to anonymous visitors as
+ *    well — it serves a truncated but real timeline. Any of those as "proof of
+ *    a session" would produce a false signed-in, and a false signed-in is the
+ *    failure that matters: the scrape returns nothing and the dashboard renders
+ *    that absence as a politician who has stopped posting.
+ *
+ * Every selector below was measured in both states, on the surface the scraper
+ * actually visits — profile pages, not just the home feed, since isLoginWall
+ * runs after navigating to a profile. Re-measure with:
+ *
+ *   npm run scraper:probe -- facebook --url=<profile> --check='sel,sel'
+ *   SCRAPER_PROFILE_DIR=/tmp/throwaway  (same command again, for the control)
  */
-const SIGNED_IN: Record<Platform, string[]> = {
+export const SIGNED_IN: Record<Platform, string[]> = {
   'Twitter/X': [
-    // The account switcher and composer live in the persistent left rail.
+    // data-testid values are build constants, identical in every language.
     '[data-testid="SideNav_AccountSwitcher_Button"]',
     '[data-testid="AppTabBar_Home_Link"]',
     '[data-testid="SideNav_NewTweet_Button"]',
     '[data-testid="AppTabBar_Profile_Link"]',
   ],
   Instagram: [
-    // The DM inbox link is never rendered to a signed-out visitor.
+    // Both measured present on the home feed AND on a profile page while
+    // signed in, and absent from the same profile page signed out. The old
+    // `svg[aria-label="Home"]` and `[aria-label="New post"]` are gone: English
+    // strings, and bare `svg[aria-label]` matches signed-out pages too.
     'a[href="/direct/inbox/"]',
-    'a[href*="/accounts/edit"]',
-    'svg[aria-label="Home"]',
-    '[aria-label="New post"]',
+    'a[href="/explore/"]',
   ],
   Facebook: [
-    '[aria-label="Your profile"]',
-    '[aria-label="Account"]',
-    'div[role="banner"] a[href*="/me/"]',
+    // ProfileTimeline is the discriminator on profile pages: present signed in,
+    // absent signed out, while the neighbouring pagelets appear in both.
+    '[data-pagelet="ProfileTimeline"]',
+    'a[href*="/notifications"]',
+    'a[href*="/friends"]',
+    // Home feed only; kept so the feed surface has a marker of its own.
     '[data-pagelet="LeftRail"]',
   ],
+  // YouTube needs no session, so it has no signed-in marker. The adapter's
+  // isLoginWall answers false outright rather than consulting this.
+  YouTube: [],
   LinkedIn: [
-    '.global-nav__me',
-    'button[aria-label*="Me"]',
-    '.scaffold-finite-scroll',
-    'a[href*="/in/"][data-control-name]',
+    // `.global-nav__me` and `.scaffold-finite-scroll` were measured ABSENT on a
+    // signed-in feed — LinkedIn has renamed them since they were written. The
+    // nav destinations survive renames and do not translate.
+    'a[href*="/mynetwork"]',
+    'a[href*="/messaging"]',
+    'a[href*="/notifications"]',
   ],
 }
 
 /** Unambiguous wall tells. Cheap fast path before the DOM query. */
-const WALL_URL: Record<Platform, RegExp> = {
+export const WALL_URL: Record<Platform, RegExp> = {
+  // Never consulted: the YouTube adapter answers isLoginWall false outright,
+  // because a public channel page has no wall to detect. `a^` matches nothing
+  // by construction, which is the honest value for "this question does not
+  // apply" — an empty pattern would match everything.
+  YouTube: /a^/,
   'Twitter/X': /\/i\/flow\/(login|signup)|\/login\b/i,
   Instagram: /\/accounts\/(login|signup)/i,
   Facebook: /\/login|\/checkpoint|\/recover/i,

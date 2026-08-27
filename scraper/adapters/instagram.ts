@@ -26,10 +26,12 @@
 import { isLoggedOut } from '../session'
 import {
   canonicalUrl,
+  parseCount,
   type AdapterContext,
   type AdapterResult,
   type PlatformAdapter,
   type ScrapedComment,
+  type ProfileInfo,
   type ScrapedPost,
 } from '../types'
 import { autoScroll } from '../browser'
@@ -37,8 +39,8 @@ import { autoScroll } from '../browser'
 /** Post and reel permalinks. Stories and highlights are deliberately excluded. */
 const POST_HREF = /\/(p|reel)\/[A-Za-z0-9_-]+/
 
-function harvest(): { href: string; alt: string | null }[] {
-  const out: { href: string; alt: string | null }[] = []
+function harvest(): { href: string; alt: string | null; thumb: string | null }[] {
+  const out: { href: string; alt: string | null; thumb: string | null }[] = []
   const seen = new Set<string>()
 
   for (const a of Array.from(document.querySelectorAll('a[href]'))) {
@@ -47,8 +49,11 @@ function harvest(): { href: string; alt: string | null }[] {
     seen.add(href)
     // The tile's image alt text is Instagram's own generated description and
     // is the only text the grid offers — useful as a title preview.
-    const alt = a.querySelector('img')?.getAttribute('alt') ?? null
-    out.push({ href, alt })
+    const img = a.querySelector('img')
+    const alt = img?.getAttribute('alt') ?? null
+    // On a grid the tile IS the picture, so every post has one.
+    const thumb = (img as HTMLImageElement | null)?.currentSrc || img?.getAttribute('src') || null
+    out.push({ href, alt, thumb })
   }
   return out
 }
@@ -71,6 +76,40 @@ export const instagram: PlatformAdapter = {
    * signed-in viewer gets, such as the DM inbox link.
    */
   isLoginWall: ({ page }) => isLoggedOut(page, 'Instagram'),
+
+  /**
+   * The header: display name, follower count, avatar.
+   *
+   * Instagram renders no link around the follower total — measured, there is no
+   * anchor to /followers on a profile page at all — so this scans the header
+   * text for the figure instead. The pattern demands a number IMMEDIATELY
+   * before the word, which is what separates "88.8k followers" from the
+   * "35 following" sitting beside it.
+   */
+  profile: async ({ page }: AdapterContext): Promise<ProfileInfo> => {
+    const raw = await page
+      .evaluate(() => {
+        let followers: string | null = null
+        for (const el of Array.from(document.querySelectorAll('span, li, div'))) {
+          const t = (el.textContent ?? '').trim()
+          if (t.length > 40) continue
+          const m = t.match(/^([\d.,]+\s*[kKmMbB]?)\s*followers?$/i)
+          if (m && m[1]) { followers = m[1]; break }
+        }
+        return {
+          followers,
+          displayName: document.querySelector('header h2, header h1')?.textContent?.trim() ?? null,
+          avatarUrl: document.querySelector('header img')?.getAttribute('src') ?? null,
+        }
+      })
+      .catch(() => ({ followers: null, displayName: null, avatarUrl: null }))
+
+    return {
+      displayName: raw.displayName || null,
+      followers: parseCount(raw.followers),
+      avatarUrl: raw.avatarUrl,
+    }
+  },
 
   posts: async (ctx: AdapterContext, handle): Promise<AdapterResult<ScrapedPost>> => {
     const { page, log, limit } = ctx
@@ -99,7 +138,7 @@ export const instagram: PlatformAdapter = {
     const found = new Map<string, ScrapedPost>()
 
     for (let round = 0; round < 8 && found.size < limit; round++) {
-      const raw = await page.evaluate(harvest).catch(() => [] as { href: string; alt: string | null }[])
+      const raw = await page.evaluate(harvest).catch(() => [] as { href: string; alt: string | null; thumb: string | null }[])
 
       for (const r of raw) {
         if (!POST_HREF.test(r.href)) continue
@@ -116,6 +155,8 @@ export const instagram: PlatformAdapter = {
           comments: null,
           shares: null,
           views: null,
+          // On a grid the tile IS the picture, so this is always present.
+          thumbnailUrl: r.thumb ?? null,
         })
         if (found.size >= limit) break
       }
@@ -141,7 +182,82 @@ export const instagram: PlatformAdapter = {
       }
     }
 
-    log(`Instagram: ${found.size} posts for @${normaliseHandle(handle)}`)
+    /**
+     * The counts, revealed by hovering each tile.
+     *
+     * Instagram publishes nothing in the grid markup — a tile carries its link
+     * and its alt text and no figures at all — but the hover overlay renders
+     * likes and comments, and the overlay is in the DOM once the pointer is on
+     * it. That happens on the page already loaded, so twenty-five posts cost
+     * twenty-five hovers rather than twenty-five navigations. The alternative
+     * was visiting every permalink, which on the platform that "punishes haste"
+     * would have been a hundred and fifty page loads across this roster, for
+     * data that was sitting here.
+     *
+     * IT IS POSITIONAL — likes first, comments second — WHICH THE FACEBOOK
+     * ADAPTER REFUSES TO BE. The difference is measured, not stylistic. On
+     * Facebook a count that is zero renders no number at all, so the second
+     * figure might be comments or might be shares, and there is no way to tell.
+     * Here every tile rendered exactly two numbers, fourteen out of fourteen,
+     * so nothing shifts. The icons carry no aria-label, so order is the only
+     * signal available.
+     *
+     * Because it IS an assumption, it is checked rather than trusted: a post
+     * with fewer likes than comments would mean the two had been read the wrong
+     * way round, and both are dropped instead of recorded. That loses the rare
+     * genuinely comment-heavy post, which is the correct trade — a silently
+     * transposed engagement figure is the kind of error nobody downstream can
+     * catch.
+     */
+    const tiles = page.locator('a[href*="/p/"], a[href*="/reel/"]')
+    const tileCount = Math.min(await tiles.count().catch(() => 0), limit * 2)
+    let read = 0
+    let dropped = 0
+
+    for (let i = 0; i < tileCount; i++) {
+      const tile = tiles.nth(i)
+      const href = await tile.getAttribute('href').catch(() => null)
+      if (!href) continue
+      const url = canonicalUrl(href, 'https://www.instagram.com')
+      const post = url ? found.get(url) : undefined
+      if (!post || post.likes !== null) continue
+
+      await tile.hover({ timeout: 3_000 }).catch(() => {})
+      await page.waitForTimeout(500)
+
+      const nums = await tile
+        .evaluate((el) => {
+          const out: string[] = []
+          for (const e of Array.from(el.querySelectorAll('span, li, div'))) {
+            const s = (e.textContent ?? '').trim()
+            if (/^[\d.,]+\s*[KMB]?$/.test(s) && e.querySelector('span,div,li') === null) out.push(s)
+          }
+          return out
+        })
+        .catch(() => [] as string[])
+
+      // Exactly two, or this is not the overlay we measured and nothing is read.
+      if (nums.length !== 2) continue
+
+      const likes = parseCount(nums[0] ?? null)
+      const comments = parseCount(nums[1] ?? null)
+      if (likes === null || comments === null) continue
+
+      if (likes < comments) {
+        dropped++
+        continue
+      }
+
+      post.likes = likes
+      post.comments = comments
+      read++
+    }
+
+    log(
+      `Instagram: ${found.size} posts for @${normaliseHandle(handle)}` +
+        (read > 0 ? `, engagement on ${read}` : '') +
+        (dropped > 0 ? ` (${dropped} dropped: likes below comments)` : ''),
+    )
     return { ok: true, items: [...found.values()].slice(0, limit) }
   },
 

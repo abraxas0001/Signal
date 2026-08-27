@@ -36,3 +36,6 @@ docs/
 
 # Real session cookies for real accounts. Never commit.
 .scraper-profile/
+
+# Live social sessions — same sensitivity as the profile itself.
+.scraper-session.json

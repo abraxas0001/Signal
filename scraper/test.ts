@@ -26,6 +26,8 @@ const ALIAS: Record<string, Platform> = {
   li: 'LinkedIn',
   x: 'Twitter/X',
   twitter: 'Twitter/X',
+  youtube: 'YouTube',
+  yt: 'YouTube',
 }
 
 async function main() {
@@ -35,13 +37,13 @@ async function main() {
   const [rawPlatform, handle] = positional
 
   if (!rawPlatform || !handle) {
-    console.log('usage: npm run scraper:test -- <facebook|instagram|linkedin|x> <handle> [--headed]')
+    console.log('usage: npm run scraper:test -- <facebook|instagram|linkedin|x|youtube> <handle> [--headed]')
     process.exit(1)
   }
 
   const platform = ALIAS[rawPlatform.toLowerCase()]
   if (!platform) {
-    console.log(`unknown platform "${rawPlatform}" — use facebook | instagram | linkedin | x`)
+    console.log(`unknown platform "${rawPlatform}" — use facebook | instagram | linkedin | x | youtube`)
     process.exit(1)
   }
 

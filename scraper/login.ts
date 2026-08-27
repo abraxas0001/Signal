@@ -22,7 +22,7 @@ import { PLATFORMS, type Platform } from './types'
  * The logged-in landing page for each platform, so an existing session is
  * detected without bouncing anybody through a form they do not need.
  */
-const HOME: Record<Platform, string> = {
+const HOME: Record<SignInPlatform, string> = {
   Facebook: 'https://www.facebook.com/',
   Instagram: 'https://www.instagram.com/',
   LinkedIn: 'https://www.linkedin.com/feed/',
@@ -41,14 +41,24 @@ const HOME: Record<Platform, string> = {
  * The account has to be created in an ordinary browser. This tool only signs
  * an existing one in, so it goes straight to the form that does that.
  */
-const SIGN_IN: Record<Platform, string> = {
+const SIGN_IN: Record<SignInPlatform, string> = {
   Facebook: 'https://www.facebook.com/login/',
   Instagram: 'https://www.instagram.com/accounts/login/',
   LinkedIn: 'https://www.linkedin.com/login',
   'Twitter/X': 'https://x.com/i/flow/login',
 }
 
-const ALIAS: Record<string, Platform> = {
+/**
+ * The platforms that HAVE a sign-in.
+ *
+ * YouTube is deliberately absent. Its channel pages are public, so there is
+ * nothing to sign into and no session to keep — offering it here would open a
+ * browser at a login form nobody needs to complete, and then report a failure
+ * when they closed it.
+ */
+type SignInPlatform = Exclude<Platform, 'YouTube'>
+
+const ALIAS: Record<string, SignInPlatform> = {
   facebook: 'Facebook',
   fb: 'Facebook',
   instagram: 'Instagram',
@@ -79,9 +89,9 @@ process.on('unhandledRejection', () => {
 
 async function main() {
   const args = process.argv.slice(2).map((a) => a.toLowerCase())
-  const wanted: Platform[] = args.length
-    ? args.map((a) => ALIAS[a]).filter((p): p is Platform => Boolean(p))
-    : [...PLATFORMS]
+  const wanted: SignInPlatform[] = args.length
+    ? args.map((a) => ALIAS[a]).filter((p): p is SignInPlatform => Boolean(p))
+    : PLATFORMS.filter((p): p is SignInPlatform => p !== 'YouTube')
 
   if (wanted.length === 0) {
     console.log('Unknown platform. Use: facebook | instagram | linkedin | x')

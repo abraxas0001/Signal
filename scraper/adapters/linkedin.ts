@@ -27,6 +27,7 @@ import {
   type AdapterResult,
   type PlatformAdapter,
   type ScrapedComment,
+  type ProfileInfo,
   type ScrapedPost,
 } from '../types'
 import { autoScroll } from '../browser'
@@ -36,6 +37,7 @@ interface RawItem {
   text: string | null
   /** The social counts row, e.g. "12 reactions · 3 comments". */
   counts: string | null
+  thumb: string | null
 }
 
 function harvest(): RawItem[] {
@@ -63,9 +65,37 @@ function harvest(): RawItem[] {
       text: el.querySelector('.update-components-text, .feed-shared-text')?.textContent?.trim()
         ?? el.textContent?.trim().slice(0, 200)
         ?? null,
-      counts:
-        el.querySelector('.social-details-social-counts, [class*="social-counts"]')?.textContent?.trim()
-        ?? null,
+      /**
+       * The counts row plus every numeric aria-label in the item.
+       *
+       * The row's own text reads "1,541 87 comments 148 reposts" — the
+       * reaction total is a BARE number with no word beside it, so a reader
+       * looking for "N reactions" found the comments and reposts and returned
+       * null for likes on every post. Taking the leading number positionally
+       * would break on a post with no reactions, where the row starts "87
+       * comments" and 87 would be recorded as likes.
+       *
+       * The aria-labels say it outright — "1,541 reactions", "87 comments on
+       * …'s post" — so they are appended and matched by word like the rest. A
+       * label in another interface language simply will not match, and likes
+       * come back null, which is the honest outcome rather than a guess.
+       */
+      // The attached picture, by rendered size. A feed item also carries the
+      // author's avatar and reactor faces, all from the same CDN; 200px of
+      // width leaves only the post's own image.
+      thumb:
+        Array.from(el.querySelectorAll('img'))
+          .map((im) => im as HTMLImageElement)
+          .filter((im) => im.naturalWidth >= 200)
+          .sort((a, b) => b.naturalWidth - a.naturalWidth)[0]?.currentSrc ?? null,
+      counts: [
+        el.querySelector('.social-details-social-counts, [class*="social-counts"]')?.textContent?.trim() ?? '',
+        ...Array.from(el.querySelectorAll('[aria-label]'))
+          .map((e) => e.getAttribute('aria-label') ?? '')
+          .filter((l) => /[0-9]/.test(l)),
+      ]
+        .filter(Boolean)
+        .join(' · ') || null,
     })
   }
   return out
@@ -100,6 +130,45 @@ export const linkedin: PlatformAdapter = {
    * a signed-in marker still holds the line.
    */
   isLoginWall: ({ page }) => isLoggedOut(page, 'LinkedIn'),
+
+  /**
+   * The header: display name, follower count, avatar.
+   *
+   * Measured as plain text — "12,134,770 followers" — with no link and no
+   * stable class worth trusting, LinkedIn having already renamed
+   * `.global-nav__me` and `.scaffold-finite-scroll` out from under this file
+   * once today. A text scan bounded to short strings survives that; a class
+   * name would need rewriting at the next redesign.
+   *
+   * Note this reads the ACTIVITY page the posts came from, which carries the
+   * same header as the profile.
+   */
+  profile: async ({ page }: AdapterContext): Promise<ProfileInfo> => {
+    const raw = await page
+      .evaluate(() => {
+        let followers: string | null = null
+        for (const el of Array.from(document.querySelectorAll('span, p, div, li'))) {
+          const t = (el.textContent ?? '').trim()
+          if (t.length > 40) continue
+          const m = t.match(/^([\d.,]+\s*[kKmMbB]?)\s*followers?$/i)
+          if (m && m[1]) { followers = m[1]; break }
+        }
+        return {
+          followers,
+          displayName: document.querySelector('h1')?.textContent?.trim() ?? null,
+          avatarUrl:
+            document.querySelector('img.pv-top-card-profile-picture__image--show, .profile-photo-edit__preview')?.getAttribute('src') ??
+            null,
+        }
+      })
+      .catch(() => ({ followers: null, displayName: null, avatarUrl: null }))
+
+    return {
+      displayName: raw.displayName || null,
+      followers: parseCount(raw.followers),
+      avatarUrl: raw.avatarUrl,
+    }
+  },
 
   posts: async (ctx: AdapterContext, handle): Promise<AdapterResult<ScrapedPost>> => {
     const { page, log, limit } = ctx
@@ -142,6 +211,7 @@ export const linkedin: PlatformAdapter = {
           comments: parseCount(comments),
           shares: parseCount(shares),
           views: null,
+          thumbnailUrl: r.thumb ?? null,
         })
         if (found.size >= limit) break
       }

@@ -24,10 +24,26 @@
  * treats as unforgivable.
  */
 
-/** The four platforms that publish nothing to an unauthenticated server. */
-export type Platform = 'Facebook' | 'Instagram' | 'LinkedIn' | 'Twitter/X'
+/**
+ * The platforms this service reads.
+ *
+ * Four of them publish nothing to an unauthenticated server and need a real
+ * signed-in browser. YouTube is the exception and is included precisely because
+ * it is one: a channel's videos are public, so it costs no login, carries no
+ * risk to an account, and is the only source here that keeps working when every
+ * session has expired.
+ */
+export type Platform = 'Facebook' | 'Instagram' | 'LinkedIn' | 'Twitter/X' | 'YouTube'
 
-export const PLATFORMS: readonly Platform[] = ['Facebook', 'Instagram', 'LinkedIn', 'Twitter/X']
+export const PLATFORMS: readonly Platform[] = [
+  'Facebook',
+  'Instagram',
+  'LinkedIn',
+  'Twitter/X',
+  // The only one that needs no session: a channel's videos are public, so it
+  // has no login to lose and no wall to mistake for an empty account.
+  'YouTube',
+]
 
 export function isPlatform(v: unknown): v is Platform {
   return typeof v === 'string' && (PLATFORMS as readonly string[]).includes(v)
@@ -51,6 +67,16 @@ export interface ScrapedPost {
   comments: number | null
   shares: number | null
   views: number | null
+  /**
+   * The picture the platform shows for this post, as it appeared in the feed.
+   *
+   * A CDN address, and therefore short-lived twice over: these hosts refuse
+   * cross-origin embedding, and their URLs carry signed expiry parameters that
+   * lapse within days. Anything that wants to DISPLAY one has to download it
+   * first — see `scraper:media`. Null where the post is text only, which is a
+   * real answer and renders as the platform's own tile.
+   */
+  thumbnailUrl: string | null
 }
 
 /** One comment, in the shape `social-source.ts` coerces from a provider. */
@@ -113,6 +139,29 @@ export interface PlatformAdapter {
 
   /** The comments under one post. Optional: not every platform is worth it. */
   comments?: (ctx: AdapterContext, url: string) => Promise<AdapterResult<ScrapedComment>>
+
+  /**
+   * Who this profile is, and how many people follow it.
+   *
+   * Read from the profile page the post list was just taken from, so it costs
+   * no extra navigation and no extra pacing budget. Separate from `posts`
+   * because the two answer different questions and fail independently: a
+   * timeline can render while the header has not, and a follower count that
+   * could not be read must not invalidate twenty-five posts that could.
+   *
+   * Every field is nullable and null means "not read", never zero. A follower
+   * count is the headline number on this dashboard, and the difference between
+   * an unknown and a zero is the difference between a blank and a claim that a
+   * sitting MP has no followers.
+   */
+  profile?: (ctx: AdapterContext, handle: string) => Promise<ProfileInfo>
+}
+
+/** The header facts about a profile: who it is and how big its audience is. */
+export interface ProfileInfo {
+  displayName: string | null
+  followers: number | null
+  avatarUrl: string | null
 }
 
 /* ── the wire contract, mirrored from social-source.ts ───────────────────── */
@@ -147,28 +196,57 @@ export interface CommentsResponse {
 export function parseCount(raw: string | null | undefined): number | null {
   if (!raw) return null
   const s = raw.replace(/,/g, '').trim().toLowerCase()
-  const m = s.match(/([\d.]+)\s*(k|m|b|lakh|lakhs|crore|crores|thousand|million)?/)
+  const m = s.match(
+    /([\d.]+)\s*(k|m|b|lakh|lakhs|crore|crores|thousand|million|लाख|करोड़|करोड|हज़ार|हजार|లక్ష|లక్షల|కోటి|కోట్ల|వేల|వేయి)?/,
+  )
   if (!m || !m[1]) return null
   const n = Number.parseFloat(m[1])
   if (!Number.isFinite(n)) return null
-  switch (m[2]) {
-    case 'k':
-    case 'thousand':
-      return Math.round(n * 1_000)
-    case 'm':
-    case 'million':
-      return Math.round(n * 1_000_000)
-    case 'b':
-      return Math.round(n * 1_000_000_000)
-    case 'lakh':
-    case 'lakhs':
-      return Math.round(n * 100_000)
-    case 'crore':
-    case 'crores':
-      return Math.round(n * 10_000_000)
-    default:
-      return Math.round(n)
+
+  const MULTIPLIER: Record<string, number> = {
+    k: 1_000,
+    thousand: 1_000,
+    'हज़ार': 1_000,
+    'हजार': 1_000,
+    'వేల': 1_000,
+    'వేయి': 1_000,
+    m: 1_000_000,
+    million: 1_000_000,
+    b: 1_000_000_000,
+    lakh: 100_000,
+    lakhs: 100_000,
+    'लाख': 100_000,
+    'లక్ష': 100_000,
+    'లక్షల': 100_000,
+    crore: 10_000_000,
+    crores: 10_000_000,
+    'करोड़': 10_000_000,
+    'करोड': 10_000_000,
+    'కోటి': 10_000_000,
+    'కోట్ల': 10_000_000,
   }
+
+  if (m[2]) return Math.round(n * (MULTIPLIER[m[2]] ?? 1))
+
+  /**
+   * A number with an unrecognised unit beside it is not a number we know.
+   *
+   * The unit group is optional, which used to mean anything unmatched silently
+   * fell through to the bare figure. Measured on this desk's own Facebook page,
+   * which renders in Hindi, that turned "2.8 लाख फ़ॉलोअर" — 280,000 followers —
+   * into 3. Not a near miss: five orders of magnitude, presented to a
+   * politician's office as a follower count, with nothing downstream able to
+   * catch it.
+   *
+   * So when a non-ASCII word sits where a multiplier would be, this refuses to
+   * answer rather than assume the units are plain. Plain ASCII trailing words
+   * are fine and common — "12134770 followers", "1271 Likes. Like" — because a
+   * multiplier written in Latin script would have matched above.
+   */
+  const after = s.slice((m.index ?? 0) + m[1].length)
+  if (/[^ -]/.test(after)) return null
+
+  return Math.round(n)
 }
 
 /** Strip tracking noise so the same post does not store under two URLs. */

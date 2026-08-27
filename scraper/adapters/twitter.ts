@@ -28,6 +28,7 @@ import {
   type AdapterResult,
   type PlatformAdapter,
   type ScrapedComment,
+  type ProfileInfo,
   type ScrapedPost,
 } from '../types'
 import { autoScroll } from '../browser'
@@ -41,6 +42,7 @@ interface RawTweet {
   replies: string | null
   reposts: string | null
   views: string | null
+  thumb: string | null
 }
 
 /**
@@ -62,11 +64,20 @@ function harvest(): RawTweet[] {
     ) as HTMLAnchorElement | undefined
     if (!link) continue
 
-    const label = (testid: string): string | null => {
-      const el = art.querySelector(`[data-testid="${testid}"]`)
-      return el?.getAttribute('aria-label') ?? null
-    }
-
+    /**
+     * The engagement labels, read inline.
+     *
+     * There used to be a `const label = (testid) => ...` helper here and it
+     * broke the entire adapter silently. tsx compiles this file through
+     * esbuild with keepNames, which wraps every named function — including an
+     * arrow assigned to a const INSIDE this one — in a `__name(...)` call.
+     * `page.evaluate` ships the function source into the browser, where
+     * `__name` does not exist, so harvest threw ReferenceError on its first
+     * tweet, the caller's `.catch(() => [])` turned that into an empty list,
+     * and X was reported as unreadable while the timeline sat there fully
+     * rendered. Nothing inside a function passed to `evaluate` may be a named
+     * function; the cost of repeating the selector is the price of that.
+     */
     // Views are not a testid control; they ride on the analytics link.
     const viewsEl = Array.from(art.querySelectorAll('a[href*="/analytics"]')).at(0)
     const viewsLabel =
@@ -76,9 +87,21 @@ function harvest(): RawTweet[] {
       href: link.getAttribute('href') ?? '',
       text: art.querySelector('[data-testid="tweetText"]')?.textContent?.trim() ?? null,
       time: art.querySelector('time')?.getAttribute('datetime') ?? null,
-      likes: label('like') ?? label('unlike'),
-      replies: label('reply'),
-      reposts: label('retweet') ?? label('unretweet'),
+      likes:
+        art.querySelector('[data-testid="like"]')?.getAttribute('aria-label') ??
+        art.querySelector('[data-testid="unlike"]')?.getAttribute('aria-label') ??
+        null,
+      replies: art.querySelector('[data-testid="reply"]')?.getAttribute('aria-label') ?? null,
+      reposts:
+        art.querySelector('[data-testid="retweet"]')?.getAttribute('aria-label') ??
+        art.querySelector('[data-testid="unretweet"]')?.getAttribute('aria-label') ??
+        null,
+      // The card's own picture. Photos and video posters both live under a
+      // testid; a text tweet has neither and stays null.
+      thumb:
+        art.querySelector('[data-testid="tweetPhoto"] img')?.getAttribute('src') ??
+        art.querySelector('[data-testid="videoComponent"] img')?.getAttribute('src') ??
+        null,
       views: viewsLabel,
     })
   }
@@ -111,6 +134,39 @@ export const twitter: PlatformAdapter = {
    */
   isLoginWall: ({ page }) => isLoggedOut(page, 'Twitter/X'),
 
+  /**
+   * The header: display name, follower count, avatar.
+   *
+   * X puts the follower total behind a link to /verified_followers, which is
+   * both stable and locale-independent as a SELECTOR — only the word beside the
+   * number translates, and parseCount handles that. Measured: "107.1M
+   * Followers" on a profile with 107,100,000.
+   */
+  profile: async ({ page }: AdapterContext): Promise<ProfileInfo> => {
+    const raw = await page
+      .evaluate(() => {
+        const followLink =
+          document.querySelector('a[href$="/verified_followers"]') ??
+          document.querySelector('a[href$="/followers"]')
+        return {
+          followers: followLink?.textContent?.trim() ?? null,
+          displayName:
+            document.querySelector('[data-testid="UserName"]')?.textContent?.trim().split('@')[0]?.trim() ??
+            null,
+          avatarUrl:
+            document.querySelector('[data-testid^="UserAvatar-Container"] img')?.getAttribute('src') ??
+            null,
+        }
+      })
+      .catch(() => ({ followers: null, displayName: null, avatarUrl: null }))
+
+    return {
+      displayName: raw.displayName || null,
+      followers: parseCount(raw.followers),
+      avatarUrl: raw.avatarUrl,
+    }
+  },
+
   posts: async (ctx: AdapterContext, handle): Promise<AdapterResult<ScrapedPost>> => {
     const { page, log, limit } = ctx
     const found = new Map<string, ScrapedPost>()
@@ -125,8 +181,34 @@ export const twitter: PlatformAdapter = {
       return { ok: true, items: [], note: 'X reports this account as unavailable or protected.' }
     }
 
+    /**
+     * Wait for the first tweet before reading anything.
+     *
+     * X's timeline is not in the initial HTML and takes several seconds to
+     * paint. Measured on a profile with 52,000 posts: nothing at all at 2.5s,
+     * three tweets at 3s, nine at 6s, eleven by 12s. The reader used to harvest
+     * as soon as navigation settled, find an empty page, scroll once, see no
+     * height change because the timeline had not rendered yet, and break out —
+     * then report that it could not read the account. The session was fine and
+     * the tweets arrived a few seconds after it gave up.
+     *
+     * Waiting on the selector rather than on a fixed delay means a fast load is
+     * not punished with a sleep, and a genuinely empty timeline still falls
+     * through to the honest "could not read" below rather than being dressed up
+     * as a silent account.
+     */
+    await page
+      .waitForSelector('article[data-testid="tweet"]', { timeout: 25_000 })
+      .catch(() => {})
+
     for (let round = 0; round < 10 && found.size < limit; round++) {
-      const raw = await page.evaluate(harvest).catch(() => [] as RawTweet[])
+      // A crash in here must not be indistinguishable from an empty timeline.
+      // Swallowing it silently is exactly how a ReferenceError inside harvest
+      // spent an afternoon looking like "X has no posts".
+      const raw = await page.evaluate(harvest).catch((err: Error) => {
+        log(`X: harvest failed — ${err.message.split('\n')[0]}`)
+        return [] as RawTweet[]
+      })
 
       for (const t of raw) {
         const url = canonicalUrl(t.href, 'https://x.com')
@@ -141,13 +223,17 @@ export const twitter: PlatformAdapter = {
           comments: fromLabel(t.replies),
           shares: fromLabel(t.reposts),
           views: fromLabel(t.views),
+          thumbnailUrl: t.thumb,
         })
         if (found.size >= limit) break
       }
 
       if (found.size >= limit) break
       const grew = await autoScroll(page, { rounds: 1, pauseMs: 1_500 })
-      if (grew === 0 && round > 1) break
+      // Three quiet rounds, not one. X's timeline is virtualised and recycles
+      // nodes as it goes, so a single scroll that adds no height is normal
+      // mid-load rather than proof the feed has ended.
+      if (grew === 0 && round > 3) break
     }
 
     /**

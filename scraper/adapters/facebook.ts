@@ -26,13 +26,22 @@ import {
   type AdapterResult,
   type PlatformAdapter,
   type ScrapedComment,
+  type ProfileInfo,
   type ScrapedPost,
 } from '../types'
 import { autoScroll } from '../browser'
 
 /** The permalink shapes a Facebook post can take. */
+/**
+ * Each shape a Facebook permalink takes.
+ *
+ * The segments that carry a numeric id demand one. Written without that, the
+ * pattern accepted the bare `facebook.com/reel/` sitting in the profile’s own
+ * navigation and recorded it as a post — a URL with no id, pointing at a
+ * product surface rather than at anything this politician published.
+ */
 const POST_HREF =
-  /(\/posts\/|\/permalink\.php\?|\/videos\/|\/reel\/|\/share\/p\/|story_fbid=)/i
+  /(\/posts\/|\/permalink\.php\?|\/videos\/[0-9]|\/reel\/[0-9]|\/share\/p\/|story_fbid=)/i
 
 /** Chrome, navigation and product links that also live on a profile page. */
 const NOISE = /\/(login|privacy|policies|help|settings|marketplace|gaming|watch\/?$)/i
@@ -44,6 +53,13 @@ interface RawPost {
   /** Any aria-label on the container that might carry counts. */
   label: string | null
   time: string | null
+  /** Counts lifted from the action row, each identified by its own button. */
+  likes: string | null
+  comments: string | null
+  shares: string | null
+  /** Per-reaction totals off the summary pills, for posts that show no Like figure. */
+  reactionPills: string[]
+  thumb: string | null
 }
 
 function harvest(): RawPost[] {
@@ -58,11 +74,120 @@ function harvest(): RawPost[] {
     // The post container: FB marks each story with role="article". Walking up
     // to it gives the text preview and any labelled counts in one place.
     const article = a.closest('[role="article"]')
+
+    // The post BODY, not the card's textContent. A card begins with the
+    // author, their verification badge, a location, a relative age and an
+    // audience note, so `textContent` yielded titles reading "D K Aruna
+    // वेरिफ़ाई किया गया अकाउंट, Gadwal,Telangana में हैं.3 दिन · इनके साथ शेयर
+    // किया गया" — the same chrome on every post, with the caption pushed past
+    // the 140-character cut. These two attributes wrap the caption alone;
+    // measured, they return the Telugu post text cleanly.
+    //
+    // Null when neither is present rather than falling back to the card text:
+    // a post with no caption genuinely has no title, and repeating the chrome
+    // would dress that absence up as content. Comment threads are `article`s
+    // too and carry neither attribute, so this also keeps a reply's text from
+    // being recorded as the post's.
+    const body =
+      article?.querySelector('[data-ad-comet-preview="message"]')?.textContent?.trim() ??
+      article?.querySelector('[data-ad-preview="message"]')?.textContent?.trim() ??
+      null
+
+    /**
+     * The counts, each taken from the button that names it.
+     *
+     * Measured on a live profile: every figure in the action row sits inside
+     * its own `[role="button"]`, and that button's aria-label says which count
+     * it is — "लाइक करें" / "कमेंट करें" / "इसे अपने दोस्तों को भेजें". So the
+     * number is identified by WHAT IT BELONGS TO, not by where it appears.
+     *
+     * That distinction is the whole reason these are read at all now. The
+     * earlier attempt looked at the bare number spans in order — [140, 6, 12]
+     * for reactions, comments, shares — and was rejected, correctly: a post
+     * with no shares renders two spans, not three, and the comment count would
+     * have been filed as shares. Reading each from its own button removes the
+     * ordering assumption entirely; a missing count is simply a button with no
+     * number in it, and stays null.
+     *
+     * The labels are matched in several languages because this desk's Facebook
+     * renders in Hindi and its audience posts in Telugu. An interface in some
+     * other language matches nothing and yields nulls — which is the right
+     * failure, and the one this file already chose over a plausible guess.
+     */
+    let likes: string | null = null
+    let comments: string | null = null
+    let shares: string | null = null
+
+    for (const btn of Array.from(article?.querySelectorAll('[role="button"][aria-label]') ?? [])) {
+      const label = btn.getAttribute('aria-label') ?? ''
+
+      // The button's own bare-number leaf, if it has one. A button with no
+      // number is a zero-count action, and contributes nothing.
+      let num: string | null = null
+      for (const el of Array.from(btn.querySelectorAll('span, div'))) {
+        const t = (el.textContent ?? '').trim()
+        if (/^[\d.,]+\s*[KMB]?$/.test(t) && el.querySelector('span, div') === null) {
+          num = t
+          break
+        }
+      }
+      if (num === null) continue
+
+      // Comments and shares are tested first: "लाइक करें" is a substring of
+      // nothing else, but a share label can mention liking.
+      if (comments === null && /comment|कमेंट|కామెంట్|వ్యాఖ్య/i.test(label)) comments = num
+      else if (shares === null && /share|send this|भेजें|शेयर|షేర్|పంపండి/i.test(label)) shares = num
+      else if (likes === null && /like|लाइक|ఇష్టం|లైక్/i.test(label)) likes = num
+    }
+
+    /**
+     * The reaction pills, for posts whose Like button carries no figure.
+     *
+     * Measured on a page with sixty-two million followers: its posts render
+     * comments and shares inside their buttons as usual, but no number in the
+     * Like button at all. The reaction total lives instead in a row of pills,
+     * each naming its own reaction — "लाइक करें: 6.7 हज़ार लोग" (Like: 6,700),
+     * "बहुत पसंद: 848 लोग" (Love: 848). Summing those gives the total, and it
+     * is structural rather than positional: each figure is labelled with the
+     * reaction it belongs to.
+     *
+     * Two constraints keep this from over-reading. The shape demanded is a
+     * SHORT prefix, then a colon, then a number — which admits "Like: 6.7
+     * thousand people" and excludes the timestamp "मंगलवार, 25 अगस्त 2026 को
+     * 9:21 AM पर", whose first colon is thirty characters in. And only labels
+     * belonging to THIS article are read: comment threads are nested articles
+     * with reaction pills of their own, and summing those in would inflate the
+     * post's total with its readers' likes.
+     */
+    const reactionPills: string[] = []
+    for (const el of Array.from(article?.querySelectorAll('[aria-label]') ?? [])) {
+      if (el.closest('[role="article"]') !== article) continue
+      const l = el.getAttribute('aria-label') ?? ''
+      const m = l.match(/^[^:]{1,25}:\s*([\d.,]+(?:\s*[^\s\d]+)?)\s/)
+      if (m?.[1]) reactionPills.push(m[1])
+    }
+
     out.push({
       href,
-      text: article?.textContent?.trim().slice(0, 200) ?? null,
+      text: body ? body.slice(0, 200) : null,
       label: article?.getAttribute('aria-label') ?? null,
       time: article?.querySelector('abbr')?.getAttribute('data-utime') ?? null,
+      likes,
+      comments,
+      shares,
+      reactionPills,
+      /**
+       * The post's own picture, by size rather than by position.
+       *
+       * A card carries the author's avatar, reaction icons and often several
+       * commenter faces, all from the same CDN. Demanding 200px of rendered
+       * width leaves only the attached photo — avatars render at 40 or 60.
+       */
+      thumb:
+        Array.from(article?.querySelectorAll('img') ?? [])
+          .map((im) => im as HTMLImageElement)
+          .filter((im) => im.naturalWidth >= 200 && /scontent|fbcdn/.test(im.currentSrc || im.src))
+          .sort((a, b) => b.naturalWidth - a.naturalWidth)[0]?.currentSrc ?? null,
     })
   }
   return out
@@ -104,6 +229,40 @@ export const facebook: PlatformAdapter = {
    */
   isLoginWall: ({ page }) => isLoggedOut(page, 'Facebook'),
 
+  /**
+   * The header: display name, follower count, avatar.
+   *
+   * The follower total sits on a link to /followers/, which is why this reads
+   * the anchor rather than scanning the page for the word. Measured on the
+   * Hindi interface the text came back "2.8 लाख फ़ॉलोअर" — the SELECTOR is
+   * language-independent even though the text is not, and parseCount knows
+   * लाख. It returns null rather than a bare 2.8 if it ever meets a unit it does
+   * not know, which is the behaviour that matters here.
+   */
+  profile: async ({ page }: AdapterContext): Promise<ProfileInfo> => {
+    const raw = await page
+      .evaluate(() => {
+        const link = Array.from(document.querySelectorAll('a[href*="/followers"]')).find((a) =>
+          /[0-9]/.test(a.textContent ?? ''),
+        )
+        return {
+          followers: link?.textContent?.trim() ?? null,
+          displayName: document.querySelector('h1')?.textContent?.trim() ?? null,
+          avatarUrl:
+            document.querySelector('image[*|href]')?.getAttribute('xlink:href') ??
+            document.querySelector('[data-imgperflogname="profileCoverPhoto"] img')?.getAttribute('src') ??
+            null,
+        }
+      })
+      .catch(() => ({ followers: null, displayName: null, avatarUrl: null }))
+
+    return {
+      displayName: raw.displayName || null,
+      followers: parseCount(raw.followers),
+      avatarUrl: raw.avatarUrl,
+    }
+  },
+
   posts: async (ctx: AdapterContext, handle): Promise<AdapterResult<ScrapedPost>> => {
     const { page, log, limit } = ctx
 
@@ -133,16 +292,29 @@ export const facebook: PlatformAdapter = {
           url.match(/\/(?:videos|reel)\/(\d+)/)?.[1] ??
           null
 
+        // The action-row buttons are the primary reading. `countFrom` over the
+        // card text stays as a fallback for a layout where the buttons carry no
+        // figures, and still returns null far more often than a number.
         const blob = [r.label, r.text].filter(Boolean).join(' ')
         found.set(url, {
           url,
           id,
           title: r.text?.slice(0, 140) ?? null,
           publishedAt: r.time ? new Date(Number(r.time) * 1000).toISOString() : null,
-          likes: countFrom(blob, /reactions?|likes?/),
-          comments: countFrom(blob, /comments?/),
-          shares: countFrom(blob, /shares?/),
+          // The Like button first, then the sum of the reaction pills, then the
+          // card text. Each falls through only when the one before found
+          // nothing at all — never when it found a zero.
+          likes:
+            parseCount(r.likes) ??
+            r.reactionPills.reduce<number | null>((total, pill) => {
+              const n = parseCount(pill)
+              return n === null ? total : (total ?? 0) + n
+            }, null) ??
+            countFrom(blob, /reactions?|likes?/),
+          comments: parseCount(r.comments) ?? countFrom(blob, /comments?/),
+          shares: parseCount(r.shares) ?? countFrom(blob, /shares?/),
           views: null,
+          thumbnailUrl: r.thumb,
         })
         if (found.size >= limit) break
       }
