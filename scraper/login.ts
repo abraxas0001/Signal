@@ -69,17 +69,48 @@ async function main() {
     }
 
     console.log(`Sign in to ${platform} in the window that opened.`)
-    console.log(`Waiting up to 5 minutes. Press Enter here when you are done.`)
+    console.log(`It advances by itself once you are through. Enter skips ahead.`)
 
-    await Promise.race([
-      new Promise<void>((resolve) => process.stdin.once('data', () => resolve())),
-      new Promise<void>((resolve) => setTimeout(resolve, 5 * 60 * 1000)),
+    /**
+     * Three ways out, whichever comes first.
+     *
+     * Polling is the one that matters: a person finishing a login should not
+     * then have to come back to a terminal and press a key, and on a
+     * checkpoint or a one-time code they often do not know when "done" is.
+     * The Enter path stays for the case where detection is wrong and somebody
+     * needs to move on regardless — and stdin has to be resumed explicitly or
+     * the listener never fires and the prompt is a lie.
+     */
+    process.stdin.resume()
+
+    const signedIn = await Promise.race([
+      (async () => {
+        for (let i = 0; i < 100; i++) {
+          await page.waitForTimeout(3_000)
+          const wall = await adapter
+            .isLoginWall({ page, log: () => {}, pace: async () => {}, limit: 1 })
+            .catch(() => true)
+          if (!wall) return true
+        }
+        return false
+      })(),
+      new Promise<boolean>((resolve) => process.stdin.once('data', () => resolve(false))),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5 * 60 * 1000)),
     ])
 
+    process.stdin.pause()
+
+    // Re-check even when the poll said yes: the page can change between the
+    // last poll and here, and a wrong "signed in" here is a scrape that
+    // silently returns nothing later.
     const still = await adapter
       .isLoginWall({ page, log: () => {}, pace: async () => {}, limit: 1 })
       .catch(() => true)
-    console.log(still ? `still a login wall — not signed in` : `signed in`)
+
+    if (!still) console.log(`signed in`)
+    else if (signedIn) console.log(`signed in, then the page changed — check it`)
+    else console.log(`still a login wall — not signed in`)
+
     await page.close().catch(() => {})
   }
 
