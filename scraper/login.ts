@@ -16,11 +16,36 @@ import { getContext, closeContext, PROFILE_DIR } from './browser'
 import { adapters } from './adapters'
 import { PLATFORMS, type Platform } from './types'
 
+/**
+ * Where to look to find out whether a session already exists.
+ *
+ * The logged-in landing page for each platform, so an existing session is
+ * detected without bouncing anybody through a form they do not need.
+ */
 const HOME: Record<Platform, string> = {
   Facebook: 'https://www.facebook.com/',
   Instagram: 'https://www.instagram.com/',
   LinkedIn: 'https://www.linkedin.com/feed/',
   'Twitter/X': 'https://x.com/home',
+}
+
+/**
+ * Where to send somebody who is NOT signed in: the sign-in form itself.
+ *
+ * Not the landing page. Landing pages lead with "Create account", and an
+ * operator who follows that lands in a signup flow — which is the most
+ * heavily bot-defended surface these platforms have. X's signup silently
+ * stops responding at its "Privacy preferences" step in an automated browser,
+ * with a Continue button that simply does nothing, and no error to explain it.
+ *
+ * The account has to be created in an ordinary browser. This tool only signs
+ * an existing one in, so it goes straight to the form that does that.
+ */
+const SIGN_IN: Record<Platform, string> = {
+  Facebook: 'https://www.facebook.com/login/',
+  Instagram: 'https://www.instagram.com/accounts/login/',
+  LinkedIn: 'https://www.linkedin.com/login',
+  'Twitter/X': 'https://x.com/i/flow/login',
 }
 
 const ALIAS: Record<string, Platform> = {
@@ -86,7 +111,13 @@ async function main() {
       continue
     }
 
+    // Not signed in: go to the form, rather than leaving them on a landing
+    // page whose most prominent button starts a signup that cannot finish here.
+    await page.goto(SIGN_IN[platform], { waitUntil: 'domcontentloaded' }).catch(() => {})
+    await page.waitForTimeout(2_000)
+
     console.log(`Sign in to ${platform} in the window that opened.`)
+    console.log(`Use an account that already exists — creating one here will stall.`)
     console.log(`Waiting up to 10 minutes. This advances by itself. Ctrl+C to give up.`)
     process.stdout.write('  waiting')
 
