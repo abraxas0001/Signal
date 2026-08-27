@@ -34,6 +34,24 @@ const ALIAS: Record<string, Platform> = {
   twitter: 'Twitter/X',
 }
 
+/**
+ * Ctrl+C during the wait is an ordinary way to use this, not a crash.
+ *
+ * Without this, interrupting mid-poll tears the browser down while a page call
+ * is still in flight and Node prints an unhandled-rejection stack trace over
+ * the instructions — which reads as the tool breaking at exactly the moment
+ * somebody was already unsure whether it was working.
+ */
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    console.log('\nstopped. Nothing was saved for this platform.')
+    void closeContext().finally(() => process.exit(0))
+  })
+}
+process.on('unhandledRejection', () => {
+  /* a teardown race after the context is gone; the message above already said it */
+})
+
 async function main() {
   const args = process.argv.slice(2).map((a) => a.toLowerCase())
   const wanted: Platform[] = args.length
@@ -69,47 +87,63 @@ async function main() {
     }
 
     console.log(`Sign in to ${platform} in the window that opened.`)
-    console.log(`It advances by itself once you are through. Enter skips ahead.`)
+    console.log(`Waiting up to 10 minutes. This advances by itself. Ctrl+C to give up.`)
+    process.stdout.write('  waiting')
 
     /**
-     * Three ways out, whichever comes first.
+     * Polling only, with no keyboard escape hatch.
      *
-     * Polling is the one that matters: a person finishing a login should not
-     * then have to come back to a terminal and press a key, and on a
-     * checkpoint or a one-time code they often do not know when "done" is.
-     * The Enter path stays for the case where detection is wrong and somebody
-     * needs to move on regardless — and stdin has to be resumed explicitly or
-     * the listener never fires and the prompt is a lie.
+     * There used to be a "press Enter when you are done" arm racing the poll,
+     * and under `npm run` it won every time: npm hands the script a stdin that
+     * emits immediately, so the race resolved on the first tick, the window
+     * closed, and the person was told they had not signed in before they had
+     * been given the chance to try. A convenience that fires on its own is
+     * worse than no convenience.
+     *
+     * Polling is also the better answer on its own merits. A one-time code or
+     * a checkpoint leaves people unsure when "done" has happened; watching the
+     * page for the session to appear does not need them to know.
      */
-    process.stdin.resume()
+    const DEADLINE_MS = 10 * 60 * 1000
+    const startedAt = Date.now()
+    let signedIn = false
 
-    const signedIn = await Promise.race([
-      (async () => {
-        for (let i = 0; i < 100; i++) {
-          await page.waitForTimeout(3_000)
-          const wall = await adapter
-            .isLoginWall({ page, log: () => {}, pace: async () => {}, limit: 1 })
-            .catch(() => true)
-          if (!wall) return true
-        }
-        return false
-      })(),
-      new Promise<boolean>((resolve) => process.stdin.once('data', () => resolve(false))),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5 * 60 * 1000)),
-    ])
+    while (Date.now() - startedAt < DEADLINE_MS) {
+      await page.waitForTimeout(3_000)
 
-    process.stdin.pause()
+      // A closed window is a deliberate abort, not a failure to detect.
+      if (page.isClosed()) {
+        console.log('\n  window closed')
+        break
+      }
 
-    // Re-check even when the poll said yes: the page can change between the
-    // last poll and here, and a wrong "signed in" here is a scrape that
-    // silently returns nothing later.
-    const still = await adapter
-      .isLoginWall({ page, log: () => {}, pace: async () => {}, limit: 1 })
-      .catch(() => true)
+      const wall = await adapter
+        .isLoginWall({ page, log: () => {}, pace: async () => {}, limit: 1 })
+        .catch(() => true)
 
-    if (!still) console.log(`signed in`)
-    else if (signedIn) console.log(`signed in, then the page changed — check it`)
-    else console.log(`still a login wall — not signed in`)
+      if (!wall) {
+        signedIn = true
+        break
+      }
+      process.stdout.write('.')
+    }
+    console.log('')
+
+    if (!signedIn) {
+      console.log(`still a login wall — not signed in`)
+    } else {
+      /**
+       * Confirmed a second time, a few seconds later. The moment a login
+       * completes is exactly when a platform is most likely to bounce through
+       * an interstitial, and a "signed in" recorded on that flicker becomes a
+       * scrape that silently returns nothing later.
+       */
+      await page.waitForTimeout(4_000)
+      const still = await adapter
+        .isLoginWall({ page, log: () => {}, pace: async () => {}, limit: 1 })
+        .catch(() => true)
+      console.log(still ? `signed in, then the page changed — check the window` : `signed in`)
+    }
 
     await page.close().catch(() => {})
   }
