@@ -33,3 +33,6 @@ public/sample-data.json
 # The redesign specs were written to brief agents during a UI rebuild, and
 # docs/history holds superseded status files from an earlier session.
 docs/
+
+# Real session cookies for real accounts. Never commit.
+.scraper-profile/

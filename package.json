@@ -28,7 +28,10 @@
     "test:places": "tsx scripts/test-places.ts",
     "test:autoconfig": "tsx scripts/test-autoconfig.ts",
     "test:matching": "tsx scripts/test-matching.ts",
-    "test:sync": "tsx scripts/test-sync.ts"
+    "test:sync": "tsx scripts/test-sync.ts",
+    "scraper": "tsx scraper/server.ts",
+    "scraper:login": "tsx scraper/login.ts",
+    "scraper:test": "tsx scraper/test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
@@ -57,6 +60,7 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
     "netlify-cli": "^27.1.2",
+    "playwright": "^1.62.1",
     "tailwindcss": "^4.3.3",
     "topojson-client": "^3.1.0",
     "tsx": "^4.23.12",

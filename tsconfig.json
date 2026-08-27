@@ -26,5 +26,5 @@
       "@shared/*": ["./shared/*"]
     }
   },
-  "include": ["src", "netlify", "shared", "vite.config.ts"]
+  "include": ["src", "netlify", "shared", "scraper", "vite.config.ts"]
 }
