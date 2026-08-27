@@ -21,7 +21,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
 import NumberFlow from '@number-flow/react'
-import { ArrowDownRight, ArrowUpRight, AtSign, Globe, MessageCircle, Minus, Send, Sparkles } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, AtSign, Globe, ImageOff, MessageCircle, Minus, Quote, Send, Sparkles } from 'lucide-react'
 import { cn, compact } from '@/lib/utils'
 import { spring } from '@/lib/motion'
 
@@ -951,8 +951,15 @@ export interface HBarRow {
   value: number
   /** Leading visual — an Avatar or PlatformBadge. */
   lead?: ReactNode
-  /** Role, seat, handle — the second line beside the name. */
-  sublabel?: string
+  /**
+   * The second line beside the name: a role, a seat, or a set of platform
+   * badges.
+   *
+   * A ReactNode rather than a string because a row can stand for a PERSON
+   * rather than one account, and then the useful second line is which platforms
+   * they are on — four small badges, not a sentence naming them.
+   */
+  sublabel?: ReactNode
   /** Marks the subject's own row. */
   emphasis?: boolean
 }
@@ -1009,7 +1016,13 @@ export function HBarBoard({
               <p className={cn('truncate text-[13px] leading-tight', r.emphasis ? 'font-bold text-ink' : 'font-semibold text-ink-2')}>
                 {r.label}
               </p>
-              {r.sublabel && <p className="truncate text-[11px] leading-tight text-ink-3">{r.sublabel}</p>}
+              {/* A div, not a p: the sublabel may now be badges rather than
+                  text, and an element inside a paragraph is invalid markup that
+                  React hydrates into a broken tree. `truncate` is dropped for
+                  the same reason — it would clip the badge row. */}
+              {r.sublabel != null && (
+                <div className="min-w-0 text-[11px] leading-tight text-ink-3">{r.sublabel}</div>
+              )}
             </div>
             <div className="tnum shrink-0 text-right text-sm sm:order-last sm:w-[74px]">
               <span className={cn(r.emphasis ? 'font-bold text-ink' : 'font-semibold text-ink-2')}>
@@ -1171,16 +1184,49 @@ export function PostThumbCard({
             onError={() => setFailed(true)}
             className="size-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
           />
-        ) : (
-          // A soft branded gradient wash + centred badge, never a flat brand
-          // slab — a wall of solid red is the thing that read as broken.
+        ) : title ? (
+          /**
+           * A post with no picture is not a post with no content.
+           *
+           * Most of what a politician publishes on X, Facebook and LinkedIn is
+           * words: a condolence, a greeting, a line about a phone call. There
+           * is no image to fetch and there never will be, so treating those as
+           * a failed thumbnail was answering the wrong question. The old
+           * fallback washed the tile in brand colour and centred a 44px
+           * platform logo in it — the same logo already sitting in the corner
+           * two centimetres away — which is why a strip of them read as a row
+           * of broken images rather than a row of text posts.
+           *
+           * So show what it said. The text is the artwork, and a reader
+           * scanning the strip can now tell these posts apart from each other
+           * instead of seeing four identical logos.
+           */
           <div
-            className="grid size-full place-items-center"
+            className="flex size-full flex-col justify-center px-3.5 pb-12 pt-10"
             style={{
-              background: `radial-gradient(120% 120% at 50% 0%, ${brandTint(platform)} 0%, var(--surface-3) 100%)`,
+              background: `linear-gradient(157deg, ${brandTint(platform)} 0%, var(--surface-2) 68%)`,
             }}
           >
-            <PlatformBadge platform={platform} size={44} />
+            <Quote
+              size={13}
+              className="mb-1.5 shrink-0 text-ink-3 opacity-60"
+              fill="currentColor"
+              strokeWidth={0}
+              aria-hidden
+            />
+            <p className="line-clamp-6 text-[12.5px] font-medium leading-[1.45] text-ink-2">
+              {title}
+            </p>
+          </div>
+        ) : (
+          /**
+           * Neither picture nor words came back for this one. Rare, and it
+           * stays quiet: a muted ground and a small glyph that says "no
+           * image", rather than a brand wash that implies the tile is still
+           * loading something.
+           */
+          <div className="grid size-full place-items-center bg-[var(--surface-3)]">
+            <ImageOff size={20} className="text-ink-3 opacity-45" aria-hidden />
           </div>
         )}
         {/* Legibility scrim so the overlays never sit on a bright still. */}
@@ -1211,7 +1257,14 @@ export function PostThumbCard({
         {authorLead}
         <div className="min-w-0">
           {author && <p className="truncate text-[12.5px] font-semibold text-ink">{author}</p>}
-          {(metaLine || title) && <p className="mt-0.5 truncate text-[11px] text-ink-3">{metaLine ?? title}</p>}
+          {/* `metaLine ?? title` would repeat the post's text on a card whose
+              face is already that text, so the title only fills in when it was
+              not used above. */}
+          {(metaLine ?? (thumbnailUrl && !failed ? title : null)) && (
+            <p className="mt-0.5 truncate text-[11px] text-ink-3">
+              {metaLine ?? title}
+            </p>
+          )}
         </div>
       </div>
     </Tag>

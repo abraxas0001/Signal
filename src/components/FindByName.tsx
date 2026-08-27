@@ -5,6 +5,7 @@ import { Avatar, Button, Chip } from './ui'
 import { PlatformBadge } from '@/components/kit'
 import { suggestionsFromIdentity, type AccountSuggestion } from './SuggestedAccounts'
 import { cn } from '@/lib/utils'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * Find someone's accounts by typing their name.
@@ -154,7 +155,7 @@ export function FindByName({
     setError(null)
     setResolving(true)
 
-    const stated = fetch('/api/identity', {
+    const stated = fetchWithTimeout('/api/identity', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: candidate.name, url: candidate.url }),

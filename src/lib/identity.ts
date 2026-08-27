@@ -3,6 +3,7 @@ import { statedIdentity } from '@shared/identity'
 import { resolvePlace } from '@shared/places'
 import { planWatchTerms } from '@/lib/autoconfig'
 import { update } from '@/lib/store'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * The client half of working out whose desk this is.
@@ -42,7 +43,7 @@ export async function resolveIdentity(input: ResolveInput): Promise<ResolveOutco
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
   try {
-    const res = await fetch('/api/identity', {
+    const res = await fetchWithTimeout('/api/identity', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),

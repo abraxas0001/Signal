@@ -11,6 +11,7 @@ import { Grievances } from './Grievances'
 import { editField, saveIdentity } from '@/lib/identity'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * Connect the office's own accounts.
@@ -57,7 +58,7 @@ const PLATFORMS: { platform: ConnectionStatus['platform']; slug: string; label: 
 ]
 
 async function fetchStatus(key: string): Promise<StatusResponse | 'unauthorised'> {
-  const res = await fetch('/api/connections', { headers: { 'X-Settings-Key': key } })
+  const res = await fetchWithTimeout('/api/connections', { headers: { 'X-Settings-Key': key } })
   if (res.status === 403) return 'unauthorised'
   if (!res.ok) throw new Error(`The server answered HTTP ${res.status}.`)
   return (await res.json()) as StatusResponse
@@ -308,7 +309,7 @@ export function Settings({
             Connected accounts
           </h2>
           <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
-            Authorise Signal to read the office&rsquo;s own accounts — real comments and exact
+            Authorise Signal to read the office&rsquo;s own accounts: real comments and exact
             counts, straight from each platform.
           </p>
         </div>

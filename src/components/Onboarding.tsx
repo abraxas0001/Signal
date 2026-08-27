@@ -5,8 +5,10 @@ import {
   ArrowLeft,
   ArrowRight,
   Building2,
+  ChevronRight,
   CircleAlert,
   ExternalLink,
+  Eye,
   Landmark,
   Link2,
   Loader2,
@@ -71,7 +73,14 @@ import { fadeUp, listStagger } from '@/lib/motion'
 type Step = 'choose' | 'working' | 'review'
 
 
-export function Onboarding({ onDone }: { onDone: () => void }) {
+export function Onboarding({
+  onDone,
+  onDemo,
+}: {
+  onDone: () => void
+  /** Open the example desk. Absent when the dataset is not deployed. */
+  onDemo?: () => void
+}) {
   /**
    * The desk already on the device, if there is one.
    *
@@ -311,8 +320,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 Whose desk is this?
               </h1>
               <p className="mt-4 max-w-[46ch] text-[15px] leading-relaxed text-ink-2">
-                Signal watches what is being said about one person. Tell it who, and it
-                sets up the news scan, the watch words and the dashboard from there.
+                Name the person this desk is for. The news scan, the watch words and the
+                dashboard configure themselves from the answer.
               </p>
 
               {/* The promise and the way out, moved up beside the headline.
@@ -322,18 +331,48 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 <p className="flex items-start gap-2.5 text-sm leading-relaxed text-ink-2">
                   <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--pos)]" aria-hidden />
                   <span>
-                    Everything stays on this device. Setting this up reads public pages on your
-                    behalf. It does not create an account anywhere, and nothing is uploaded.
+                    Everything stays on this device. No account is created anywhere, and
+                    nothing is uploaded.
                   </span>
                 </p>
-                <button
-                  onClick={skip}
-                  className="mt-2 inline-flex min-h-11 items-center text-left text-sm font-medium text-ink-3 underline decoration-[var(--rule)] underline-offset-4 hover:text-ink-2"
-                >
-                  {existing
-                    ? `Leave it as it is: keep ${existing.name}`
-                    : 'Skip for now. I just want to read a link'}
-                </button>
+                {/* The two ways past this form, on one line and correctly
+                    weighted. The demo led as a full-bleed bar across the
+                    column, which made the loudest thing on the screen an
+                    aside; the skip link sat above it underlined like a
+                    footnote. Now: one solid action, one quiet one, side by
+                    side, with the form itself still the primary path. */}
+                <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
+                  {onDemo !== undefined && !existing && (
+                    <button
+                      type="button"
+                      onClick={onDemo}
+                      className={cn(
+                        'group inline-flex min-h-12 items-center gap-2.5 rounded-full pl-4 pr-5',
+                        'bg-[var(--accent-2)] text-[15px] font-semibold text-[var(--accent-fg)]',
+                        'shadow-[0_1px_2px_rgb(16_24_40/0.08),0_8px_20px_-8px_color-mix(in_oklab,var(--accent-2)_55%,transparent)]',
+                        'transition-[transform,box-shadow,filter] duration-200 ease-out',
+                        'hover:-translate-y-0.5 hover:brightness-[1.07]',
+                        'hover:shadow-[0_2px_4px_rgb(16_24_40/0.1),0_14px_28px_-10px_color-mix(in_oklab,var(--accent-2)_65%,transparent)]',
+                        'active:translate-y-0 active:brightness-95',
+                      )}
+                    >
+                      <Eye size={17} aria-hidden />
+                      Try the demo
+                      <ChevronRight
+                        size={16}
+                        className="transition-transform duration-200 group-hover:translate-x-0.5"
+                        aria-hidden
+                      />
+                    </button>
+                  )}
+                  <button
+                    onClick={skip}
+                    className="inline-flex min-h-11 items-center text-left text-sm font-medium text-ink-3 transition-colors hover:text-ink-2"
+                  >
+                    {existing ? `Keep ${existing.name}` : 'Skip for now'}
+                  </button>
+                </div>
+
               </div>
             </m.header>
 
@@ -392,9 +431,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                           Who is this desk for?
                         </label>
                         <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                          Type a name. Add the seat or the office if the name alone is
-                          common: “aruna mahabubnagar” finds what “aruna” cannot. A link to
-                          a public profile works too.
+                          Add the seat if the name is a common one. A link to a public
+                          profile works too.
                         </p>
 
                         <div className="relative mt-3">

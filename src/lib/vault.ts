@@ -1,6 +1,7 @@
 import {
   emptyStore,
   makeId,
+  PLAIN_CODEC,
   readStore,
   setCodec,
   setStorageKey,
@@ -1094,6 +1095,24 @@ export function initVault(): void {
 }
 
 initVault()
+
+/**
+ * Which codec the DEFAULT namespace should be reading and writing through,
+ * right now, with nobody signed in.
+ *
+ * The same rule `initVault` applies at boot, named so it can be applied twice.
+ * The demo desk is an unencrypted namespace and installs the plaintext pair to
+ * write into it; on the way back out, something has to restore the sealing
+ * pair, and only this module knows whether this device has accounts to seal.
+ *
+ * Skipping the restore is not a small bug: with the plaintext codec left
+ * installed over `STORE_KEY`, the first stray write drops an empty cleartext
+ * store on top of it and destroys the `adoptableCleartext` recovery path that
+ * a device upgrading from before accounts existed depends on.
+ */
+export function resealDefaultScope(): void {
+  setCodec(hasAccounts() || accountsUnreadable() ? SEALED_CODEC : PLAIN_CODEC)
+}
 
 /* ── Accounts ────────────────────────────────────────────────────────────── */
 

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { Button, Card, SignalGlyph } from '@/components/ui'
 import { ease, fadeUp, haptic, listStagger, spring } from '@/lib/motion'
+import { cn } from '@/lib/utils'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import {
   accountsUnreadable,
@@ -334,7 +335,79 @@ function ThreatModel() {
 
 type Step = 'pick' | 'signin' | 'create' | 'backup' | 'restore' | 'restored' | 'blocked'
 
-export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
+/**
+ * The second of the two ways in.
+ *
+ * A person arriving here has exactly two useful things they might want: to open
+ * their own desk, or to find out what this thing is. Those deserve equal
+ * billing. This started life as a line of underlined text below the card, which
+ * put "see the product" in the visual position of a legal disclaimer — somebody
+ * who had not signed up yet had to notice a footnote to get past a passphrase
+ * prompt for accounts that were not theirs.
+ *
+ * It sits INSIDE the card, in the same list as the accounts, because that is
+ * where the eye already is. It stays visually secondary to a real account —
+ * dashed rather than solid, no filled background — since a returning user came
+ * here to sign in and should not have to step around an advertisement.
+ */
+function DemoOption({ onDemo }: { onDemo: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        haptic.tap()
+        onDemo()
+      }}
+      /**
+       * Violet and solid, at the weight of a real action.
+       *
+       * It was a dashed outline in muted grey, which is the language this
+       * interface uses for "add another", "restore from a file" — the
+       * housekeeping nobody arrives wanting. A visitor who has not signed up is
+       * here to find out what the product is, and the one control that answers
+       * that read as the least important thing on the card.
+       *
+       * `--accent-2` rather than `--accent`: the blue belongs to signing in, and
+       * two blue buttons of equal weight would make the reader choose between
+       * things that look identical. Violet says "a different kind of door".
+       */
+      className={cn(
+        'group mt-4 flex min-h-14 w-full items-center gap-3 rounded-2xl px-4 text-left',
+        'bg-[var(--accent-2)] text-[var(--accent-fg)]',
+        // The primary button's own shadow recipe, tinted to this colour: a
+        // tight contact shadow over a wide soft one in the button's own hue.
+        'shadow-[0_1px_2px_rgb(16_24_40/0.1),0_10px_24px_-8px_color-mix(in_oklab,var(--accent-2)_60%,transparent)]',
+        'transition-[transform,box-shadow,filter] duration-200 ease-out',
+        'hover:-translate-y-0.5 hover:brightness-110',
+        'hover:shadow-[0_2px_4px_rgb(16_24_40/0.12),0_16px_32px_-10px_color-mix(in_oklab,var(--accent-2)_70%,transparent)]',
+        'active:translate-y-0 active:brightness-95',
+      )}
+    >
+      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white/20">
+        <Eye size={17} />
+      </span>
+      <span className="min-w-0 flex-1 text-[15px] font-semibold">Try the demo</span>
+      <ChevronRight
+        size={17}
+        className="shrink-0 transition-transform duration-200 group-hover:translate-x-0.5"
+      />
+    </button>
+  )
+}
+
+export function LockScreen({
+  onUnlocked,
+  onDemo,
+}: {
+  onUnlocked: () => void
+  /**
+   * Open the example desk without signing in.
+   *
+   * Absent when the demo dataset is not deployed, so the door is never offered
+   * onto an empty room.
+   */
+  onDemo?: () => void
+}) {
   const { accounts } = useVaultState()
 
   // Read once on mount. Re-deriving the step from `accounts` on every render
@@ -581,6 +654,8 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                   ))}
                 </ul>
 
+                {onDemo !== undefined && <DemoOption onDemo={onDemo} />}
+
                 <button
                   type="button"
                   onClick={() => goto('create')}
@@ -647,34 +722,53 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                   <Busy label={busy ? 'Opening' : 'Sign in'} busy={busy} />
                 </Button>
 
-                {accounts.length > 1 && (
+                {/**
+                 * The demo belongs on this screen most of all.
+                 *
+                 * It was on 'pick' and 'create' only — and a device with
+                 * exactly ONE account never sees 'pick', because the effect
+                 * above skips a picker with nothing to pick between and comes
+                 * straight here. That is the overwhelmingly common case, so on
+                 * most devices the button existed in the code and nowhere on
+                 * screen. Anyone who wanted to show a colleague what Signal
+                 * does had to sign in first, or add a second account.
+                 */}
+                {onDemo !== undefined && <DemoOption onDemo={onDemo} />}
+
+                {/* The quiet links, spaced as one group rather than each
+                    carrying its own margin — the first of them varies with the
+                    account count, so a margin on any single one leaves the
+                    others touching whatever sits above. */}
+                <div className="mt-4">
+                  {accounts.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChosen(null)
+                        goto('pick')
+                      }}
+                      className="flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2"
+                    >
+                      Sign in as someone else
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => {
-                      setChosen(null)
-                      goto('pick')
-                    }}
-                    className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2"
+                    onClick={() => goto('create')}
+                    className="flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2"
                   >
-                    Sign in as someone else
+                    <UserPlus size={15} />
+                    Add another person
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => goto('create')}
-                  className="flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2"
-                >
-                  <UserPlus size={15} />
-                  Add another person
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goto('restore')}
-                  className="flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2"
-                >
-                  <Upload size={15} />
-                  Restore from a backup file
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => goto('restore')}
+                    className="flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2"
+                  >
+                    <Upload size={15} />
+                    Restore from a backup file
+                  </button>
+                </div>
               </Card>
             </m.div>
           )}
@@ -779,6 +873,14 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
                     Back
                   </Button>
                 )}
+
+                {/**
+                 * The first screen a brand-new device ever shows is this one,
+                 * and until now its only offer was "invent a passphrase for a
+                 * product you have not seen". The example desk belongs here
+                 * more than anywhere else.
+                 */}
+                {onDemo !== undefined && <DemoOption onDemo={onDemo} />}
 
                 <div className="mt-5 space-y-2 border-t border-[var(--border)] pt-4">
                   <ThreatModel />
@@ -979,6 +1081,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
               </Card>
             </m.div>
           )}
+
         </m.div>
       </div>
     </LazyMotion>

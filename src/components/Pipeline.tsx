@@ -184,7 +184,7 @@ function StageStep({
     <m.li
       data-active={state === 'active' ? 'true' : undefined}
       className="relative flex w-[76px] shrink-0 flex-col items-center sm:w-auto sm:flex-1"
-      title={detail ? `${label} — ${detail}` : label}
+      title={detail ? `${label}: ${detail}` : label}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: state === 'pending' ? 0.55 : 1, y: 0 }}
       transition={{ ...spring.pop, delay: reduced ? 0 : index * 0.04 }}

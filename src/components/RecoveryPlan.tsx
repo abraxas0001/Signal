@@ -7,6 +7,7 @@ import { actionIdForSource, requestActionFocus } from '@/lib/focus'
 import { readStore } from '@/lib/store'
 import type { OpinionSurvey } from '@/lib/opinion'
 import { cn } from '@/lib/utils'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * What to do about a negative score.
@@ -112,7 +113,7 @@ export function RecoveryPlan({
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch('/api/recovery', {
+      const res = await fetchWithTimeout('/api/recovery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

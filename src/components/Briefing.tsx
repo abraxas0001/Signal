@@ -1288,14 +1288,26 @@ function VoicePanel({
     )
   }
 
+  /**
+   * Say what was found, and only claim a lean when something was scored.
+   *
+   * "Evenly split" was reachable two completely different ways: a genuine tie,
+   * and nobody having read anything — because zero critical equals zero
+   * supportive. A desk whose posts had all been listed but never scored was
+   * therefore told its coverage was balanced, which is a finding, about work
+   * that had not been done.
+   */
+  const scored = voice.supportive.length + voice.critical.length + voice.neutral.length
   const verdict =
     voice.total === 0
       ? 'Nothing names you directly this week.'
-      : voice.critical.length > voice.supportive.length
-      ? 'More of them are against you than for you.'
-      : voice.supportive.length > voice.critical.length
-        ? 'More of them are for you than against you.'
-        : 'They are evenly split.'
+      : scored === 0
+        ? `${voice.total} ${voice.total === 1 ? 'post names' : 'posts name'} you. None has been read for tone yet.`
+        : voice.critical.length > voice.supportive.length
+          ? 'More of them are against you than for you.'
+          : voice.supportive.length > voice.critical.length
+            ? 'More of them are for you than against you.'
+            : 'They are evenly split.'
 
   return (
     <div className="stack-tight">
@@ -1314,7 +1326,12 @@ function VoicePanel({
             { label: 'For you', n: voice.supportive.length, colour: 'var(--chart-pos)' },
             { label: 'Neutral', n: voice.neutral.length, colour: 'var(--chart-mid)' },
             { label: 'Against you', n: voice.critical.length, colour: 'var(--chart-neg)' },
-          ].map((seg) => (
+            // Its own segment, never folded into Neutral: "nobody has read this"
+            // is not a finding of even-handedness.
+            { label: 'Not read yet', n: voice.unread.length, colour: 'var(--border-strong)' },
+          ]
+            .filter((seg) => seg.n > 0)
+            .map((seg) => (
             <li key={seg.label} className="flex items-center gap-2 text-sm">
               <span
                 aria-hidden
@@ -1542,7 +1559,18 @@ interface DeskPost {
   title: string | null
   author: string
   engagement: number
+  /** False when the platform published no likes or comments — never a zero. */
+  measured: boolean
+  views: number | null
   metaLine: string
+  /**
+   * The picture the scrape stored for this post, served from this origin.
+   *
+   * Preferred over `youtubeThumb`, which only ever answers for YouTube — so
+   * before this every Facebook, Instagram and X card fell through to the blank
+   * platform tile even though the scrape had the image sitting in the dataset.
+   */
+  thumbnailUrl: string | null
 }
 
 /**
@@ -1564,15 +1592,66 @@ function deskPosts(handles: TrackedHandle[]): DeskPost[] {
         url: p.url,
         platform: h.platform,
         title: p.title,
+        thumbnailUrl: p.thumbnailUrl ?? null,
         author: h.displayName || h.handle,
         engagement: eng,
+        measured: p.likes != null || p.comments != null,
+        views: p.views,
         metaLine: [p.views != null ? `${compact(p.views)} views` : null, eng > 0 ? `${compact(eng)} reactions` : null]
           .filter(Boolean)
           .join(' · '),
       })
     }
   }
-  return posts.sort((a, b) => b.engagement - a.engagement).slice(0, 10)
+  /**
+   * Rank by engagement, but let every channel onto the strip.
+   *
+   * Sorting on engagement alone deleted a whole platform from this card.
+   * YouTube publishes a view count and no likes or comments, so every video
+   * scored zero and none of twenty-five ever reached a strip of ten — the
+   * channel was scraped, counted in the follower total, and then invisible
+   * exactly where posts are shown.
+   *
+   * So the best post from each platform leads and the rest fills by rank.
+   * Nothing is invented to manage it: views are not converted into pretend
+   * likes, and `metaLine` already writes "views" for a video and "reactions"
+   * for a post, so the two never read as the same measure.
+   */
+  /**
+   * A post with no picture AND no text cannot be shown, only counted.
+   *
+   * A handful of Facebook records come back with an engagement figure and
+   * nothing else — no caption the adapter could read, no image. They are real
+   * and they stay in the dataset, because the follower and engagement totals
+   * are computed from them and deleting them would quietly change true
+   * numbers. But they have no business leading a strip whose entire job is to
+   * show what was published: they render as an empty tile, and because they
+   * rank on engagement they were taking the FIRST slots. Sorting them last
+   * keeps the arithmetic honest and the strip legible.
+   */
+  const showable = (p: DeskPost): boolean =>
+    Boolean(p.thumbnailUrl) || Boolean(p.title?.trim())
+
+  posts.sort((a, b) => {
+    if (showable(a) !== showable(b)) return showable(a) ? -1 : 1
+    if (a.measured !== b.measured) return a.measured ? -1 : 1
+    if (a.measured) return b.engagement - a.engagement
+    return (b.views ?? 0) - (a.views ?? 0)
+  })
+
+  const seen = new Set<string>()
+  const lead: DeskPost[] = []
+  const rest: DeskPost[] = []
+  for (const post of posts) {
+    // `posts` is already showable-first, so the first post seen for a platform
+    // is its best SHOWABLE one whenever it has any.
+    if (seen.has(post.platform)) rest.push(post)
+    else {
+      seen.add(post.platform)
+      lead.push(post)
+    }
+  }
+  return [...lead, ...rest].slice(0, 10)
 }
 
 /**
@@ -1598,8 +1677,27 @@ function DeskOverview({
 }) {
   const own = handles.filter((h) => h.own)
   const watched = handles.filter((h) => !h.own)
-  const totalFollowers = handles.reduce((s, h) => s + (latestFollowers(h) ?? 0), 0)
-  const channels = new Set(handles.map((h) => h.platform)).size
+
+  /**
+   * The headline figures describe THIS desk, not everything it can see.
+   *
+   * Both of these used to run over every tracked handle, which was survivable
+   * when a desk watched one rival and became nonsense the moment it watched
+   * several: an MP with 450,000 followers sat under a "total followers" of 27
+   * crore, because the number had quietly become the sum of her and five
+   * national figures she happens to monitor. A reader has no way to tell that
+   * from a real reach figure.
+   *
+   * `own` is the desk; anything else is being watched. Watched accounts still
+   * appear — on the board below, on Accounts, on Compare — where they are
+   * labelled as rivals rather than folded into a total.
+   *
+   * The fallback to every handle covers a desk that has marked nothing as its
+   * own: there, "all of them" is the only available reading of the question.
+   */
+  const counted = own.length > 0 ? own : handles
+  const totalFollowers = counted.reduce((s, h) => s + (latestFollowers(h) ?? 0), 0)
+  const channels = new Set(counted.map((h) => h.platform)).size
 
   // The seat, geocoded once. Null when it will not resolve — the map then
   // centres on India and says so rather than pinning a plausible dot. The
@@ -1607,10 +1705,75 @@ function DeskOverview({
   const seat = geocodePlace(identity?.constituency ?? identity?.district ?? identity?.state ?? null)
   const ground = partyColor(identity?.party)
 
-  const board = handles
-    .map((h) => ({ h, followers: latestFollowers(h) }))
-    .filter((r): r is { h: TrackedHandle; followers: number } => r.followers != null)
-    .sort((a, b) => b.followers - a.followers)
+  /**
+   * The desk's own accounts first, then who it watches — each biggest first.
+   *
+   * Sorting the whole list purely by size reads well until the desk watches
+   * somebody far larger than itself. It only shows five rows, so an MP with
+   * 450,000 followers watching a handful of national figures was pushed off her
+   * own board entirely: five rivals, none of them her. Grouping first keeps the
+   * question the card is answering — how big are we, and next to whom — instead
+   * of answering "who is biggest in India".
+   */
+  /**
+   * The follower board: one row per PERSON, not per account.
+   *
+   * It listed a row per handle, so a politician on three platforms appeared
+   * three times over — the same name, the same face, three bars — and a
+   * five-row board was filled by not quite two people. Nobody reads that as
+   * reach; they read it as a bug.
+   *
+   * Grouping answers the question the card actually asks. The value is the
+   * person's total across everywhere they post, and which platforms those are
+   * moves to badges under the name — the same information in one line rather
+   * than three rows. It also means the board scales: five politicians fit where
+   * not quite two did.
+   */
+  const board = (() => {
+    const byPerson = new Map<
+      string,
+      {
+        name: string
+        own: boolean
+        label: string | null
+        avatarUrl: string | null
+        followers: number
+        platforms: TrackedHandle['platform'][]
+        read: boolean
+      }
+    >()
+
+    for (const h of [...own, ...watched]) {
+      const name = h.displayName || h.handle
+      const entry = byPerson.get(name) ?? {
+        name,
+        own: h.own,
+        label: h.label,
+        avatarUrl: h.avatarUrl,
+        followers: 0,
+        platforms: [] as TrackedHandle['platform'][],
+        read: false,
+      }
+      const f = latestFollowers(h)
+      if (f != null) {
+        entry.followers += f
+        entry.read = true
+      }
+      if (!entry.platforms.includes(h.platform)) entry.platforms.push(h.platform)
+      // Any photo will do; they are the same person.
+      if (!entry.avatarUrl && h.avatarUrl) entry.avatarUrl = h.avatarUrl
+      byPerson.set(name, entry)
+    }
+
+    // `read` guards the difference between a person whose accounts could not be
+    // read and one with no followers. Nobody is plotted at zero for the former.
+    return [...byPerson.values()]
+      .filter((p) => p.read)
+      .sort((a, b) => {
+        if (a.own !== b.own) return a.own ? -1 : 1
+        return b.followers - a.followers
+      })
+  })()
 
   // The home shows the office's OWN posts. Rivals are compared on Accounts.
   const posts = deskPosts(own.length > 0 ? own : handles)
@@ -1665,7 +1828,10 @@ function DeskOverview({
      handle, so a platform we could not read simply does not appear. */
   const reachShare = (() => {
     const byPlatform = new Map<string, number>()
-    for (const h of handles) {
+    // The desk's own accounts, like every other headline figure here. Over all
+    // handles this read 11L on a desk whose subject has 4.5L — the remainder
+    // being her opponent's, folded into a chart captioned "your reach".
+    for (const h of counted) {
       const f = latestFollowers(h)
       if (f == null) continue
       byPlatform.set(h.platform, (byPlatform.get(h.platform) ?? 0) + f)
@@ -1695,7 +1861,7 @@ function DeskOverview({
             <CardHead
               icon={<MapPin size={16} aria-hidden />}
               tint="blue"
-              title={seat ? `${seat.name} — your ground` : 'Your ground'}
+              title={seat ? `Your ground: ${seat.name}` : 'Your ground'}
               sub={
                 seat
                   ? [identity?.role, identity?.party, seat.state].filter(Boolean).join(' · ')
@@ -1718,8 +1884,12 @@ function DeskOverview({
               original three-across order. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
             <IconStat icon={<UserRound size={18} aria-hidden />} label="Accounts tracked" value={handles.length} tint="blue" deltaLabel={`${own.length} yours · ${watched.length} watched`} />
-            <IconStat className="order-first col-span-2 sm:order-none sm:col-span-1" icon={<Users size={18} aria-hidden />} label="Total followers" value={totalFollowers || null} tint="violet" hero={totalFollowers > 0} deltaLabel="Across every account" />
-            <IconStat icon={<Megaphone size={18} aria-hidden />} label="Channels" value={channels || null} tint="teal" deltaLabel={channels === 1 ? 'One platform' : 'Platforms watched'} />
+            {/* The label has to say WHOSE, now that the figure is the desk's
+                own rather than every account on the device. "Across every
+                account" over a number that deliberately excludes most of them
+                would be the same misreading, just written down. */}
+            <IconStat className="order-first col-span-2 sm:order-none sm:col-span-1" icon={<Users size={18} aria-hidden />} label="Total followers" value={totalFollowers || null} tint="violet" hero={totalFollowers > 0} deltaLabel={own.length > 0 ? `Across ${own.length === 1 ? 'your account' : `your ${own.length} accounts`}` : 'Across every account'} />
+            <IconStat icon={<Megaphone size={18} aria-hidden />} label="Channels" value={channels || null} tint="teal" deltaLabel={channels === 1 ? 'One platform' : own.length > 0 ? 'Platforms you post on' : 'Platforms watched'} />
           </div>
 
           {board.length > 1 ? (
@@ -1741,21 +1911,20 @@ function DeskOverview({
               />
               <HBarBoard
                 rows={board.slice(0, 5).map((r) => ({
-                  label: r.h.displayName || r.h.handle,
-                  // Who they are to this desk — kept to one short word so it
-                  // never wraps in a fixed-width column. The handle rides on
-                  // the row's title attribute rather than crowding the line.
-                  sublabel: r.h.own ? 'Yours' : r.h.label || 'Watched',
-                  value: r.followers,
-                  lead: (
-                    <span className="relative block">
-                      <Avatar src={r.h.avatarUrl} name={r.h.displayName || r.h.handle} size={38} />
-                      <span className="absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-[var(--surface)]">
-                        <PlatformBadge platform={r.h.platform} size={17} />
+                  label: r.name,
+                  sublabel: (
+                    <span className="flex items-center gap-1.5">
+                      <span className="shrink-0">{r.own ? 'Yours' : r.label || 'Watched'}</span>
+                      <span className="flex items-center gap-1">
+                        {r.platforms.map((p) => (
+                          <PlatformBadge key={p} platform={p} size={13} />
+                        ))}
                       </span>
                     </span>
                   ),
-                  emphasis: r.h.own,
+                  value: r.followers,
+                  lead: <Avatar src={r.avatarUrl} name={r.name} size={38} />,
+                  emphasis: r.own,
                 }))}
                 formatValue={(n) => full(Math.round(n))}
               />
@@ -1862,7 +2031,7 @@ function DeskOverview({
                   value={compact(p.engagement)}
                   tint={i === 0 ? 'violet' : 'blue'}
                   onClick={() => onRead(p.url)}
-                  title="Read this post in full — comments, sentiment and the fake-news check"
+                  title="Read this post in full: comments, sentiment and the fake-news check"
                 />
               ))}
             </div>
@@ -1895,7 +2064,7 @@ function DeskOverview({
             {posts.map((p) => (
               <PostThumbCard
                 key={p.url}
-                thumbnailUrl={youtubeThumb(p.url)}
+                thumbnailUrl={p.thumbnailUrl ?? youtubeThumb(p.url)}
                 platform={p.platform}
                 author={p.author}
                 metaLine={p.metaLine}

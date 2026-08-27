@@ -6,6 +6,7 @@ import type {
   Report,
   StreamEvent,
 } from '@shared/types'
+import { fetchWithTimeout } from '@/lib/net'
 
 export type StageState = 'pending' | 'active' | 'done' | 'skipped'
 
@@ -186,7 +187,7 @@ export function useAnalysis() {
       })
 
     try {
-      const res = await fetch('/api/analyse', {
+      const res = await fetchWithTimeout('/api/analyse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),

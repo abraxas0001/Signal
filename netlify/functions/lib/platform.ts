@@ -162,6 +162,30 @@ export function identify(rawUrl: string): UrlIdentity {
         postType: kind === 'p' ? 'Image' : 'Short / Reel',
       })
     }
+
+    /**
+     * Instagram also publishes posts under the author's own path.
+     *
+     * `instagram.com/someone/reel/<code>/` is a real, current permalink — it is
+     * what the site itself puts in the address bar when a reel is opened from a
+     * profile grid, and what the share sheet copies. Only the bare
+     * `/reel/<code>/` form was recognised, so every one of those was read as a
+     * PROFILE with no post id and rejected with "that Instagram link does not
+     * point at a post" — about a link that pointed at exactly one post.
+     *
+     * The marker is searched for rather than assumed at a fixed depth, and the
+     * handle is kept from the first segment, which is the one thing this shape
+     * carries that the short form does not.
+     */
+    const at = seg.findIndex((s) => s === 'p' || s === 'reel' || s === 'reels' || s === 'tv')
+    if (at > 0) {
+      return base('Instagram', {
+        id: seg[at + 1] ?? null,
+        handle: seg[0] ?? null,
+        postType: seg[at] === 'p' ? 'Image' : 'Short / Reel',
+      })
+    }
+
     return base('Instagram', { handle: seg[0] ?? null })
   }
 

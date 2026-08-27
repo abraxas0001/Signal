@@ -9,6 +9,7 @@ import { fadeUp } from '@/lib/motion'
 import { fileFreeAction, hasOpenAction } from '@/lib/actions'
 import { actionIdForSource, requestActionFocus } from '@/lib/focus'
 import { readStore } from '@/lib/store'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * Two people, side by side, on what an office actually argues about.
@@ -623,7 +624,7 @@ export function HeadToHead({
       const already = cachedNotes(person.name)
       if (already) return already
       setReading(person.name)
-      const res = await fetch('/api/compare', {
+      const res = await fetchWithTimeout('/api/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ step: 'search', who, [who]: person }),
@@ -691,7 +692,7 @@ export function HeadToHead({
 
       setReading(null)
       setPhase('structuring')
-      const structured = await fetch('/api/compare', {
+      const structured = await fetchWithTimeout('/api/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -882,7 +883,7 @@ export function HeadToHead({
                     <p className="text-[15px] font-bold text-ink">The shape of it</p>
                     <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
                       Both people across every dimension at once. The figures are the model's
-                      0–100 placements from the coverage it read — comparable with each other,
+                      0 to 100 placements from the coverage it read, comparable with each other
                       not measurements of anything.
                     </p>
                   </div>

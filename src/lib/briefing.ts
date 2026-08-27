@@ -336,6 +336,17 @@ export interface InfluencerVoice {
   supportive: VoiceOf[]
   critical: VoiceOf[]
   neutral: VoiceOf[]
+  /**
+   * Named the member, but nothing has read them for tone yet.
+   *
+   * Held apart from `neutral`, which used to absorb them. The two are different
+   * claims: "a model read this and found it even-handed" against "nobody has
+   * looked". Folding the second into the first let a screen report a stance
+   * nothing had decided — and worse, a desk whose posts were ALL unread showed
+   * zero for and zero against, which the verdict then announced as "they are
+   * evenly split".
+   */
+  unread: VoiceOf[]
   /** Anything questionable, which outranks everything else here. */
   suspect: VoiceOf[]
   total: number
@@ -416,9 +427,9 @@ export function influencerVoiceOf(store: Store, since: number): InfluencerVoice 
 
   const critical = personal.filter((v) => v.stance === 'critical').sort(byReach)
   const supportive = personal.filter((v) => v.stance === 'supportive').sort(byReach)
-  const neutral = personal
-    .filter((v) => v.stance === 'neutral' || v.stance === 'unclear')
-    .sort(byReach)
+  const neutral = personal.filter((v) => v.stance === 'neutral').sort(byReach)
+  // Matched by a search word but never scored — see `unread` on the interface.
+  const unread = personal.filter((v) => v.stance === 'unclear').sort(byReach)
   const suspect = personal.filter((v) => v.suspect).sort(byReach)
   const aboutSeat = voices.filter((v) => v.about === 'constituency').sort(byReach)
   const heard = new Set(voices.map((v) => v.handle)).size
@@ -429,6 +440,7 @@ export function influencerVoiceOf(store: Store, since: number): InfluencerVoice 
     supportive,
     critical,
     neutral,
+    unread,
     suspect,
     aboutSeat,
     total: personal.length,

@@ -4,6 +4,7 @@ import { ChevronRight, Link2, Settings as SettingsIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { GROUPS, type NavItem, type Tab } from '@/lib/nav'
 import { SignalGlyph } from '@/components/ui'
+import { DemoDoor, type DemoDoorProps } from '@/components/DemoDoor'
 import { pressable, spring } from '@/lib/motion'
 
 /**
@@ -33,6 +34,15 @@ interface Props {
   onSelect: (k: NavKey) => void
   /** Row badges. A key that is absent or zero shows no badge. */
   counts?: Partial<Record<NavKey, number>>
+  /**
+   * The example desk, if there is one to offer.
+   *
+   * An optional callback rather than a boolean, the same shape MoreSheet's
+   * `onLock` already uses: absent means the door does not exist, so it is never
+   * offered onto a dataset that was not deployed. `mode` and `note` come from
+   * the caller because only App knows whether this tap costs a sign-out.
+   */
+  demo?: DemoDoorProps
 }
 
 /**
@@ -128,7 +138,7 @@ function NavRow({
   )
 }
 
-export function SideNav({ active, onSelect, counts }: Props) {
+export function SideNav({ active, onSelect, counts, demo }: Props) {
   const reduced = useReducedMotion() === true
 
   return (
@@ -216,7 +226,13 @@ export function SideNav({ active, onSelect, counts }: Props) {
             only in the header: it is beside the theme toggle and the history
             button there, present on every width including the phone, and a
             padlock is the one control an office reaches for in a hurry. */}
-        <div className="mt-3 border-t border-[var(--border)] pt-3">
+        <div className="mt-3 space-y-2 border-t border-[var(--border)] pt-3">
+          {/* First under the rule, which puts it directly beneath History —
+              the last row in the scrolling group above. That is where it was
+              asked for, and it is the right slot on its own merits: this is
+              the only control here that changes which desk you are on. */}
+          {demo && <DemoDoor {...demo} />}
+
           <button
             onClick={() => onSelect('settings')}
             aria-current={active === 'settings' ? 'page' : undefined}

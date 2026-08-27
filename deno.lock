@@ -25,6 +25,7 @@
         "npm:canvas-confetti@^1.9.4",
         "npm:cheerio@^1.2.0",
         "npm:clsx@^2.1.1",
+        "npm:firebase-admin@^14.3.0",
         "npm:linkedom@~0.18.13",
         "npm:lucide-react@^1.31.0",
         "npm:motion@^13.1.0",
@@ -34,10 +35,12 @@
         "npm:sonner@^2.0.8",
         "npm:tailwind-merge@^3.6.0",
         "npm:tailwindcss@^4.3.3",
+        "npm:topojson-client@^3.1.0",
         "npm:tsx@^4.23.12",
         "npm:typescript@^5.9.2",
         "npm:undici@^7.29.0",
-        "npm:vite@^8.2.1"
+        "npm:vite@^8.2.1",
+        "npm:world-atlas@^2.0.2"
       ]
     }
   }

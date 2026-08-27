@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { readStore, update, useStore } from '@/lib/store'
+import { isDemoScope, readStore, update, useStore } from '@/lib/store'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * The client half of "what is being said about you".
@@ -53,6 +54,10 @@ export function useOpinion(): {
 
   const run = useCallback((force = false) => {
     if (running.current) return
+    // The example desk ships its own readings and must not spend a grounded
+    // search re-deriving them for every visitor. `force` is the reader tapping
+    // refresh, which is still allowed to run.
+    if (!force && isDemoScope()) return
     const current = readStore()
     const person = current.identity
     if (!person) return
@@ -76,7 +81,7 @@ export function useOpinion(): {
           watching one unexplained spinner for half a minute.
         */
         setStage('searching')
-        const searchRes = await fetch('/api/opinion', {
+        const searchRes = await fetchWithTimeout('/api/opinion', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -98,7 +103,7 @@ export function useOpinion(): {
         }
 
         setStage('reading')
-        const structRes = await fetch('/api/opinion', {
+        const structRes = await fetchWithTimeout('/api/opinion', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({

@@ -50,6 +50,7 @@ import { CardHead, DonutBreakdown, Legend, PlatformBadge, RankRow } from '@/comp
 import { AddInfluencer, SearchInfluencers } from './AddInfluencer'
 import { cn, compact, full, relativeTime } from '@/lib/utils'
 import { fadeUp, listItem, listStagger } from '@/lib/motion'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * Influencer watch.
@@ -491,7 +492,7 @@ function WatchTerms() {
         icon={<Search size={16} />}
         title="Words that mean a post is about you"
         sub="Shared with the grievance desk"
-        hint="One list for the whole office — editing it here edits it everywhere a check runs."
+        hint="One list for the whole office. Editing it here edits it everywhere a check runs."
         tint="violet"
       />
       <p className="text-xs leading-relaxed text-ink-2">
@@ -809,7 +810,7 @@ export function Influencers({
     setCapped([])
 
     try {
-      const res = await fetch('/api/influencers', {
+      const res = await fetchWithTimeout('/api/influencers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ influencers: rotated, watchTerms }),
@@ -1082,7 +1083,7 @@ export function Influencers({
                 icon={<MessagesSquare size={16} />}
                 title="How the coverage reads"
                 sub="Unjudged listings are not counted"
-                hint="Sentiment across the posts a model has actually read — unjudged listings are not counted."
+                hint="Sentiment across the posts a model has actually read. Unjudged listings are not counted."
                 tint="violet"
               />
               {/* Ring above legend on a phone; ring beside a stacked legend

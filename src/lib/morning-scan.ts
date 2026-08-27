@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { readStore, update, useStore } from '@/lib/store'
+import { isDemoScope, readStore, update, useStore } from '@/lib/store'
 import { planDesk, applyDeskPlan, planTerms } from '@/lib/autoconfig'
 import { resolvePlace } from '@shared/places'
 import { pruneMentions } from '@shared/grievance'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * The scan that runs without being asked.
@@ -184,7 +185,7 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
 
       void (async () => {
         try {
-          const res = await fetch('/api/persona', {
+          const res = await fetchWithTimeout('/api/persona', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
@@ -305,7 +306,7 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
     sourcing.current = true
     void (async () => {
       try {
-        const res = await fetch('/api/news-sources', {
+        const res = await fetchWithTimeout('/api/news-sources', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -480,7 +481,7 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
          */
         const judged = watchTerms.filter((t) => t.trim().length >= 2).length > 0
 
-        const res = await fetch('/api/influencers', {
+        const res = await fetchWithTimeout('/api/influencers', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ influencers: roster, watchTerms }),
@@ -527,8 +528,28 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
 
   /* ── the automatic part ────────────────────────────────────────────────── */
 
+  /**
+   * The example desk never calls the server on its own.
+   *
+   * It is a fixed dataset — its own notes say "read once and stored, not a live
+   * feed" — so every automatic refresher in here is asking a backend to redo
+   * work that already shipped in the JSON. Measured on the built app: a single
+   * fresh demo visit fired POST /api/persona and POST /api/opinion twice each.
+   *
+   * That is not merely wasteful. `lastScanAt` is written only on SUCCESS, so a
+   * failure never backs off and the call repeats on every mount for the life of
+   * the deployment. With no model key configured the visitor is shown the
+   * function's own error text — "No language model is configured... set
+   * GROQ_API_KEY in the site environment and redeploy" — as the body of a card
+   * on the showcase screen. With a key configured, every anonymous visitor
+   * spends a billed grounded search instead.
+   *
+   * Only the AUTOMATIC paths are stopped. Anything the reader asks for by
+   * tapping — Analyse, or the refresh control — still runs, because a demo
+   * where the buttons do nothing is a worse demo.
+   */
   useEffect(() => {
-    if (!identity) return
+    if (!identity || isDemoScope()) return
 
     // A desk whose identity exists but whose profile was never written — set up
     // before auto-configuration existed, or half-written by an interrupted

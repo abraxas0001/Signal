@@ -91,6 +91,7 @@ import { LevelPips } from './charts'
 import { makeId, readStore, update, useStore } from '@/lib/store'
 import { absoluteDate, cn, hostOf, isIndicScript, pluralise } from '@/lib/utils'
 import { fadeUp, haptic, listItem, listStaggerFast, spring } from '@/lib/motion'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * The grievance desk.
@@ -413,7 +414,7 @@ async function readBatch(
 
   let res: Response
   try {
-    res = await fetch('/api/grievance', {
+    res = await fetchWithTimeout('/api/grievance', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
       body: JSON.stringify({ urls, stream: true }),
@@ -1257,7 +1258,7 @@ export function Grievances({
     setScanning(true)
     setScanNote(null)
     try {
-      const res = await fetch('/api/scan', {
+      const res = await fetchWithTimeout('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1758,7 +1759,7 @@ export function Grievances({
             icon={<Inbox size={16} />}
             title="The desk at a glance"
             sub="Re-counted from what the desk already holds"
-            hint="Every number here is a re-count of records already on the desk — nothing new is fetched, and no delta is invented."
+            hint="Every number here is a re-count of records already on the desk. Nothing new is fetched, and no delta is invented."
             tint="blue"
             action={<Chip tone="neutral">{isToday(day) ? 'Today' : formatDeskDay(day)}</Chip>}
           />
@@ -3598,7 +3599,7 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
         <CardHead
           icon={<ShieldAlert size={16} />}
           title="Is it real?"
-          sub="Signals, not a verdict — the office decides"
+          sub="Signals, not a verdict. The office decides."
           hint="Signals, not a verdict. Somebody in the office decides."
           tint="orange"
         />

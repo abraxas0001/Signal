@@ -63,6 +63,7 @@ import {
   type RivalCache,
   type Standing,
 } from '@/lib/handles'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * The account dashboard.
@@ -353,7 +354,7 @@ export function Dashboard({
 
     try {
       for (let pass = 0; pass < MAX_PASSES; pass++) {
-        const res = await fetch('/api/batch-track-all', {
+        const res = await fetchWithTimeout('/api/batch-track-all', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -409,7 +410,7 @@ export function Dashboard({
               // Name the account being read. A count alone cannot tell the
               // reader that the long pause is Instagram behaving normally.
               setSyncNote(
-                `${String(event['handle'])} — ${posts} post${posts === 1 ? '' : 's'} (${synced}/${handles.length})`,
+                `${String(event['handle'])}: ${posts} post${posts === 1 ? '' : 's'} (${synced}/${handles.length})`,
               )
             } else if (event['type'] === 'complete') {
               done = event['done'] === true
@@ -422,7 +423,7 @@ export function Dashboard({
         }
 
         if (done) break
-        setSyncNote(`${remaining} account${remaining === 1 ? '' : 's'} left — continuing…`)
+        setSyncNote(`${remaining} account${remaining === 1 ? '' : 's'} left. Continuing…`)
       }
 
       setSyncNote('Reading back what was stored…')
@@ -590,15 +591,41 @@ export function Dashboard({
     [refresh],
   )
 
-  /** Accounts with a reading, yours first — the table's column order. */
-  const compared = useMemo(
-    () =>
-      handles
-        .filter((h) => h.snapshots.length > 0)
-        .sort((a, b) => Number(b.own) - Number(a.own))
-        .slice(0, 4),
-    [handles],
-  )
+  /**
+   * Accounts with a reading, yours first — the table's column order.
+   *
+   * A flat "yours first, take four" cut worked while a desk watched one rival,
+   * and broke the moment it watched three: an office running four of its own
+   * accounts filled every slot, and the comparison screen listed nobody to
+   * compare against. The screen is named for a question it had stopped being
+   * able to ask.
+   *
+   * So the office's own accounts are taken first — all of them, since a desk
+   * wants its standing per channel — and then ONE account per rival, their
+   * largest. That is the right sample for the question this screen asks: "what
+   * do people think of them" is about the person, and their biggest account is
+   * where most of the comments are. Four rows per rival would be the same
+   * person four times, crowding out the other opponents.
+   */
+  const compared = useMemo(() => {
+    const withReadings = handles.filter((h) => h.snapshots.length > 0)
+    const mine = withReadings.filter((h) => h.own)
+
+    const followersOf = (h: TrackedHandle): number =>
+      h.snapshots.at(-1)?.followers ?? 0
+
+    // The biggest account for each rival, keyed by who they are.
+    const bestPerRival = new Map<string, TrackedHandle>()
+    for (const h of withReadings) {
+      if (h.own) continue
+      const who = h.displayName ?? h.handle
+      const held = bestPerRival.get(who)
+      if (!held || followersOf(h) > followersOf(held)) bestPerRival.set(who, h)
+    }
+
+    const rivals = [...bestPerRival.values()].sort((a, b) => followersOf(b) - followersOf(a))
+    return [...mine, ...rivals]
+  }, [handles])
 
   /**
    * One sentence naming where you actually stand.
@@ -678,7 +705,7 @@ export function Dashboard({
         if (crawlable || own.length > 0) {
           const res = crawlable
             ? await fetch(`/api/standing?q=${encodeURIComponent(h.profileUrl || h.handle)}`)
-            : await fetch('/api/standing', {
+            : await fetchWithTimeout('/api/standing', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ urls: own, platform: h.platform, handle: h.handle }),
@@ -720,7 +747,7 @@ export function Dashboard({
           }
 
           setReadingPhase('searching')
-          const searched = await fetch('/api/opinion', {
+          const searched = await fetchWithTimeout('/api/opinion', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ step: 'search', ...subject }),
@@ -739,7 +766,7 @@ export function Dashboard({
           }
 
           setReadingPhase('structuring')
-          const structured = await fetch('/api/opinion', {
+          const structured = await fetchWithTimeout('/api/opinion', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -895,7 +922,53 @@ export function Dashboard({
         })
       }
     }
-    return rows.sort((a, b) => b.interactions - a.interactions).slice(0, 8)
+    /**
+     * Rank by interactions, but give every channel a place on the strip.
+     *
+     * Sorting on interactions alone silently deleted a whole platform. YouTube
+     * publishes a view count and no likes or comments, so every video scored
+     * zero and none of the twenty-five ever reached a strip of eight — the
+     * channel was scraped, counted in the follower totals, and then invisible
+     * wherever posts are actually shown.
+     *
+     * So the best post from each platform leads, and the rest of the strip
+     * fills by rank. Nothing is invented to achieve it: a video's views are not
+     * converted into pretend likes, and `measured` still tells the card to say
+     * "interactions not published" rather than implying a zero.
+     */
+    /**
+     * Anything with neither a picture nor a caption sorts last, whatever it
+     * scored. A few Facebook records carry an engagement figure and no
+     * readable content at all; they belong in the totals, which are computed
+     * from them, but a tile with nothing on it should never outrank a post
+     * that can actually be read.
+     */
+    const showable = (r: (typeof rows)[number]): boolean =>
+      Boolean(r.post.thumbnailUrl) ||
+      Boolean(r.post.title?.trim()) ||
+      r.handle.platform === 'YouTube'
+
+    rows.sort((a, b) => {
+      if (showable(a) !== showable(b)) return showable(a) ? -1 : 1
+      if (a.measured !== b.measured) return a.measured ? -1 : 1
+      if (a.measured) return b.interactions - a.interactions
+      return (b.post.views ?? 0) - (a.post.views ?? 0)
+    })
+
+    // Keyed by platform AND side, so a rival's YouTube does not stand in for
+    // the office's own.
+    const seen = new Set<string>()
+    const lead: typeof rows = []
+    const rest: typeof rows = []
+    for (const r of rows) {
+      const key = `${r.handle.platform}:${r.handle.own ? 'own' : 'rival'}`
+      if (seen.has(key)) rest.push(r)
+      else {
+        seen.add(key)
+        lead.push(r)
+      }
+    }
+    return [...lead, ...rest].slice(0, 14)
   }, [shown])
 
   /**
@@ -985,7 +1058,7 @@ export function Dashboard({
             hero={kpis.totalFollowers != null}
             deltaLabel={
               kpis.withFollowers === 0
-                ? 'No follower reading yet — refresh to take one'
+                ? 'No follower reading yet. Refresh to take one.'
                 : kpis.withFollowers < shown.length
                   ? `Across the ${kpis.withFollowers} of ${shown.length} accounts with a reading`
                   : 'Across every account shown'
@@ -1022,7 +1095,7 @@ export function Dashboard({
             <CardHead
               icon={<MapPin size={16} />}
               tint="blue"
-              title={ground ? `${ground.name} — your ground` : identity ? 'Your ground' : 'Where this desk sits'}
+              title={ground ? `Your ground: ${ground.name}` : identity ? 'Your ground' : 'Where this desk sits'}
               sub={
                 identity
                   ? 'The seat this desk watches, on the map.'
@@ -1066,7 +1139,7 @@ export function Dashboard({
                     <div className="flex items-start gap-2.5 rounded-2xl bg-[var(--surface-2)] p-4">
                       <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
                       <p className="text-xs leading-relaxed text-ink-3">
-                        Placed with the offline gazetteer on this device — the seat name never
+                        Placed with the offline gazetteer on this device. The seat name never
                         leaves it. A seat the map does not know lights nothing rather than a guess.
                       </p>
                     </div>
@@ -1076,7 +1149,7 @@ export function Dashboard({
                     <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
                     <p className="text-xs leading-relaxed text-ink-3">
                       {identity.constituency || identity.district || identity.state
-                        ? `We track ${identity.constituency ?? identity.district ?? identity.state}, but it is not on the offline map yet — so nothing is pinned, rather than dropped somewhere plausible.`
+                        ? `We track ${identity.constituency ?? identity.district ?? identity.state}, but it is not on the offline map yet, so nothing is pinned rather than dropped somewhere plausible.`
                         : 'No seat is set for this desk yet, so there is nowhere to light.'}
                     </p>
                   </div>
@@ -1113,7 +1186,7 @@ export function Dashboard({
             {/* The provenance line, kept whole. CardHead's one-line sub would
                 truncate exactly the half that matters on a phone. */}
             <p className="mt-3 text-xs text-ink-3">
-              Followers over every reading stored on this device — never estimated between them.
+              Followers across every reading stored on this device. Never estimated between them.
             </p>
           </Card>
         </m.section>
@@ -1845,7 +1918,10 @@ export function Dashboard({
                       <PostThumbCard
                         className="w-[150px]"
                         key={`${handle.id}:${post.url}`}
-                        thumbnailUrl={handle.platform === 'YouTube' ? youtubeThumb(post.url) : null}
+                        thumbnailUrl={
+                          post.thumbnailUrl ??
+                          (handle.platform === 'YouTube' ? youtubeThumb(post.url) : null)
+                        }
                         platform={handle.platform}
                         author={handle.displayName ?? handle.handle}
                         title={post.title}

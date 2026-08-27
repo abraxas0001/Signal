@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { LazyMotion, domAnimation, AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { Clock, Moon, RefreshCw, Sun, TriangleAlert } from 'lucide-react'
@@ -15,7 +15,11 @@ import { ReportView } from '@/components/report/ReportView'
 import { RescueSheet } from '@/components/RescueSheet'
 import { HistoryPanel } from '@/components/HistoryPanel'
 import { Dashboard } from '@/components/Dashboard'
+import { loadDemoRoster, type DemoRoster } from '@/lib/demo-roster'
+import { enterDemoMode, exitDemoMode, isDemoMode } from '@/lib/demo-mode'
 import { Briefing } from '@/components/Briefing'
+import { DemoBar, DemoNote, DemoPairing } from '@/components/DemoBar'
+import { type DemoDoorProps } from '@/components/DemoDoor'
 import { Grievances } from '@/components/Grievances'
 import { Influencers } from '@/components/Influencers'
 import { Persona } from '@/components/Persona'
@@ -25,9 +29,9 @@ import { Onboarding } from '@/components/Onboarding'
 import { TabBar, type Tab } from '@/components/TabBar'
 import { MoreSheet } from '@/components/MoreSheet'
 import { SideNav } from '@/components/SideNav'
-import { emptyStore, useStore, update, writeStore } from '@/lib/store'
+import { emptyStore, isDemoScope, subscribe, useStore, update, writeStore } from '@/lib/store'
 import { LockButton, LockScreen, useVaultState } from '@/components/Lock'
-import { signOut } from '@/lib/vault'
+import { activeAccount, signOut } from '@/lib/vault'
 import { Avatar, Button, Card, Shell, SignalGlyph } from '@/components/ui'
 import { applyDeviceClass, ease, haptic, pageIn } from '@/lib/motion'
 
@@ -100,6 +104,212 @@ export default function App() {
   const openActions = store.actions.filter(
     (a) => a.status !== 'Completed' && a.status !== 'Declined',
   ).length
+
+  /**
+   * The seeded roster, when this device is running on it.
+   *
+   * `deskKey` remounts the dashboard when the reader switches politician.
+   * Briefing reads the tracked list once, with `useMemo(..., [])`, which is
+   * right for a screen whose accounts do not change under it — so rewriting
+   * that list needs an explicit remount rather than a subscription nobody else
+   * would use.
+   */
+  const [demoRoster, setDemoRoster] = useState<DemoRoster | null>(null)
+  const [deskKey, setDeskKey] = useState(0)
+  /**
+   * Whether the demo desk is open.
+   *
+   * Read straight from storage rather than defaulted to false, because
+   * `main.tsx` has already pointed the store at the demo namespace by the time
+   * this runs. Starting at false would gate a returning visitor behind the lock
+   * screen for one render while their demo data sat loaded underneath it.
+   */
+  /**
+   * Subscribed to the store, not remembered.
+   *
+   * This was `useState(() => isDemoMode())` — read once at mount and never
+   * corrected. That made it a second, staler answer to a question the store
+   * already answers, and the two came apart the moment anything else moved the
+   * namespace. Creating an account from inside the demo does exactly that: the
+   * records went where they should, but this stayed true, so the politician
+   * switcher went on rendering over a real account and the lock screen — which
+   * the demo is allowed to bypass — never came back.
+   *
+   * `setStorageKey` emits on every scope change, so subscribing means signing
+   * in, signing out and creating an account all close the example desk without
+   * any of them having to know it exists.
+   */
+  const demoOpen = useSyncExternalStore(subscribe, isDemoScope, () => false)
+
+  /**
+   * Load the roster so the entry screens can offer it, and restore an open demo.
+   *
+   * Loading is not entering: this only fetches the dataset, which is what tells
+   * the sign-in and setup screens whether there is an example desk to offer at
+   * all. A visitor already inside the demo is a separate case — main.tsx pointed
+   * the store at that namespace before the first render, so all that remains is
+   * to show the banner.
+   */
+  useEffect(() => {
+    void (async () => {
+      const roster = await loadDemoRoster()
+      if (!roster) return
+      setDemoRoster(roster)
+
+      // Already inside the demo — main.tsx pointed the store at it before the
+      // first render, so there is nothing to switch, only the banner to show.
+      if (isDemoMode()) return
+
+      /**
+       * The demo opens when it is ASKED for, never on its own.
+       *
+       * An earlier version opened it automatically on any device with nothing
+       * configured. That skipped the very choice this is supposed to present:
+       * the first screen would have been somebody else's dashboard, with no
+       * moment at which the visitor decided to look at an example rather than
+       * set up their own desk. Both entry screens now carry the offer — the
+       * sign-in list and the "whose desk is this?" form — so the choice is in
+       * front of them either way, and taking it is theirs.
+       */
+      if (!new URLSearchParams(window.location.search).has('example')) return
+
+      if (await enterDemoMode()) setDeskKey((k) => k + 1)
+    })()
+  }, [])
+
+  /**
+   * Open the demo from anywhere: the lock screen, the setup screen, the nav
+   * foot, or ?example=1.
+   *
+   * Three things happen here that did not have to happen while this was only
+   * reachable from the entry screens, because on those screens nobody is
+   * signed in and nothing is running.
+   */
+  const demoBusy = useRef(false)
+  const openDemo = useCallback(async (): Promise<void> => {
+    /**
+     * `enterDemoMode` awaits a fetch before it checks whether anyone is signed
+     * in, so two taps can both pass that check and both try to enter.
+     */
+    if (demoBusy.current) return
+
+    /**
+     * Null unless somebody is signed in IN THIS TAB, so the lock screen and the
+     * setup screen still reach the demo in a single tap exactly as before.
+     *
+     * The sign-out is not optional — a signed-in session has the vault's live
+     * codec installed and would seal the example desk into that account's
+     * envelope — but it is also not something to do to somebody quietly. They
+     * get told the cost, in the one sentence that matters: the passphrase.
+     */
+    const account = activeAccount()
+    if (
+      account !== null &&
+      !window.confirm(
+        `Open the example desk?
+
+This signs you out of ${account.name}. Your records stay encrypted on this device, and you will need the passphrase to open them again.`,
+      )
+    ) {
+      return
+    }
+
+    /**
+     * Tear down a run in flight, the way `goTo` does.
+     *
+     * `openDemo` sets the tab directly rather than going through `goTo`, which
+     * was harmless while the only callers were screens that cannot have an
+     * analysis running. From the nav foot it is reachable from the analyse
+     * screen itself, and without this the run is neither cancelled nor
+     * abandoned: it keeps spending a model call for a screen nobody is on, and
+     * when it lands, `history.add` writes the office's real report into the
+     * demo's unencrypted namespace — which leaving deliberately never wipes.
+     */
+    if (state.status === 'running') cancel()
+    reset()
+    setLastRequest(null)
+    setDemo(null)
+    setRescueOpen(false)
+    setCameFrom(null)
+
+    demoBusy.current = true
+    try {
+      if (await enterDemoMode()) {
+        setDeskKey((k) => k + 1)
+        setTab('dashboard')
+        window.scrollTo({ top: 0 })
+      }
+    } catch (err) {
+      console.warn('Signal: could not open the example desk.', err)
+    } finally {
+      demoBusy.current = false
+    }
+  }, [state.status, cancel, reset])
+
+  /**
+   * Leave the example desk.
+   *
+   * Points the store back at the real accounts and reinstalls the sealing
+   * codec. The demo's own records are left in their namespace rather than
+   * deleted: nothing in them is private, and keeping them means coming back is
+   * instant.
+   */
+  const leaveDemo = useCallback((): void => {
+    /**
+     * The same teardown `openDemo` does, for the same reason in the other
+     * direction. An analysis started inside the demo and still running when the
+     * reader leaves lands after the namespace has moved, and `history.add`
+     * resolves its key at call time — so a demo report is filed into the
+     * office's real history, evicting a genuine entry if the list is at its cap.
+     */
+    if (state.status === 'running') cancel()
+    reset()
+    setLastRequest(null)
+    setDemo(null)
+    setRescueOpen(false)
+    setCameFrom(null)
+
+    exitDemoMode()
+    setDeskKey((k) => k + 1)
+  }, [state.status, cancel, reset])
+
+  /**
+   * The nav foot's demo control, decided once and handed to both navigations.
+   *
+   * Undefined only when the dataset was never deployed, so the door is never
+   * offered onto an empty room. It is deliberately NOT hidden while the demo is
+   * open: it flips to the way out instead.
+   *
+   * That flip matters more than it looks. `DemoBar` — which carries the only
+   * other exit — renders on the dashboard alone, so Grievances, Tasks,
+   * Influencers, Accounts, Compare and Settings had no way off the example desk
+   * at all. Someone who took this new one-tap door and then opened Settings
+   * would have been editing API keys and office identity into a namespace that
+   * gets discarded, with nothing on screen saying so. Keeping the control
+   * mounted makes the nav foot a permanent answer to "which desk am I on".
+   *
+   * The note is written here rather than in the component because only this
+   * scope knows whether the tap costs a sign-out, and whose name is on it.
+   */
+  const navDemo = useMemo<DemoDoorProps | undefined>(() => {
+    if (demoRoster === null) return undefined
+    if (demoOpen) {
+      return {
+        mode: 'leave' as const,
+        // Kept under ~20 characters: the column is 240px and the note truncates
+        // past that, which would cut the account name out of the one line whose
+        // job is to disclose the sign-out.
+        note: vault.exists ? 'Back to sign-in' : 'Back to your desk',
+        onClick: leaveDemo,
+      }
+    }
+    const account = activeAccount()
+    return {
+      mode: 'enter' as const,
+      note: account ? 'Signs you out first' : 'Real data, no setup',
+      onClick: () => void openDemo(),
+    }
+  }, [demoRoster, demoOpen, vault.exists, vault.account, leaveDemo, openDemo])
 
   // Gate the expensive visual layers once, at boot.
   useEffect(() => {
@@ -351,10 +561,24 @@ export default function App() {
     return <div className="min-h-screen-safe bg-[var(--bg)]" aria-busy="true" />
   }
 
-  if (sealed) {
+  /**
+   * The demo desk opens through the lock, not around it.
+   *
+   * `demoOpen` bypasses the seal because there is nothing sealed to reach: the
+   * store is pointed at a separate, unencrypted namespace holding public posts
+   * by public figures. No account is signed in, no private record is decrypted,
+   * and the real accounts stay locked exactly as they were — leaving the demo
+   * puts this screen straight back.
+   */
+  if (sealed && !demoOpen) {
     return (
       <LazyMotion features={domAnimation} strict>
-        <LockScreen onUnlocked={() => window.scrollTo({ top: 0 })} />
+        {/* Offered unconditionally, not gated on the roster having loaded.
+            Gating it raced: the sign-in screen paints immediately while the
+            dataset is still being fetched, so the button appeared a beat late
+            or, on a slow read, not at all. The dataset ships with the app, and
+            `openDemo` already no-ops if it is somehow absent. */}
+        <LockScreen onUnlocked={() => window.scrollTo({ top: 0 })} onDemo={() => void openDemo()} />
       </LazyMotion>
     )
   }
@@ -373,6 +597,7 @@ export default function App() {
     return (
       <LazyMotion features={domAnimation} strict>
         <Onboarding
+          onDemo={() => void openDemo()}
           onDone={() => {
             setTab('dashboard')
             window.scrollTo({ top: 0 })
@@ -508,7 +733,14 @@ export default function App() {
     switch (tab) {
       case 'grievances':
         return (
-          <Grievances key="grievances" onClose={go('dashboard')} focusIssueId={focusIssue} />
+          <>
+            <Grievances
+              key={`grievances-${deskKey}`}
+              onClose={go('dashboard')}
+              focusIssueId={focusIssue}
+            />
+            {demoOpen && <DemoNote />}
+          </>
         )
       // People the office is tracked against. Distinct from Influencers: that
       // screen asks what a set of accounts is saying in general, this one asks
@@ -524,7 +756,12 @@ export default function App() {
           />
         )
       case 'actions':
-        return <Actions key="actions" onClose={go('dashboard')} />
+        return (
+          <>
+            <Actions key={`actions-${deskKey}`} onClose={go('dashboard')} />
+            {demoOpen && <DemoNote />}
+          </>
+        )
       case 'accounts':
         return (
           <Dashboard
@@ -536,12 +773,16 @@ export default function App() {
         )
       case 'compare':
         return (
-          <Dashboard
-            key="compare"
-            mode="compare"
-            onClose={go('dashboard')}
-            onOpenActions={() => goTo('actions')}
-          />
+          <>
+            {/* Why this rival, on the screen where the rival is the subject. */}
+            {demoRoster && demoOpen && <DemoPairing roster={demoRoster} />}
+            <Dashboard
+              key={`compare-${deskKey}`}
+              mode="compare"
+              onClose={go('dashboard')}
+              onOpenActions={() => goTo('actions')}
+            />
+          </>
         )
       case 'settings':
         return (
@@ -556,8 +797,34 @@ export default function App() {
         )
       default:
         return (
-          <Briefing
-            key="dashboard"
+          <>
+            {/**
+             * Inside a Shell, like everything else on the page.
+             *
+             * It was rendered bare, outside the container every other block
+             * sits in, so it ran to the window edges while the dashboard
+             * beneath it stayed within the column — the pills started further
+             * left than the heading they belonged to and finished further
+             * right. `pb-5` is the gap that stops the row from sitting directly
+             * on top of the date line below it.
+             */}
+            {demoRoster && demoOpen && (
+              <Shell className="pb-5">
+              <DemoBar
+                roster={demoRoster}
+                onSwitched={() => {
+                  setDeskKey((k) => k + 1)
+                  window.scrollTo({ top: 0, behavior: 'smooth' })
+                }}
+                onExit={() => {
+                  leaveDemo()
+                  window.scrollTo({ top: 0 })
+                }}
+              />
+              </Shell>
+            )}
+            <Briefing
+            key={`dashboard-${deskKey}`}
             onRead={(postUrl) => readPost(postUrl, 'dashboard')}
             onEditIdentity={() => {
               // Clearing the stamp is what puts the setup screen back in front:
@@ -577,7 +844,8 @@ export default function App() {
               setFocusIssue(issueId ?? null)
               goTo(to)
             }}
-          />
+            />
+          </>
         )
     }
   }
@@ -713,6 +981,7 @@ export default function App() {
 
         <SideNav
           active={tab}
+          demo={navDemo}
           counts={{ influencers: unacknowledged, history: history.entries.length }}
           // No onLock: the padlock in the header is the one Lock control now,
           // present at every width. The sidebar's foot carries Settings.
@@ -759,6 +1028,7 @@ export default function App() {
           active={tab}
           counts={{ influencers: unacknowledged, history: history.entries.length }}
           onClose={() => setMoreOpen(false)}
+          demo={navDemo}
           onLock={vault.exists ? () => void signOut() : undefined}
           person={store.identity}
           onSelect={(next) => {

@@ -37,6 +37,16 @@ export interface TrackedPost {
   comments: number | null
   /** Only ever present when read through an owned-page API token. */
   shares?: number | null
+  /**
+   * The post's own picture, already downloaded and served from this origin.
+   *
+   * Never a platform CDN address. Those hosts refuse cross-origin embedding and
+   * their signed URLs expire within days, so one stored here would render as a
+   * broken image within the week — `scraper:media` downloads them and rewrites
+   * this to a local path. Null for a text-only post, which renders as the
+   * platform's own tile.
+   */
+  thumbnailUrl?: string | null
 }
 
 export interface HandleSnapshot {
@@ -91,6 +101,24 @@ function write(handles: TrackedHandle[]): void {
 
 export function listHandles(): TrackedHandle[] {
   return read()
+}
+
+/**
+ * Replace the whole tracked list in one write.
+ *
+ * `saveHandle` is the right call when a person adds or refreshes one account.
+ * Seeding a set of them through it would mean one `localStorage` write per
+ * handle, each re-serialising the whole list — and on a demo roster of two
+ * politicians across four platforms that is eight full rewrites to land one
+ * state. This does it once.
+ *
+ * Deliberately destructive, and therefore never called on a store that holds
+ * someone's real work: see the demo loader, which only seeds an empty store or
+ * one the reader explicitly asked to replace.
+ */
+export function replaceAllHandles(handles: TrackedHandle[]): TrackedHandle[] {
+  write(handles)
+  return handles
 }
 
 export function saveHandle(h: TrackedHandle): TrackedHandle[] {

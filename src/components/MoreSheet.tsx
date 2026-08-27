@@ -7,6 +7,8 @@ import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { ease, spring } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { OVERFLOW_GROUPS, badgeOf, type Tab } from '@/lib/nav'
+import { DemoDoor, type DemoDoorProps } from '@/components/DemoDoor'
+import { isDemoScope, subscribe } from '@/lib/store'
 
 /**
  * The rest of the app, on a phone.
@@ -55,6 +57,7 @@ export function MoreSheet({
   onSelect,
   onClose,
   onLock,
+  demo,
   person,
 }: {
   open: boolean
@@ -64,6 +67,12 @@ export function MoreSheet({
   onClose: () => void
   /** Omitted when there is no account to lock, and then no lock row. */
   onLock?: () => void
+  /**
+   * The example desk, if there is one to offer. Identical shape to SideNav's,
+   * and App passes both surfaces the same binding — the sidebar is `lg:`+ only,
+   * so without this every phone would be left without a door.
+   */
+  demo?: DemoDoorProps
   /** Who the desk is for, shown at the top so the sheet has an owner. */
   person?: { name: string; photoUrl?: string | null; role?: string | null; constituency?: string | null } | null
 }) {
@@ -217,19 +226,65 @@ export function MoreSheet({
               ))}
 
               {/* The way out of the desk, where the sidebar also puts it —
-                  last, under a rule, away from the destinations. */}
-              {onLock && (
-                <div className="mt-6 border-t border-[var(--border)] pt-3">
-                  <button
-                    onClick={() => {
-                      onClose()
-                      onLock()
-                    }}
-                    className={cn(PILL_ROW, PILL_FOCUS, 'px-4 text-sm font-medium', PILL_IDLE)}
-                  >
-                    <Lock size={16} strokeWidth={1.9} className="shrink-0" aria-hidden />
-                    Lock
-                  </button>
+                  last, under a rule, away from the destinations. The example
+                  desk shares the block, above Lock: locking is the terminal
+                  act and stays last. */}
+              {(demo || onLock) && (
+                <div className="mt-6 space-y-2 border-t border-[var(--border)] pt-3">
+                  {demo && (
+                    <DemoDoor
+                      {...demo}
+                      /* The sheet closes only if the scope actually moved.
+                         The Lock row's `onClose(); onLock()` shape would have
+                         shut the sheet even when the reader cancelled the
+                         sign-out confirmation — costing them the menu they
+                         were in the middle of using, for a choice they
+                         declined. Asking the store where it is now beats
+                         threading a boolean back through the callback. */
+                      onClick={() => {
+                        /**
+                         * Subscribed, not awaited.
+                         *
+                         * App hands this down as `() => void openDemo()`, which
+                         * returns undefined immediately — so a `.then` on it
+                         * resolves one microtask later, long before
+                         * `enterDemoMode` has finished awaiting the roster
+                         * fetch. The scope was always still unchanged at that
+                         * point and the sheet never closed. Listening to the
+                         * store instead closes it exactly when the namespace
+                         * moves, however long that takes, and the unsubscribe
+                         * timer stops a cancelled confirmation from leaving a
+                         * listener behind.
+                         */
+                        const want = demo.mode === 'enter'
+                        if (isDemoScope() === want) {
+                          demo.onClick()
+                          onClose()
+                          return
+                        }
+                        const stop = subscribe(() => {
+                          if (isDemoScope() !== want) return
+                          stop()
+                          clearTimeout(giveUp)
+                          onClose()
+                        })
+                        const giveUp = setTimeout(stop, 15_000)
+                        demo.onClick()
+                      }}
+                    />
+                  )}
+                  {onLock && (
+                    <button
+                      onClick={() => {
+                        onClose()
+                        onLock()
+                      }}
+                      className={cn(PILL_ROW, PILL_FOCUS, 'px-4 text-sm font-medium', PILL_IDLE)}
+                    >
+                      <Lock size={16} strokeWidth={1.9} className="shrink-0" aria-hidden />
+                      Lock
+                    </button>
+                  )}
                 </div>
               )}
             </div>

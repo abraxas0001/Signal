@@ -6,6 +6,7 @@ import { Card, Chip } from './ui'
 import { CardHead, PlatformBadge, ProgressRow } from '@/components/kit'
 import { listItem, listStaggerFast } from '@/lib/motion'
 import { cn } from '@/lib/utils'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * What this deployment can read, and what it would take to read more.
@@ -130,7 +131,7 @@ export function DataSources() {
     let cancelled = false
     void (async () => {
       try {
-        const res = await fetch('/api/capabilities')
+        const res = await fetchWithTimeout('/api/capabilities')
         if (!res.ok) throw new Error(String(res.status))
         const payload = (await res.json()) as {
           capabilities?: Capability[]

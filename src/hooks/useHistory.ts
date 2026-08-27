@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Report } from '@shared/types'
-import { scopedKey } from '@/lib/store'
+import { scopedKey, subscribe } from '@/lib/store'
 
 /**
  * Scoped per signed-in account. See scopedKey in lib/store.
@@ -35,8 +35,31 @@ export interface HistoryEntry {
 export function useHistory() {
   const [entries, setEntries] = useState<HistoryEntry[]>([])
 
+  /**
+   * Re-read whenever the store changes namespace.
+   *
+   * This was a one-shot read at mount, and the hook is mounted once at App
+   * level and never remounted. `write` resolves `KEY()` at call time, so the
+   * two disagreed the moment anyone signed in, signed out or opened the
+   * example desk: the list in memory still held the PREVIOUS scope's reports,
+   * and the next write filed all of them under the new scope's key. Opening
+   * the demo from the nav would have copied an office's real analysed reports
+   * into an unencrypted, passphrase-free namespace that is deliberately never
+   * wiped. It also left the sidebar's History badge counting the last desk's
+   * entries.
+   *
+   * Compared by key rather than re-read on every emit: the store emits on
+   * every write, and re-parsing thirty reports each time buys nothing.
+   */
   useEffect(() => {
+    let key = KEY()
     setEntries(read())
+    return subscribe(() => {
+      const next = KEY()
+      if (next === key) return
+      key = next
+      setEntries(read())
+    })
   }, [])
 
   const add = useCallback((report: Report) => {

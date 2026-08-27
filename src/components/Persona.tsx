@@ -44,6 +44,7 @@ import { INDIA_BBOX, INDIA_DOTS } from './india-dots'
 import { LevelPips } from './charts'
 import { absoluteDate, cn, hostOf, pluralise, relativeTime } from '@/lib/utils'
 import { fadeUp, listItem, listStagger } from '@/lib/motion'
+import { fetchWithTimeout } from '@/lib/net'
 
 /**
  * Persona tracker.
@@ -409,7 +410,7 @@ interface ApiResult {
 async function callPersona(payload: Record<string, unknown>): Promise<ApiResult> {
   let res: Response
   try {
-    res = await fetch('/api/persona', {
+    res = await fetchWithTimeout('/api/persona', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -791,7 +792,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
             label="People followed"
             value={personas.length}
             tint="blue"
-            deltaLabel="Checked by hand — no server watches for you"
+            deltaLabel="Checked by hand. No server watches for you."
           />
           <IconStat
             icon={<Newspaper size={18} />}
@@ -1441,7 +1442,7 @@ function PersonaProfilePanel({ person, mentions }: { person: TrackedPersona; men
                 icon={<PieChart size={16} aria-hidden />}
                 tint="violet"
                 title="How the coverage reads"
-                sub="Scored mentions only — never guessed at"
+                sub="Scored mentions only, never guessed at"
                 hint="Scored mentions only. A story nobody could score is never coloured in."
               />
               <div className="mt-1 flex flex-col items-center gap-5 sm:flex-row">
@@ -1454,7 +1455,7 @@ function PersonaProfilePanel({ person, mentions }: { person: TrackedPersona; men
                   <Legend items={sentiment.segments.map((s) => ({ label: s.label, color: s.color }))} />
                   {sentiment.unscored > 0 && (
                     <p className="mt-3 text-xs text-ink-3">
-                      {sentiment.unscored} not scored — carried through, never guessed at.
+                      {sentiment.unscored} not scored. Carried through, never guessed at.
                     </p>
                   )}
                 </div>

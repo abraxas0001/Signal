@@ -88,16 +88,68 @@ export function scopedKey(base: string): string {
 }
 
 /**
+ * The example desk's storage namespace.
+ *
+ * It lives here, beside `STORE_KEY`, rather than in demo-mode.ts, because the
+ * demo is not a mode the app is in — it is a scope the store is pointed at, and
+ * that makes it this module's business. Anything that wants to know whether the
+ * demo is open is really asking which namespace is live, and there is exactly
+ * one answer to that.
+ */
+export const DEMO_STORE_KEY = `${STORE_KEY}:demo`
+
+/**
+ * Where the open-demo flag is persisted, so a refresh reopens the example desk
+ * instead of dumping the reader back at the door.
+ */
+const DEMO_FLAG = 'signal.demo.mode'
+
+/** Is the store currently pointed at the example desk? */
+export function isDemoScope(): boolean {
+  return storageKey === DEMO_STORE_KEY
+}
+
+/** Was the example desk open when this device last had the app loaded? */
+export function demoWasOpen(): boolean {
+  try {
+    return localStorage.getItem(DEMO_FLAG) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
  * Point the store at an account's storage.
  *
  * Clearing the cache is not optional. Without it, switching accounts would hand
  * the next person the previous person's records straight out of memory — the
  * exact separation this exists to provide — and the first write under the new
  * account would then seal them into the new account's blob.
+ *
+ * The demo flag is written here, and ONLY here, for a reason that cost a real
+ * bug. It used to be set by `enterDemoMode` and cleared by `exitDemoMode`, and
+ * `exitDemoMode` was reachable from exactly one button. So signing into a real
+ * account from inside the demo left the flag set: the records were correctly
+ * scoped and empty, but the app still believed the example desk was open. The
+ * politician switcher stayed on screen over a real account — one click from
+ * writing five public figures into somebody's own desk — and the lock screen,
+ * which the demo is allowed to bypass, stopped appearing at all.
+ *
+ * Making the flag a mirror of `storageKey` rather than an independent truth
+ * means the two cannot disagree. Every path that points the store somewhere
+ * else — signing in, signing out, creating an account, restoring a session —
+ * already goes through here, and now closes the demo by doing so.
  */
 export function setStorageKey(next: string): void {
   if (storageKey === next) return
   storageKey = next
+  try {
+    if (next === DEMO_STORE_KEY) localStorage.setItem(DEMO_FLAG, '1')
+    else localStorage.removeItem(DEMO_FLAG)
+  } catch {
+    /* private mode: the scope is still correct for this tab, it just will not
+       survive a refresh. Losing the demo on reload is the safe direction. */
+  }
   cache = null
   emit()
 }
@@ -285,10 +337,33 @@ function migrate(raw: unknown): Store {
  * The codec seam.
  *
  * Reads and writes go through these two, so adding at-rest encryption later is
- * a change here rather than a change everywhere. They are identity today.
+ * a change here rather than a change everywhere. The vault swaps them for a
+ * sealing pair once an account exists.
  */
-let encode: (s: Store) => string = (s) => JSON.stringify(s)
-let decode: (raw: string) => unknown = (raw) => JSON.parse(raw) as unknown
+export interface Codec {
+  encode: (s: Store) => string
+  decode: (raw: string) => unknown
+}
+
+/**
+ * The plaintext pair: what this module used before the vault existed, and what
+ * an unencrypted namespace still needs.
+ *
+ * Exported because the demo desk is exactly that namespace and had no way to
+ * ask for it. The vault installs a codec whose `encode` THROWS the moment a
+ * device has any account, `writeStore` swallows that throw by design, and the
+ * result was a demo that seeded itself into the in-memory cache and never
+ * reached disk. It looked perfect until the page reloaded, and then the
+ * example desk was gone and the setup screen was back. Measured: 25,489 bytes
+ * written on a device with no accounts, 0 bytes on a device with one.
+ */
+export const PLAIN_CODEC: Codec = {
+  encode: (s) => JSON.stringify(s),
+  decode: (raw) => JSON.parse(raw) as unknown,
+}
+
+let encode: (s: Store) => string = PLAIN_CODEC.encode
+let decode: (raw: string) => unknown = PLAIN_CODEC.decode
 
 export function setCodec(next: {
   encode: (s: Store) => string
