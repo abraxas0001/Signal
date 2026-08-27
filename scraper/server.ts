@@ -222,6 +222,23 @@ const server = createServer((req, res) => {
   })()
 })
 
+/**
+ * A port collision is the commonest way to start this service twice, and
+ * Node's default is an unhandled 'error' event and a stack trace about
+ * EADDRINUSE — which says nothing about what to do. Almost always the answer
+ * is "it is already running", so say that.
+ */
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `[scraper] port ${PORT} is already in use — the service is probably already running.\n` +
+        `[scraper] Check http://127.0.0.1:${PORT}/health, or set SCRAPER_PORT to use another port.`,
+    )
+    process.exit(1)
+  }
+  throw err
+})
+
 server.listen(PORT, '127.0.0.1', () => {
   log(`listening on http://127.0.0.1:${PORT}/provider`)
   log(`auth: ${KEY ? 'bearer key required' : 'open (localhost only)'}`)

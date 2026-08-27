@@ -29,9 +29,9 @@
     "test:autoconfig": "tsx scripts/test-autoconfig.ts",
     "test:matching": "tsx scripts/test-matching.ts",
     "test:sync": "tsx scripts/test-sync.ts",
-    "scraper": "tsx scraper/server.ts",
-    "scraper:login": "tsx scraper/login.ts",
-    "scraper:test": "tsx scraper/test.ts"
+    "scraper": "tsx --env-file-if-exists=.env scraper/server.ts",
+    "scraper:login": "tsx --env-file-if-exists=.env scraper/login.ts",
+    "scraper:test": "tsx --env-file-if-exists=.env scraper/test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
