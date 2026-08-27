@@ -23,6 +23,7 @@
  * recoverable by retrying.
  */
 
+import { isLoggedOut } from '../session'
 import {
   canonicalUrl,
   type AdapterContext,
@@ -64,25 +65,12 @@ export const instagram: PlatformAdapter = {
   profileUrl: (handle) => `https://www.instagram.com/${normaliseHandle(handle)}/`,
 
   /**
-   * Instagram's wall takes two forms: a redirect to /accounts/login/, and a
-   * modal laid over a partially rendered profile. The second is why the DOM
-   * check exists — the URL still reads as the profile while the content
-   * underneath is inert.
+   * Measured: the signed-out landing page carries no `input[name="username"]`
+   * at all — the form is behind a button — so requiring that pair reported a
+   * logged-out session as usable. `isLoggedOut` requires a marker only a
+   * signed-in viewer gets, such as the DM inbox link.
    */
-  isLoginWall: async ({ page }) => {
-    const url = page.url()
-    if (/\/accounts\/login|\/accounts\/signup/i.test(url)) return true
-    return page
-      .evaluate(() => {
-        const hasLoginForm = Boolean(
-          document.querySelector('input[name="username"]') &&
-            document.querySelector('input[name="password"]'),
-        )
-        const hasGrid = Boolean(document.querySelector('a[href*="/p/"], a[href*="/reel/"]'))
-        return hasLoginForm && !hasGrid
-      })
-      .catch(() => false)
-  },
+  isLoginWall: ({ page }) => isLoggedOut(page, 'Instagram'),
 
   posts: async (ctx: AdapterContext, handle): Promise<AdapterResult<ScrapedPost>> => {
     const { page, log, limit } = ctx

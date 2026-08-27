@@ -20,6 +20,7 @@
  * twice.
  */
 
+import { isLoggedOut } from '../session'
 import {
   canonicalUrl,
   parseCount,
@@ -103,27 +104,12 @@ export const twitter: PlatformAdapter = {
   profileUrl: (handle) => `https://x.com/${normaliseHandle(handle)}`,
 
   /**
-   * Both halves matter. X will happily render a profile shell to a signed-out
-   * visitor and then refuse the timeline, so a URL check alone reports an
-   * active account as empty.
+   * Measured: signed out, `x.com/home` redirects to `x.com/` — no /login in
+   * the URL and no username field on the landing page. Every wall marker this
+   * used to look for missed, so it reported a never-signed-in profile as
+   * signed in. `isLoggedOut` asks for proof of a session instead.
    */
-  isLoginWall: async ({ page }) => {
-    const url = page.url()
-    if (/\/i\/flow\/login|\/login|\/i\/flow\/signup/.test(url)) return true
-    return page
-      .evaluate(() => {
-        const hasSignIn = Boolean(
-          document.querySelector('input[autocomplete="username"]') ||
-            document.querySelector('a[href="/login"]'),
-        )
-        const hasTimeline = Boolean(
-          document.querySelector('article[data-testid="tweet"]') ||
-            document.querySelector('[data-testid="primaryColumn"]'),
-        )
-        return hasSignIn && !hasTimeline
-      })
-      .catch(() => false)
-  },
+  isLoginWall: ({ page }) => isLoggedOut(page, 'Twitter/X'),
 
   posts: async (ctx: AdapterContext, handle): Promise<AdapterResult<ScrapedPost>> => {
     const { page, log, limit } = ctx

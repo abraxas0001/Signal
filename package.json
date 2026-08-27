@@ -31,7 +31,8 @@
     "test:sync": "tsx scripts/test-sync.ts",
     "scraper": "tsx --env-file-if-exists=.env scraper/server.ts",
     "scraper:login": "tsx --env-file-if-exists=.env scraper/login.ts",
-    "scraper:test": "tsx --env-file-if-exists=.env scraper/test.ts"
+    "scraper:test": "tsx --env-file-if-exists=.env scraper/test.ts",
+    "scraper:probe": "tsx --env-file-if-exists=.env scraper/probe.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

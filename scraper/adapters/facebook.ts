@@ -18,6 +18,7 @@
  * FIND the URLs; the app's job is to read them.
  */
 
+import { isLoggedOut } from '../session'
 import {
   canonicalUrl,
   parseCount,
@@ -95,23 +96,13 @@ export const facebook: PlatformAdapter = {
   },
 
   /**
-   * URL and DOM together. Facebook will render a partial public shell to a
-   * signed-out visitor with a login form pinned over it, so the presence of
-   * the email+password pair is the reliable tell rather than the URL alone.
+   * Facebook's own version of this check happened to be right — measured
+   * signed out, the email and password inputs are both present — but it was
+   * right by luck rather than by rule, and would break the moment Facebook
+   * moved the form behind a button as Instagram has. `isLoggedOut` requires
+   * proof of a session instead of recognising one shape of wall.
    */
-  isLoginWall: async ({ page }) => {
-    const url = page.url()
-    if (/\/login|\/checkpoint|\/recover/i.test(url)) return true
-    return page
-      .evaluate(
-        () =>
-          Boolean(
-            document.querySelector('input[name="email"]') &&
-              document.querySelector('input[name="pass"]'),
-          ),
-      )
-      .catch(() => false)
-  },
+  isLoginWall: ({ page }) => isLoggedOut(page, 'Facebook'),
 
   posts: async (ctx: AdapterContext, handle): Promise<AdapterResult<ScrapedPost>> => {
     const { page, log, limit } = ctx

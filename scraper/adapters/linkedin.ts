@@ -20,6 +20,7 @@
  * actual list, so that is where a bare handle is pointed.
  */
 
+import { isLoggedOut } from '../session'
 import {
   parseCount,
   type AdapterContext,
@@ -91,31 +92,14 @@ export const linkedin: PlatformAdapter = {
   },
 
   /**
-   * The most important isLoginWall of the four, because LinkedIn's wall is a
-   * 200 and would otherwise be indistinguishable from an empty profile.
+   * The most consequential of the four, because LinkedIn's authwall is served
+   * as HTTP 200 and is otherwise indistinguishable from an empty profile.
+   * Measured signed out it redirects to /login/ with the title "LinkedIn
+   * Login, Sign in", which `isLoggedOut` catches on the URL before it even
+   * reaches the DOM — and if LinkedIn ever stops redirecting, the demand for
+   * a signed-in marker still holds the line.
    */
-  isLoginWall: async ({ page }) => {
-    const url = page.url()
-    if (/\/uas\/login|\/authwall|\/login|\/checkpoint/i.test(url)) return true
-    return page
-      .evaluate(() => {
-        const title = document
-          .querySelector('meta[property="og:title"]')
-          ?.getAttribute('content') ?? ''
-        if (/sign ?in|log ?in/i.test(title)) return true
-
-        const hasSignInForm = Boolean(
-          document.querySelector('input[name="session_key"]') ||
-            document.querySelector('#username') ||
-            document.querySelector('.authwall'),
-        )
-        const hasFeed = Boolean(
-          document.querySelector('[data-urn], .feed-shared-update-v2, .scaffold-finite-scroll'),
-        )
-        return hasSignInForm && !hasFeed
-      })
-      .catch(() => false)
-  },
+  isLoginWall: ({ page }) => isLoggedOut(page, 'LinkedIn'),
 
   posts: async (ctx: AdapterContext, handle): Promise<AdapterResult<ScrapedPost>> => {
     const { page, log, limit } = ctx
