@@ -184,6 +184,7 @@ export async function deskSignIn(deskId: string, passphrase: string): Promise<vo
     rev: 0,
   }
   saveDeskSession(session)
+  rememberDeskId(id)
 
   // Pull before the first render, so what opens is the desk the office fed
   // this morning. A pull that fails still opens the local copy: an office on
@@ -205,6 +206,59 @@ export function deskSignOut(): void {
   saveDeskSession(null)
   setStorageKey(STORE_KEY)
   resealDefaultScope()
+}
+
+/* ── the padlock's half ──────────────────────────────────────────────────── */
+
+const LAST_ID_KEY = 'signal.desk.lastId'
+const RELOCK_KEY = 'signal.desk.relock'
+
+/** The desk id last signed in on this device. An id, never a passphrase. */
+export function lastDeskId(): string | null {
+  try {
+    return localStorage.getItem(LAST_ID_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function rememberDeskId(deskId: string): void {
+  try {
+    localStorage.setItem(LAST_ID_KEY, deskId)
+  } catch {
+    /* the form simply asks for the id again */
+  }
+}
+
+/**
+ * Lock the desk: end the session so the passphrase is required again, and
+ * leave a one-shot note for the entry screen to open straight onto the desk
+ * login with the id already filled in. The member pressed a padlock; the
+ * screen that greets her next must ask for HER password, not offer somebody
+ * else's vault account.
+ */
+export function lockDesk(): void {
+  const s = readDeskSession()
+  if (s) rememberDeskId(s.deskId)
+  try {
+    sessionStorage.setItem(RELOCK_KEY, '1')
+  } catch {
+    /* the login is then one tap further away, not gone */
+  }
+  deskSignOut()
+}
+
+/** True exactly once after `lockDesk`, so the desk form opens by itself. */
+export function consumeRelock(): boolean {
+  try {
+    if (sessionStorage.getItem(RELOCK_KEY) === '1') {
+      sessionStorage.removeItem(RELOCK_KEY)
+      return true
+    }
+  } catch {
+    /* fall through */
+  }
+  return false
 }
 
 /** Reopen the desk on boot, exactly as the demo scope restores. */

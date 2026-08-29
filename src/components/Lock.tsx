@@ -21,6 +21,8 @@ import {
 } from 'lucide-react'
 import { Button, Card, SignalGlyph } from '@/components/ui'
 import { DeskDoor } from '@/components/DeskDoor'
+import { consumeRelock, lockDesk } from '@/lib/desk-session'
+import { isDeskScope } from '@/lib/store'
 import { ease, fadeUp, haptic, listStagger, spring } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -421,8 +423,11 @@ export function LockScreen({
     return 'pick'
   })
   const [chosen, setChosen] = useState<AccountSummary | null>(null)
-  /** The desk login form is open, and the card clears the stage for it. */
-  const [deskFormOpen, setDeskFormOpen] = useState(false)
+  /** The desk login form is open, and the card clears the stage for it.
+      Seeded from the padlock's one-shot relock note, consumed HERE because
+      this screen outlives the picker-to-passphrase jump that remounts the
+      door itself. */
+  const [deskFormOpen, setDeskFormOpen] = useState(consumeRelock)
 
   const [name, setName] = useState('')
   const [passphrase, setPassphrase] = useState('')
@@ -622,7 +627,10 @@ export function LockScreen({
           {step === 'pick' && (
             <m.div variants={fadeUp}>
               <Card level="lift">
-                <div className="flex flex-col items-center gap-3 text-center">
+                {/* Same retreat as the passphrase card: while the desk form is
+                    open, a heading about vault passphrases over it describes
+                    the wrong kind of account. */}
+                <div className={cn('flex flex-col items-center gap-3 text-center', deskFormOpen && 'hidden')}>
                   <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
                     <Lock size={20} />
                   </span>
@@ -666,7 +674,12 @@ export function LockScreen({
                     store's scope, which the shell watches; nothing here needs
                     to know what happens next. */}
                 {onDeskOpened !== undefined && (
-                  <DeskDoor onOpened={onDeskOpened} onOpenChange={setDeskFormOpen} className="mt-3" />
+                  <DeskDoor
+                    onOpened={onDeskOpened}
+                    onOpenChange={setDeskFormOpen}
+                    initialOpen={deskFormOpen}
+                    className="mt-3"
+                  />
                 )}
 
                 <button
@@ -692,7 +705,11 @@ export function LockScreen({
           {step === 'signin' && chosen !== null && (
             <m.div variants={fadeUp}>
               <Card level="lift">
-                <div className="flex flex-col items-center gap-3 text-center">
+                {/* The vault account's name steps aside with the rest of its
+                    furniture while the desk form is open. She pressed the
+                    padlock on HER desk; a card headed with somebody else's
+                    name over her prefilled desk id reads as the wrong door. */}
+                <div className={cn('flex flex-col items-center gap-3 text-center', deskFormOpen && 'hidden')}>
                   <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
                     <Lock size={20} />
                   </span>
@@ -757,7 +774,12 @@ export function LockScreen({
                     the form is open everything else on the card steps aside:
                     two sign-in forms stacked read as one broken one. */}
                 {onDeskOpened !== undefined && (
-                  <DeskDoor onOpened={onDeskOpened} onOpenChange={setDeskFormOpen} className="mt-3" />
+                  <DeskDoor
+                    onOpened={onDeskOpened}
+                    onOpenChange={setDeskFormOpen}
+                    initialOpen={deskFormOpen}
+                    className="mt-3"
+                  />
                 )}
 
                 {/* The quiet links, spaced as one group rather than each
@@ -1141,6 +1163,19 @@ export function LockButton({ className }: { className?: string }) {
       <button
         type="button"
         onClick={() => {
+          /**
+           * On a handed-over desk the padlock LOCKS THE DESK: the session
+           * ends so the passphrase is required again, and the entry screen
+           * reopens straight onto the desk login with the id prefilled.
+           * Without this branch the padlock offered the device's own vault
+           * accounts — a member locking her desk was greeted by somebody
+           * else's name and no way back into her own.
+           */
+          if (isDeskScope()) {
+            lockDesk()
+            window.scrollTo({ top: 0 })
+            return
+          }
           setMode(account !== null ? 'sheet' : 'setup')
           setOpen(true)
         }}

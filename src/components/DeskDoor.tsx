@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Building2, ChevronRight, Eye, EyeOff, X } from 'lucide-react'
 import { Button } from './ui'
-import { deskSignIn } from '@/lib/desk-session'
+import { deskSignIn, lastDeskId } from '@/lib/desk-session'
 import { cn } from '@/lib/utils'
 
 /**
@@ -17,19 +17,33 @@ import { cn } from '@/lib/utils'
 export function DeskDoor({
   onOpened,
   onOpenChange,
+  initialOpen = false,
   className,
 }: {
   onOpened: () => void
   /** Fires as the form opens and closes, so the host can clear the stage. */
   onOpenChange?: (open: boolean) => void
+  /**
+   * Start with the form already open — the padlock's relock flow. Owned by
+   * the HOST, not read from storage here: this component can mount twice in
+   * one entrance (the picker renders for a frame before a single-account
+   * device jumps to its passphrase step), and whichever instance consumed a
+   * one-shot flag first took it to its grave.
+   */
+  initialOpen?: boolean
   className?: string
 }) {
-  const [open, setOpenState] = useState(false)
+  const [open, setOpenState] = useState(initialOpen)
   const setOpen = (v: boolean): void => {
     setOpenState(v)
     onOpenChange?.(v)
   }
-  const [deskId, setDeskId] = useState('')
+  useEffect(() => {
+    if (open) onOpenChange?.(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // Prefilled with the id last used here - an id, never a passphrase.
+  const [deskId, setDeskId] = useState(() => lastDeskId() ?? '')
   const [passphrase, setPassphrase] = useState('')
   const [shown, setShown] = useState(false)
   const [busy, setBusy] = useState(false)
