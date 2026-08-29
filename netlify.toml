@@ -55,14 +55,17 @@
   timeout = 60
 
 [functions."daily-scan"]
-  # The morning pass over every registered desk, and the only place the cron can
-  # live: the function's own Config declares a path, and @netlify/functions makes
-  # `schedule` and `path` mutually exclusive, so it cannot schedule itself.
-  # 01:20 UTC is 06:50 IST, which lands the server's reading before the client's
-  # own 07:30 boundary rather than racing it. Raising this past 60 without also
-  # raising DAILY_SCAN_BUDGET_MS would just move where the kill happens.
+  # The morning pass over every registered desk, reachable by hand at its URL.
+  # The cron does NOT live here: Netlify fails the whole build when a schedule
+  # (from either file) meets a function that declares a path, so the schedule
+  # rides on daily-scan-cron, a wrapper that invokes this same handler.
+  # Raising this past 60 without also raising DAILY_SCAN_BUDGET_MS would just
+  # move where the kill happens.
   timeout = 60
-  schedule = "20 1-6 * * *"
+
+[functions."daily-scan-cron"]
+  # The scheduled twin. Same run, same budget.
+  timeout = 60
 
 [functions."desk-registry"]
   # Opting a desk out walks its findings subcollection and deletes it in pages
