@@ -73,11 +73,9 @@ export function OpinionPanel({
                 ? 'Making sense of what was found…'
                 : 'Searching news, editorials and opposition statements…'}
             </p>
-            <p className="mt-0.5 text-sm text-ink-2">
-              {stage === 'reading'
-                ? 'Sorting it into what you are credited with, attacked on, and disputing.'
-                : 'Reading the published record. About twenty seconds.'}
-            </p>
+            {stage !== 'reading' && (
+              <p className="mt-0.5 text-sm text-ink-2">About twenty seconds.</p>
+            )}
           </div>
         </div>
       </Card>
@@ -88,10 +86,11 @@ export function OpinionPanel({
     return (
       <Card>
         <p className="text-[15px] font-semibold">Nothing has been read yet</p>
-        <p className="mt-1 text-sm leading-relaxed text-ink-2">
-          {error ??
-            'This reads the published record: news, editorials, what opponents have said. It reports what is actually being claimed about you.'}
-        </p>
+        {error && (
+          <p className="mt-1 text-sm leading-relaxed text-ink-2">
+            {error}
+          </p>
+        )}
         <Button size="sm" className="mt-3" onClick={onRefresh}>
           <RefreshCw size={15} />
           Read it now
@@ -155,10 +154,12 @@ export function OpinionPanel({
 
         {/* Said on the face of it, not in a footnote. Mistaking this for a poll
             is the one misreading that would actually cost a member something. */}
-        <p className="mt-2 text-xs leading-relaxed text-ink-3">
-          Read from {survey.sources.length} published sources: journalists, opponents and
-          commentators. This is not a survey of your constituents.
-          {survey.readAt ? ` Read ${relativeTime(survey.readAt)}.` : ''}
+        <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-3">
+          <Chip>Press coverage</Chip>
+          <span className="tnum">
+            {survey.sources.length} sources
+            {survey.readAt ? ` · read ${relativeTime(survey.readAt)}` : ''}
+          </span>
         </p>
 
         {/* The balance of what was found — nothing new, just the three theme
@@ -170,7 +171,6 @@ export function OpinionPanel({
             <CardHead
               icon={<Scale size={14} />}
               title="The balance of coverage"
-              sub="Counted from the theme lists below"
               tint="blue"
             />
             {/* The share column claims a real minimum width, so at 375px it
@@ -226,6 +226,17 @@ export function OpinionPanel({
         <RecoveryPlan survey={survey} person={person} onOpenActions={onOpenActions} />
       )}
 
+      {/* Side by side from lg up, not stacked: three lists one under another
+          cost three screens of scrolling to compare what should be read as
+          one balance. Single column on a phone, where columns would crush
+          the theme labels. */}
+      <div
+        className={cn(
+          'grid items-start gap-3',
+          groups.length === 2 && 'lg:grid-cols-2',
+          groups.length >= 3 && 'lg:grid-cols-3',
+        )}
+      >
       {groups.map((group) => {
         const ThemeIcon = Icon[group.tone]
         return (
@@ -246,7 +257,12 @@ export function OpinionPanel({
                 >
                   <ThemeIcon size={14} aria-hidden />
                 </span>
-                <h3 className="min-w-0 text-[13px] font-semibold leading-tight">{group.title}</h3>
+                {/* 13px put this sub-heading BELOW the body text it introduces once the
+                    phone floor raised body to 15px. A heading that ranks under its own
+                    content is not a heading. */}
+                <h3 className="min-w-0 text-[16px] font-semibold leading-tight sm:text-[13px]">
+                  {group.title}
+                </h3>
               </div>
               <span className="tnum shrink-0 rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-xs font-semibold text-ink-2">
                 {group.items.length}
@@ -299,6 +315,7 @@ export function OpinionPanel({
           </Card>
         )
       })}
+      </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button size="sm" variant="outline" onClick={onRefresh} disabled={busy}>

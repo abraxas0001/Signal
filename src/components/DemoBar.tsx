@@ -84,8 +84,21 @@ export function DemoBar({
    * the one thing this bar alone can do.
    */
   return (
+    /**
+     * One scrolling row on a phone, a wrapping set from sm: up.
+     *
+     * Five names at 390px wrapped to THREE rows and pushed the dashboard's
+     * first real content to y=740 on an 844px screen: the reader arrived at a
+     * dashboard and saw only furniture. A horizontal scroller keeps the switch
+     * one row tall and still reaches every name. `-mx-4 px-4` lets the row
+     * bleed to the screen edge so the last chip is visibly cut off, which is
+     * what tells a thumb there is more to the right.
+     */
     <div
-      className="flex flex-wrap items-center gap-2"
+      className={cn(
+        'flex items-center gap-2 overflow-x-auto scrollbar-none',
+        '-mx-4 px-4 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0',
+      )}
       role="tablist"
       aria-label="Example desk: whose desk to show"
     >
@@ -99,7 +112,7 @@ export function DemoBar({
             aria-selected={on}
             onClick={() => choose(person.key)}
             className={cn(
-              'flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition',
+              'flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3.5 text-sm transition',
               on
                 ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-medium text-ink'
                 : 'border-[var(--border)] bg-[var(--surface)] text-ink-2 hover:border-[var(--border-strong)]',
@@ -127,7 +140,7 @@ export function DemoBar({
             ? `Example desk. Posts and followers collected ${collected.toLocaleDateString()}.`
             : 'Example desk.'
         }
-        className="ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-ink-3 transition-colors hover:text-[var(--accent)]"
+        className="ml-2 inline-flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-xs text-ink-3 transition-colors hover:text-[var(--accent)] sm:ml-auto"
       >
         <RefreshCw size={13} aria-hidden />
         Use my own accounts
@@ -155,7 +168,7 @@ export function DemoNote() {
     <p className="flex items-start gap-2 px-1 text-xs leading-relaxed text-ink-3">
       <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
       <span>
-        Example records. Posts, followers and engagement elsewhere are real.
+        Example records.
       </span>
     </p>
   )

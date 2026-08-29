@@ -155,14 +155,7 @@ export function SuggestedAccounts({
           <div className="min-w-0">
             <p className="text-sm font-bold">No accounts were found for {identity.name}</p>
             <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
-              Public records carry a politician&rsquo;s social accounts only when somebody has
-              added them, and for most sitting members nobody has. Paste the addresses below and
-              mark them as yours. That is what lets this desk read the comments under your own
-              posts.
-            </p>
-            <p className="mt-2 text-xs leading-relaxed text-ink-3">
-              Facebook and Instagram return nothing at all to a stranger, so those two only ever
-              produce comments once the office connects them on the Settings screen.
+              Paste the addresses below and mark them as yours.
             </p>
           </div>
         </div>
@@ -206,8 +199,7 @@ export function SuggestedAccounts({
               {identity.name.split(/\s+/)[0]} owns
             </h3>
             <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
-              Check each one before adding it. Marking an account as yours is what decides whose
-              comments the public mood is read from.
+              Check each one before adding it.
             </p>
           </div>
         </div>

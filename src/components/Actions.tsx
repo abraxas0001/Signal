@@ -5,7 +5,6 @@ import {
   ArrowUp,
   Ban,
   Building2,
-  CalendarClock,
   Check,
   ChevronDown,
   ChevronUp,
@@ -799,7 +798,7 @@ function ActionCard({
             <p className="kicker">Linked records</p>
             {found.length === 0 && missing === 0 ? (
               <p className="mt-1 text-xs text-ink-3">
-                Nothing linked. This action stands on its own.
+                Nothing linked.
               </p>
             ) : (
               <ul className="mt-1.5 space-y-1.5">
@@ -876,7 +875,7 @@ function Composer({
   const submit = () => {
     const text = description.trim()
     if (!text) {
-      setError('Say what needs doing. A department cannot act on a blank line.')
+      setError('Say what needs doing.')
       first.current?.focus()
       return
     }
@@ -904,7 +903,6 @@ function Composer({
         tint="blue"
         title="New action"
         sub="One line someone can be held to"
-        hint="One line someone can be held to, with the date you promised."
         action={
           <button
             type="button"
@@ -1020,7 +1018,7 @@ function Composer({
 
         {!due && (
           <p className="rounded-[var(--radius-sm)] bg-[var(--surface-2)] px-3 py-2 text-xs text-ink-3">
-            Without a date this never appears as late. Set one if the office promised one.
+            Without a date this never appears as late.
           </p>
         )}
 
@@ -1042,13 +1040,12 @@ function Composer({
           <p className={LABEL}>Link records</p>
           {records.length === 0 ? (
             <p className="mt-1 text-xs text-ink-3">
-              No records saved on this device yet, so there is nothing to link. The action works
-              on its own.
+              No records saved on this device yet.
             </p>
           ) : (
             <>
               <p className="mt-0.5 text-xs text-ink-3">
-                The complaints this answers. Linking keeps the evidence with the promise.
+                The complaints this answers.
               </p>
               <div className="scroller mt-2 max-h-48 space-y-1 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-1.5">
                 {records.map((r) => (
@@ -1333,7 +1330,6 @@ export function Actions({ onClose }: { onClose: () => void }) {
               icon={<ListChecks size={16} aria-hidden />}
               tint="green"
               title="Progress"
-              sub="Counted from the tasks below"
             />
             <div className="flex flex-wrap items-center gap-6 sm:gap-10">
               <DonutGauge
@@ -1405,40 +1401,6 @@ export function Actions({ onClose }: { onClose: () => void }) {
               title="No actions yet"
               sub="A complaint, turned into somebody's job"
             />
-            <p className="text-sm leading-relaxed text-ink-2">
-              An action is a complaint turned into somebody’s job: what needs doing, which
-              department owns it, and the date the office promised. Once it has a date, this
-              screen is what tells you it has run out, and what to escalate.
-            </p>
-            <ul className="mt-4 space-y-2.5 text-xs text-ink-3">
-              <li className="flex items-center gap-2.5">
-                <span
-                  className="icon-badge icon-badge-sm"
-                  style={{ background: 'var(--neg-soft)', color: 'var(--neg)' }}
-                >
-                  <CalendarClock size={14} aria-hidden />
-                </span>
-                Overdue work is lifted above everything else, so it cannot be scrolled past.
-              </li>
-              <li className="flex items-center gap-2.5">
-                <span
-                  className="icon-badge icon-badge-sm"
-                  style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}
-                >
-                  <ArrowUp size={14} aria-hidden />
-                </span>
-                A late item offers the next escalation level: officer, department, minister.
-              </li>
-              <li className="flex items-center gap-2.5">
-                <span
-                  className="icon-badge icon-badge-sm"
-                  style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
-                >
-                  <Link2 size={14} aria-hidden />
-                </span>
-                Link the records it answers, so the evidence stays with the promise.
-              </li>
-            </ul>
             <Button className="mt-5" size="sm" onClick={() => setComposing(true)}>
               <Plus size={15} aria-hidden />
               Create the first one
@@ -1461,8 +1423,7 @@ export function Actions({ onClose }: { onClose: () => void }) {
               {overdue.length} {pluralise(overdue.length, 'action')} overdue
             </h2>
             <p className="mt-1.5 text-xs font-medium text-[var(--neg)]">
-              Past the date the office promised. Taken out of their columns so they cannot be
-              missed.
+              Past the date the office promised.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {overdue.map((item) => (
@@ -1502,10 +1463,6 @@ export function Actions({ onClose }: { onClose: () => void }) {
           ))}
         </m.div>
       )}
-
-      <m.p variants={fadeUp} className="text-center text-xs text-ink-3">
-        Stored on this device only. Nothing here is sent to a server.
-      </m.p>
     </m.div>
   )
 }

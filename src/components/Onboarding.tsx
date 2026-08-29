@@ -14,7 +14,6 @@ import {
   Loader2,
   Pencil,
   Search,
-  ShieldCheck,
   Sparkles,
   UserRound,
 } from 'lucide-react'
@@ -32,6 +31,7 @@ import { useStore } from '@/lib/store'
 import { Avatar, Button, Card, Chip, Shell, SignalGlyph } from './ui'
 import { CardHead } from '@/components/kit'
 import { IdentityRows } from './IdentityEditor'
+import { DeskDoor } from './DeskDoor'
 import { applyDeskPlan, describePlan, planDesk } from '@/lib/autoconfig'
 import { cn } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
@@ -324,17 +324,7 @@ export function Onboarding({
                 dashboard configure themselves from the answer.
               </p>
 
-              {/* The promise and the way out, moved up beside the headline.
-                  At the foot of a long single column they were below the fold
-                  on every laptop, which is where a reassurance is worth least. */}
               <div className="mt-7 border-t border-[var(--rule)] pt-5">
-                <p className="flex items-start gap-2.5 text-sm leading-relaxed text-ink-2">
-                  <ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--pos)]" aria-hidden />
-                  <span>
-                    Everything stays on this device. No account is created anywhere, and
-                    nothing is uploaded.
-                  </span>
-                </p>
                 {/* The two ways past this form, on one line and correctly
                     weighted. The demo led as a full-bleed bar across the
                     column, which made the loudest thing on the screen an
@@ -365,14 +355,21 @@ export function Onboarding({
                       />
                     </button>
                   )}
-                  <button
-                    onClick={skip}
-                    className="inline-flex min-h-11 items-center text-left text-sm font-medium text-ink-3 transition-colors hover:text-ink-2"
-                  >
-                    {existing ? `Keep ${existing.name}` : 'Skip for now'}
-                  </button>
+                  {/* The handed-over desk's door, for the member whose office
+                      issued them credentials: their first screen is this one,
+                      so the way into their own desk sits beside the demo, at
+                      the same weight. The quiet skip drops below the pair. */}
+                  <div className="w-full max-w-sm sm:w-auto">
+                    <DeskDoor onOpened={() => window.location.reload()} />
+                  </div>
                 </div>
 
+                <button
+                  onClick={skip}
+                  className="mt-4 inline-flex min-h-11 items-center text-left text-sm font-medium text-ink-3 transition-colors hover:text-ink-2"
+                >
+                  {existing ? `Keep ${existing.name}` : 'Skip for now'}
+                </button>
               </div>
             </m.header>
 
@@ -493,9 +490,8 @@ export function Onboarding({
                             >
                               {results.length === 0 ? (
                                 <p className="px-3 py-3 text-sm leading-relaxed text-ink-2">
-                                  Nobody by that name was found. Many sitting members have no
-                                  encyclopaedia article, so press Enter to set the desk up under
-                                  the name you typed.
+                                  Nobody by that name was found. Press Enter to use the name you
+                                  typed.
                                 </p>
                               ) : (
                                 <ul className="space-y-0.5">
@@ -602,10 +598,6 @@ export function Onboarding({
                             Set up the desk
                             <ArrowRight size={17} />
                           </Button>
-                          <p className="mt-2 text-xs leading-relaxed text-ink-3">
-                            We will still try to find a photograph and a few public details from
-                            these. Anything we cannot confirm is left blank rather than guessed.
-                          </p>
                         </div>
                       </div>
                     )}
@@ -892,7 +884,7 @@ function Working() {
       <CardHead
         icon={<Loader2 size={15} className="animate-spin" aria-hidden />}
         title="Finding your details…"
-        sub="This genuinely takes ten to twenty seconds"
+        sub="Takes 10 to 20 seconds"
         tint="blue"
       />
       <ol className="mt-4 space-y-2.5">
@@ -915,9 +907,6 @@ function Working() {
           </li>
         ))}
       </ol>
-      <p className="mt-4 text-xs leading-relaxed text-ink-3">
-        This reads live pages, so it takes a few seconds. Nothing is being uploaded.
-      </p>
     </Card>
   )
 }

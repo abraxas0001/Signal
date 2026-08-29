@@ -18,6 +18,12 @@ export interface DemoDoorProps {
    * whether this tap costs a sign-out and whose name is on the account.
    */
   note: string
+  /**
+   * What the door is called. Defaults to the demo wording; a handed-over
+   * desk passes "Logout", because a member signed into her own desk is not
+   * in anybody's demo and the door must not claim she is.
+   */
+  label?: string
   onClick: () => void
 }
 
@@ -51,7 +57,7 @@ export interface DemoDoorProps {
  * signs a real account out, and that decision belongs to the one caller that
  * already holds the vault state, not to a button in a nav column.
  */
-export function DemoDoor({ mode, note, onClick }: DemoDoorProps) {
+export function DemoDoor({ mode, note, label, onClick }: DemoDoorProps) {
   const leaving = mode === 'leave'
   const Icon = leaving ? LogOut : Eye
 
@@ -63,7 +69,10 @@ export function DemoDoor({ mode, note, onClick }: DemoDoorProps) {
         onClick()
       }}
       className={cn(
-        'group flex w-full items-center gap-3 rounded-[var(--radius-lg)] p-3 text-left',
+        // gap-2.5 and px-2.5, not gap-3/p-3: the rail is 240px and the chrome
+        // either side of the label was eating 99px of it, clipping "Leave the
+        // demo" into "Leave the de...".
+        'group flex w-full items-center gap-2.5 rounded-[var(--radius-lg)] px-2.5 py-3 text-left',
         'focus-visible:rounded-[var(--radius-lg)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-2)]',
         // Leaving is not a thing to advertise — whoever is already inside the
         // demo found the door once. It takes the quiet card treatment the
@@ -83,7 +92,7 @@ export function DemoDoor({ mode, note, onClick }: DemoDoorProps) {
     >
       <span
         className={cn(
-          'grid size-9 shrink-0 place-items-center rounded-full',
+          'grid size-8 shrink-0 place-items-center rounded-full',
           leaving ? 'bg-[var(--accent-2-soft)] text-[var(--accent-2)]' : 'bg-white/20',
         )}
       >
@@ -92,7 +101,7 @@ export function DemoDoor({ mode, note, onClick }: DemoDoorProps) {
 
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">
-          {leaving ? 'Leave the demo' : 'Try the demo'}
+          {label ?? (leaving ? 'Leave the demo' : 'Try the demo')}
         </span>
         {/* Not decoration. On the entrance this is where the sign-out is
             disclosed, before the tap rather than after it. */}

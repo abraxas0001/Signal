@@ -587,7 +587,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
     async (person: TrackedPersona) => {
       if (!canSearch) {
         setError(
-          'Signal does not know which papers to search. Set the state and tick the mastheads on the intake screen first, then come back.',
+          'Signal does not know which papers to search. Set the state and tick the mastheads on the intake screen first.',
         )
         return
       }
@@ -766,12 +766,11 @@ export function Persona({ onClose }: { onClose: () => void }) {
     >
       <m.header variants={fadeUp}>
         <PageHeader
-          kicker="Names, not topics"
           title="Persona tracker"
           subtitle={
             personas.length
               ? `${personas.length} ${pluralise(personas.length, 'person', 'people')} followed · ${total} ${pluralise(total, 'mention')} on file`
-              : 'What the papers are saying about the people this office watches.'
+              : 'Follow named people through the papers.'
           }
           actions={
             <Button variant="ghost" onClick={onClose}>
@@ -792,14 +791,12 @@ export function Persona({ onClose }: { onClose: () => void }) {
             label="People followed"
             value={personas.length}
             tint="blue"
-            deltaLabel="Checked by hand. No server watches for you."
           />
           <IconStat
             icon={<Newspaper size={18} />}
             label="Mentions on file"
             value={total}
             tint="violet"
-            deltaLabel="Stored on this device only"
           />
           <IconStat
             icon={<TriangleAlert size={18} />}
@@ -829,16 +826,12 @@ export function Persona({ onClose }: { onClose: () => void }) {
           />
           <div className="text-sm leading-relaxed text-ink-2">
             <p>
-              There is no server holding this list and no job reading the papers on your behalf,
-              so Signal cannot alert you and will never send a notification. Following someone
-              means opening this screen and tapping Check now: it searches the papers set on the
-              intake screen for that name, reads the first {READ_LIMIT} stories it finds, and puts
-              them below. Everything here stays on this device.
+              Updates only when you tap Check now.
             </p>
             {!canSearch && (
               <p className="mt-2.5 rounded-[var(--radius-md)] bg-[var(--warn-soft)] px-3 py-2 font-medium text-[var(--warn)]">
-                No papers are set yet, so a check has nothing to search. Pick the state and tick
-                the mastheads on the intake screen first.
+                No papers are set yet. Pick the state and tick the mastheads on the intake
+                screen first.
               </p>
             )}
           </div>
@@ -857,7 +850,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
 
       {/* ── Roster ────────────────────────────────────────────────────────── */}
       <m.section variants={fadeUp} className="mt-6">
-        <SectionTitle hint="Removing somebody takes their mentions with them. Tasks you already raised stay in Actions.">
+        <SectionTitle hint="Removing somebody removes their mentions.">
           Followed
           <span className="ml-2 text-sm font-normal text-ink-3">{personas.length}</span>
         </SectionTitle>
@@ -896,9 +889,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           <p className="mt-2 text-xs text-ink-3">
-            Separate spellings with commas. A name written in Telugu will never match an English
-            headline, and the papers here print both. Without the second spelling a check finds
-            part of the coverage and presents it as all of it.
+            Separate spellings with commas.
           </p>
           <div className="mt-3">
             <Button size="sm" onClick={addPersona} disabled={!name.trim()}>
@@ -957,7 +948,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
             <SectionTitle
               hint={
                 current.lastCheckedAt
-                  ? `Last checked ${relativeTime(current.lastCheckedAt)}. Newest first.`
+                  ? `Last checked ${relativeTime(current.lastCheckedAt)} · newest first`
                   : 'Not checked yet on this device.'
               }
             >
@@ -969,8 +960,8 @@ export function Persona({ onClose }: { onClose: () => void }) {
               <Card level="quiet">
                 <p className="text-sm leading-relaxed text-ink-2">
                   {current.lastCheckedAt
-                    ? 'The last check found nothing carrying this name. Add the Telugu spelling and the short form the papers use, then check again.'
-                    : `Nothing read for ${current.name} yet. Tap Check now on their card above.`}
+                    ? 'The last check found nothing carrying this name. Add the Telugu spelling and check again.'
+                    : `Nothing read for ${current.name} yet. Tap Check now.`}
                 </p>
               </Card>
             ) : (
@@ -1010,8 +1001,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
             ) : (
               <Card level="quiet">
                 <p className="text-sm leading-relaxed text-ink-3">
-                  Open a mention to read the summary, what the fake-news check found, and what it
-                  suggests doing about it.
+                  Open a mention to read it.
                 </p>
               </Card>
             )}
@@ -1034,10 +1024,10 @@ export function Persona({ onClose }: { onClose: () => void }) {
 function EmptyRoster({ subject }: { subject: string | null }) {
   const first = [
     subject
-      ? `${subject}, the member this office belongs to. Most of what needs answering is said about them.`
-      : 'The member this office belongs to. Most of what needs answering is said about them.',
-    'Whoever contests against them, because that is where the attacks start.',
-    'The officials your grievances keep naming: the collector, the executive engineer, the tahsildar whose department is in every second complaint.',
+      ? `${subject}, the member this office belongs to.`
+      : 'The member this office belongs to.',
+    'Whoever contests against them.',
+    'The officials your grievances keep naming.',
     'Any local figure whose posts your associates keep forwarding to you.',
   ]
 
@@ -1050,13 +1040,7 @@ function EmptyRoster({ subject }: { subject: string | null }) {
         sub="Who this screen is for"
       />
       <div className="text-sm leading-relaxed text-ink-2">
-        <p>
-          A persona tracker follows one named person through the papers this desk already reads.
-          It collects what was written about them, whether the story reads as supportive or
-          critical, and whether anything about it looks fabricated, so the office hears it here
-          rather than in a phone call at ten at night.
-        </p>
-        <p className="mt-4 text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
+        <p className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
           Who to add first
         </p>
         <ul className="mt-2 space-y-2">
@@ -1070,7 +1054,7 @@ function EmptyRoster({ subject }: { subject: string | null }) {
             </li>
           ))}
         </ul>
-        <p className="mt-3">Add each of them in both scripts, or you will only see half of it.</p>
+        <p className="mt-3">Add each of them in both scripts.</p>
       </div>
     </Card>
   )
@@ -1181,7 +1165,6 @@ function CheckSummary({ report, name }: { report: CheckReport; name: string }) {
         icon={<RefreshCw size={16} aria-hidden />}
         tint="blue"
         title="What the last check did"
-        sub="Counted from the run just finished"
       />
 
       {report.found === 0 ? (
@@ -1220,10 +1203,6 @@ function CheckSummary({ report, name }: { report: CheckReport; name: string }) {
         <div className="mt-4 rounded-[var(--radius-md)] bg-[var(--surface-2)] p-3.5">
           <p className="text-2xs font-medium uppercase tracking-[0.04em] text-ink-3">
             Found but not read
-          </p>
-          <p className="mt-1 text-xs leading-relaxed text-ink-3">
-            Signal reads {READ_LIMIT} at a time so the request finishes before the server cuts it
-            off. These were left. Open them yourself, or paste them into the grievance desk.
           </p>
           <ul className="mt-2 space-y-1">
             {report.unread.map((candidate) => (
@@ -1442,8 +1421,7 @@ function PersonaProfilePanel({ person, mentions }: { person: TrackedPersona; men
                 icon={<PieChart size={16} aria-hidden />}
                 tint="violet"
                 title="How the coverage reads"
-                sub="Scored mentions only, never guessed at"
-                hint="Scored mentions only. A story nobody could score is never coloured in."
+                sub="Scored mentions only"
               />
               <div className="mt-1 flex flex-col items-center gap-5 sm:flex-row">
                 <DonutBreakdown
@@ -1455,7 +1433,7 @@ function PersonaProfilePanel({ person, mentions }: { person: TrackedPersona; men
                   <Legend items={sentiment.segments.map((s) => ({ label: s.label, color: s.color }))} />
                   {sentiment.unscored > 0 && (
                     <p className="mt-3 text-xs text-ink-3">
-                      {sentiment.unscored} not scored. Carried through, never guessed at.
+                      {sentiment.unscored} not scored
                     </p>
                   )}
                 </div>
@@ -1483,15 +1461,12 @@ function PersonaProfilePanel({ person, mentions }: { person: TrackedPersona; men
             icon={<MapPin size={16} aria-hidden />}
             tint="blue"
             title="Where the coverage is datelined"
-            sub="Only places Signal can put on the map"
-            hint="Only places Signal can put on the map are shown. Anything it cannot place is counted below, never guessed at."
           />
           <IndiaMap dots={INDIA_DOTS} bbox={INDIA_BBOX} markers={origins.markers} className="mt-1" />
           {origins.toneLegend.length > 1 && <Legend items={origins.toneLegend} className="mt-3" />}
           {origins.unplaced > 0 && (
             <p className="mt-3 text-xs text-ink-3">
-              {origins.unplaced} {pluralise(origins.unplaced, 'mention')} named a place Signal has no
-              coordinates for and {origins.unplaced === 1 ? 'is' : 'are'} not shown.
+              {origins.unplaced} {pluralise(origins.unplaced, 'mention')} not mapped.
             </p>
           )}
         </Card>
@@ -1626,7 +1601,7 @@ function MentionDetail({
         </div>
 
         <p className="mt-3 text-sm leading-relaxed text-ink-2">
-          {mention.summary || 'No summary came back for this story. Open it and read it yourself.'}
+          {mention.summary || 'No summary came back for this story.'}
         </p>
 
         {mention.excerpt && (
@@ -1652,12 +1627,11 @@ function MentionDetail({
           icon={<TriangleAlert size={16} aria-hidden />}
           tint="orange"
           title="Fake-news check"
-          sub="Signals, not a verdict. A person decides."
         />
 
         {!mention.fake ? (
           <p className="text-sm text-ink-3">
-            No fake-news check came back for this story, so nothing is claimed either way.
+            No fake-news check came back for this story.
           </p>
         ) : (
           <>
@@ -1679,7 +1653,7 @@ function MentionDetail({
 
             {mention.fake.signals.length === 0 ? (
               <p className="mt-3 text-sm text-ink-3">
-                No signals were found either way, so this rests on the suspicion above alone.
+                No signals were found either way.
               </p>
             ) : (
               <ul className="mt-3 space-y-2">
@@ -1712,8 +1686,7 @@ function MentionDetail({
 
         {!rec ? (
           <p className="text-sm text-ink-3">
-            No recommendation came back for this one, so there is nothing to turn into a task. Read
-            the story and decide.
+            No recommendation came back for this one.
           </p>
         ) : (
           <>
@@ -1769,9 +1742,8 @@ function MentionDetail({
                     Make this an action
                   </Button>
                   <p className="mt-2 text-xs text-ink-3">
-                    Adds a Planned task at {rec.priority.toLowerCase()} priority, due{' '}
-                    {absoluteDate(dueIn(DUE_DAYS[rec.priority]))}, with the story attached. No
-                    department is set. The desk assigns that on the Actions sheet.
+                    Planned · {rec.priority.toLowerCase()} priority · due{' '}
+                    {absoluteDate(dueIn(DUE_DAYS[rec.priority]))} · story attached
                   </p>
                 </>
               )}

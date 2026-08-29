@@ -53,6 +53,13 @@ export interface HandleSnapshot {
   /** When this reading was taken, not when the posts were published. */
   takenAt: string
   followers: number | null
+  /**
+   * The account's LIFETIME post count as its own profile header states it —
+   * "6,710 posts", "619 videos" — as against `posts`, which holds only the
+   * recent ones the collector stores. Absent when the platform publishes no
+   * such figure (Facebook, LinkedIn); never zero for unknown.
+   */
+  postsTotal?: number | null
   posts: TrackedPost[]
 }
 
@@ -372,6 +379,16 @@ export interface Standing {
   summary: string
   commentsRead: number
   postsRead: number
+  /**
+   * Of commentsRead, how many were left under WATCHED-CHANNEL COVERAGE about
+   * the person rather than under their own posts. A quiet account is not a
+   * silent public: when someone's own posts draw next to nothing, the
+   * conversation about them lives under the news coverage, and a reading
+   * that includes it must say so or the count reads as their own audience.
+   */
+  coverageComments?: number
+  /** Coverage posts those comments were read from. */
+  coveragePosts?: number
   readAt: string
   /**
    * Where the reading came from, and it has to be on the record because the two
@@ -507,6 +524,43 @@ export function saveStandingCache(handleId: string, standing: Standing): void {
     localStorage.setItem(STANDING_KEY(), JSON.stringify(all))
   } catch {
     /* a cache that will not write is a slower app, not a broken one */
+  }
+}
+
+const STANDING_NOTE_KEY = (): string => scopedKey('signal.standingNote.v1')
+
+/**
+ * Why an account has no standing, when we know why.
+ *
+ * A refusal to score is a result, not a gap. The reader opens the posts, counts
+ * what it finds and declines below thirty comments, and that count is the only
+ * honest thing the card can say: YouTube records no per-post comment figure at
+ * all, so the card cannot work the reason out from the posts it holds and would
+ * otherwise fall back to "no comment reading exists", which is false about an
+ * account we did read.
+ */
+export function readStandingNote(handleId: string): string | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(STANDING_NOTE_KEY()) ?? '{}') as Record<
+      string,
+      string
+    >
+    return all[handleId] ?? null
+  } catch {
+    return null
+  }
+}
+
+export function saveStandingNote(handleId: string, note: string): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(STANDING_NOTE_KEY()) ?? '{}') as Record<
+      string,
+      string
+    >
+    all[handleId] = note
+    localStorage.setItem(STANDING_NOTE_KEY(), JSON.stringify(all))
+  } catch {
+    /* see above */
   }
 }
 

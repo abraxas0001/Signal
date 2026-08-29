@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react'
 import { Button, Card, SignalGlyph } from '@/components/ui'
+import { DeskDoor } from '@/components/DeskDoor'
 import { ease, fadeUp, haptic, listStagger, spring } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -323,10 +324,8 @@ function Busy({ label, busy }: { label: string; busy: boolean }) {
 function ThreatModel() {
   return (
     <p className="text-xs leading-relaxed text-ink-3">
-      This keeps your records apart from the other people who use this device, and stops someone
-      who picks the phone up. It is not protection from someone who takes the phone away: the
-      encrypted records are on it either way, and can be worked on for as long as they like. Keep
-      the phone with you.
+      This keeps your records apart from other people who use this device, so keep the phone
+      with you.
     </p>
   )
 }
@@ -398,6 +397,7 @@ function DemoOption({ onDemo }: { onDemo: () => void }) {
 export function LockScreen({
   onUnlocked,
   onDemo,
+  onDeskOpened,
 }: {
   onUnlocked: () => void
   /**
@@ -407,6 +407,8 @@ export function LockScreen({
    * onto an empty room.
    */
   onDemo?: () => void
+  /** A handed-over desk opened through the office sign-in. */
+  onDeskOpened?: () => void
 }) {
   const { accounts } = useVaultState()
 
@@ -625,7 +627,7 @@ export function LockScreen({
                   <div className="min-w-0">
                     <h1 className="text-xl font-bold tracking-[-0.015em]">Sign in</h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                      Each account has its own records and passphrase.
+                      Each account has its own passphrase.
                     </p>
                   </div>
                 </div>
@@ -655,6 +657,13 @@ export function LockScreen({
                 </ul>
 
                 {onDemo !== undefined && <DemoOption onDemo={onDemo} />}
+
+                {/* The handed-over desk's own door, at the demo door's weight
+                    and directly under it: the two are the ways IN for someone
+                    with no vault account on this device. Opening one moves the
+                    store's scope, which the shell watches; nothing here needs
+                    to know what happens next. */}
+                {onDeskOpened !== undefined && <DeskDoor onOpened={onDeskOpened} className="mt-3" />}
 
                 <button
                   type="button"
@@ -686,9 +695,6 @@ export function LockScreen({
                   <div className="min-w-0 max-w-full">
                     {/* No tight tracking here: the name is dynamic and may be Indic. */}
                     <h1 className="truncate text-xl font-bold">{chosen.name}</h1>
-                    <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                      Enter this account's passphrase to open its records.
-                    </p>
                   </div>
                 </div>
 
@@ -885,11 +891,6 @@ export function LockScreen({
                 <div className="mt-5 space-y-2 border-t border-[var(--border)] pt-4">
                   <ThreatModel />
                   <p className="text-xs leading-relaxed text-ink-3">
-                    {VAULT_PARAMS.cipher}, with the key stretched through{' '}
-                    {VAULT_PARAMS.iterations.toLocaleString('en-IN')} rounds of {VAULT_PARAMS.kdf}.
-                    The passphrase is never stored and never sent anywhere.
-                  </p>
-                  <p className="text-xs leading-relaxed text-ink-3">
                     This covers the grievance records, issues, actions, the influencer list and the
                     people you track. Saved report history and account handles are shared across
                     everyone on this device and are not encrypted.
@@ -911,9 +912,8 @@ export function LockScreen({
                       Encrypted. Take a backup.
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                      Phones get lost, dropped and replaced. This file is the only other copy of
-                      this account's records, and it is encrypted with the same passphrase. Put it
-                      somewhere the office controls.
+                      This file is the only other copy of this account's records, and it is
+                      encrypted with the same passphrase. Put it somewhere the office controls.
                     </p>
                   </div>
                 </div>
@@ -933,11 +933,6 @@ export function LockScreen({
                   {downloaded ? 'Continue' : 'Skip for now'}
                 </Button>
 
-                {!downloaded && (
-                  <p className="mt-3 text-center text-xs text-ink-3">
-                    You can take one later from the lock button.
-                  </p>
-                )}
               </Card>
             </m.div>
           )}
@@ -953,10 +948,6 @@ export function LockScreen({
                     <h1 className="text-xl font-bold tracking-[-0.015em]">
                       Restore from a backup
                     </h1>
-                    <p className="mt-1 text-sm leading-relaxed text-ink-2">
-                      This puts the records from a backup file onto this device as a new account,
-                      opened with the passphrase that file was made with.
-                    </p>
                   </div>
                 </div>
 
@@ -991,7 +982,7 @@ export function LockScreen({
                       setName(v)
                       if (error) setError(null)
                     }}
-                    hint="Nothing in the file says whose records these are, so this has to be typed."
+                    hint="Not stored in the file."
                   />
                   <PassphraseField
                     id="vault-restore"
@@ -1033,8 +1024,7 @@ export function LockScreen({
                 </Button>
 
                 <p className="mt-4 text-xs leading-relaxed text-ink-3">
-                  Nothing already on this device is changed or removed. The restored records are
-                  added as their own account, alongside everyone else's.
+                  Nothing already on this device is changed or removed.
                 </p>
               </Card>
             </m.div>
@@ -1320,11 +1310,11 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                     <h2 className="truncate text-xl font-bold">
                       {account ? account.name : 'Account'}
                     </h2>
-                    <p className="mt-1 text-sm text-ink-2">
-                      {accounts.length > 1
-                        ? `Your records, encrypted separately from the other ${accounts.length - 1} on this device.`
-                        : 'Your records are encrypted on this device. Nothing leaves it.'}
-                    </p>
+                    {accounts.length > 1 && (
+                      <p className="mt-1 text-sm text-ink-2">
+                        {`Your records, encrypted separately from the other ${accounts.length - 1} on this device.`}
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -1371,9 +1361,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                         Sign out
                       </Button>
                       <p className="pt-1 text-xs leading-relaxed text-ink-3">
-                        Signing out drops the key from memory and brings back the list of people on
-                        this device, so somebody else can sign in as themselves. Your passphrase is
-                        needed again to read anything.
+                        Your passphrase is needed again to read anything.
                       </p>
 
                       <div className="border-t border-[var(--border)] pt-3">
@@ -1439,7 +1427,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                         onChange={setNext}
                         onEnter={() => void doChange()}
                         autoComplete="new-password"
-                        hint={`At least ${VAULT_PARAMS.minPassphrase} characters. This changes only your account. Nobody else on this device is affected.`}
+                        hint={`At least ${VAULT_PARAMS.minPassphrase} characters. Changes only your account.`}
                       />
                       <Button
                         className="w-full"
@@ -1471,7 +1459,7 @@ function VaultSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                         value={current}
                         onChange={setCurrent}
                         autoComplete="current-password"
-                        hint="Required, so that somebody who simply picks this phone up cannot wipe the records."
+                        hint="So a stranger cannot wipe records."
                         autoFocus
                       />
                       <NameField

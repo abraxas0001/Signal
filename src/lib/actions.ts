@@ -187,6 +187,56 @@ export function fileFreeAction(input: {
 }
 
 /**
+ * File a plan whose STEPS are the instructions, each its own checkbox.
+ *
+ * `fileFreeAction` renders extra lines as `Say: "…"`, which is right for
+ * talking points and wrong for a content plan — "Shoot a 30-second clip at
+ * the site" is something to do, not to say. Same dedup rule, same shape out.
+ */
+export function fileStepsAction(input: {
+  title: string
+  steps: string[]
+  priority: ActionPriority
+  channel: CommsChannel
+  source: ActionSource
+}): boolean {
+  const { title, steps, priority, channel, source } = input
+
+  const already = readStore().actions.some(
+    (a) =>
+      a.linkedRecordIds.includes(source.id) &&
+      (a.status === 'Planned' || a.status === 'In Progress'),
+  )
+  if (already) return false
+
+  const item: ActionItem = {
+    id: makeId('action'),
+    createdAt: new Date().toISOString(),
+    steps: steps.map((step, i) => ({
+      id: `${source.id}-step-${i}`,
+      text: step,
+      channel,
+      done: false,
+      doneAt: null,
+    })),
+    linkedRecordIds: [source.id],
+    description: [title, source.headline].filter(Boolean).join(' · '),
+    department: null,
+    owner: null,
+    status: 'Planned',
+    priority,
+    dueAt: dueIn(DUE_DAYS[priority]),
+    completedAt: null,
+    escalation: 'None',
+    delayReason: null,
+    notes: '',
+  }
+
+  update((s) => ({ ...s, actions: [item, ...s.actions] }))
+  return true
+}
+
+/**
  * File it.
  *
  * Returns false when this source already has an open task, rather than filing a

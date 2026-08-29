@@ -119,7 +119,7 @@ export function HistoryPanel({
               </div>
 
               <p className="mt-1 text-xs text-ink-3">
-                Stored on this device only. Opening one re-runs it, because engagement counts move.
+                Opening one re-runs the analysis.
               </p>
 
               {/* An empty sheet used to be just the header over blank space,

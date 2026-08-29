@@ -205,15 +205,80 @@ export const youtube: PlatformAdapter = {
   },
 
   /**
-   * Left to the app's own reader, like LinkedIn's.
+   * Read the comments under one watch page, in the browser.
    *
-   * Comments load behind a separate request and a sort control, and the app
-   * already extracts them from a watch URL. An honest empty lets it fall
-   * through to that rather than treating this as an outage.
+   * This was a stub returning an empty list, and the stub was not neutral: the
+   * comment pass counted every video it opened as "read, zero comments", so a
+   * channel whose videos carry three and four real comments apiece was
+   * recorded as one nobody speaks to — measured on the flagship desk, 5 real
+   * comments across its top two videos reported as 0. The same stub bug the
+   * Instagram adapter had, with the same fix: actually read the page.
+   *
+   * YouTube mounts `ytd-comments` only once it scrolls into view, and fills
+   * `ytd-comment-thread-renderer` nodes lazily after that — so the reader
+   * scrolls first, waits for either threads or the comment header (which
+   * renders even at "0 Comments"), then keeps scrolling while the list grows.
    */
-  comments: async (): Promise<AdapterResult<ScrapedComment>> => ({
-    ok: true,
-    items: [],
-    note: 'YouTube comments are left to the app’s own post reader.',
-  }),
+  comments: async (ctx: AdapterContext): Promise<AdapterResult<ScrapedComment>> => {
+    const { page, log, limit } = ctx
+
+    // Bring the comments section into view; it does not exist before this.
+    for (let i = 0; i < 5; i++) {
+      await page.mouse.wheel(0, 900)
+      await page.waitForTimeout(900)
+    }
+    await page
+      .waitForSelector('ytd-comment-thread-renderer, ytd-comments-header-renderer, ytd-message-renderer', {
+        timeout: 12_000,
+      })
+      .catch(() => null)
+
+    // "Comments are turned off" is an answer about the channel, not a failure.
+    const turnedOff = await page
+      .locator('ytd-message-renderer', { hasText: /comments are turned off/i })
+      .count()
+      .catch(() => 0)
+    if (turnedOff > 0) {
+      return { ok: true, items: [], note: 'Comments are turned off on this video.' }
+    }
+
+    // Let the lazy list fill until it stops growing or we have enough.
+    let last = -1
+    for (let round = 0; round < 10; round++) {
+      const count = await page.locator('ytd-comment-thread-renderer').count().catch(() => 0)
+      if (count >= limit || count === last) break
+      last = count
+      await autoScroll(page, { rounds: 1, pauseMs: 1_500 })
+    }
+
+    const items = await page.evaluate((max) => {
+      const out: { text: string; author: string | null; likes: string | null }[] = []
+      for (const thread of Array.from(document.querySelectorAll('ytd-comment-thread-renderer'))) {
+        const text = (thread.querySelector('#content-text') as HTMLElement | null)?.innerText?.trim()
+        if (!text) continue
+        out.push({
+          text,
+          author:
+            (thread.querySelector('#author-text') as HTMLElement | null)?.innerText?.trim() ?? null,
+          likes:
+            (thread.querySelector('#vote-count-middle') as HTMLElement | null)?.innerText?.trim() ??
+            null,
+        })
+        if (out.length >= max) break
+      }
+      return out
+    }, limit)
+
+    log(`YouTube: ${items.length} comments`)
+    return {
+      ok: true,
+      items: items.map((c) => ({
+        text: c.text,
+        author: c.author,
+        likes: parseCount(c.likes),
+        publishedAt: null,
+        isReply: false,
+      })),
+    }
+  },
 }

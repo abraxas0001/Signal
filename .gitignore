@@ -39,3 +39,4 @@ docs/
 
 # Live social sessions — same sensitivity as the profile itself.
 .scraper-session.json
+.desk-pull/

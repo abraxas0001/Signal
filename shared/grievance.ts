@@ -404,6 +404,16 @@ export interface Influencer {
   addedAt: string
   /** Why this page is on the list. */
   note: string | null
+  /**
+   * What sort of voice this is: a newsroom, an individual commentator, or an
+   * account campaigning for a side. The distinction is the point of showing
+   * it: an office reads a rival party's loudest account differently from a
+   * wire service, and a screen that presents them alike misleads. Optional
+   * because rows written before discovery recorded it carry no claim.
+   */
+  kind?: 'outlet' | 'commentator' | 'aligned' | 'unclear'
+  /** The party an aligned account campaigns for, when discovery recorded one. */
+  affiliation?: string | null
 }
 
 /** Something an influencer said that mentions the office. */
@@ -431,6 +441,14 @@ export interface InfluencerMention {
    */
   judged?: boolean
   stance: 'supportive' | 'critical' | 'neutral' | 'unclear'
+  /**
+   * What the mention is actually about: the person themselves, their party, or
+   * their seat. Optional because only readings that matched on a specific term
+   * can say — a mention that predates this field carries no claim about it.
+   * The news digest groups on it, so "the papers said BJP" and "the papers
+   * said Aruna" stop being the same row.
+   */
+  about?: 'person' | 'party' | 'seat'
   sentiment: Sentiment
   fake: FakeAssessment | null
   seenAt: string

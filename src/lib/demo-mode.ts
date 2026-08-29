@@ -60,7 +60,9 @@ export function isDemoMode(): boolean {
  * before, so a visitor carrying a namespace from an older build gets the new
  * shape instead of a half-filled one.
  */
-const SEED_VERSION = '11'
+// 17: YouTube readings rest on the channel's all-time popular videos, where
+// the audience actually is, not only the newest uploads.
+const SEED_VERSION = '17'
 const SEED_KEY = 'signal.demo.seed'
 
 /**
@@ -172,5 +174,39 @@ export function restoreDemoModeIfActive(): boolean {
   if (!demoWasOpen()) return false
   setStorageKey(DEMO_STORE_KEY)
   setCodec(PLAIN_CODEC)
+  return true
+}
+
+/**
+ * Rebuild a restored demo that a newer build has moved past.
+ *
+ * The seed check lived only inside `enterDemoMode`, so it ran when somebody
+ * walked through the door and never when a returning tab was pointed straight
+ * back at the namespace by the restore above. A visitor who kept the demo
+ * open across a data update was stranded on the old dataset for as long as
+ * they kept returning — reload after reload, always one version behind the
+ * door. Returns true when it reseeded, so the caller can remount the desk.
+ */
+export async function reseedDemoIfStale(): Promise<boolean> {
+  if (!isDemoMode()) return false
+  let stamped: string | null = null
+  try {
+    stamped = localStorage.getItem(SEED_KEY)
+  } catch {
+    /* unreadable storage: leave the namespace as it is */
+  }
+  if (stamped === SEED_VERSION) return false
+
+  const roster = await loadDemoRoster()
+  if (!roster) return false
+  const key = readChoice() ?? roster.pairings[0]?.principal
+  if (!key) return false
+  applyPrincipal(roster, key)
+  saveChoice(key)
+  try {
+    localStorage.setItem(SEED_KEY, SEED_VERSION)
+  } catch {
+    /* it reseeds again next visit, which is correct */
+  }
   return true
 }

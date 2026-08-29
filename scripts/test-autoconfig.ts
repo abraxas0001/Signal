@@ -32,7 +32,7 @@ class MemoryStorage {
 }
 ;(globalThis as Record<string, unknown>)['localStorage'] = new MemoryStorage()
 
-const { planDesk, planWatchTerms, planTerms, describePlan } = await import('../src/lib/autoconfig')
+const { planDesk, planWatchTerms, planTerms, describePlan, PORTAL_BUDGET } = await import('../src/lib/autoconfig')
 const { partyAbbreviation, tidyParty } = await import('../shared/identity')
 const { resolvePlace } = await import('../shared/places')
 const { indexUrlFor, PORTALS } = await import('../shared/regions')
@@ -90,7 +90,7 @@ check(
 )
 check(
   'the portal count never exceeds what the scanner reads',
-  aruna.portals.length <= 8,
+  aruna.portals.length <= PORTAL_BUDGET,
   `${aruna.portals.length} portals`,
 )
 check(

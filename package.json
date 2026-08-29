@@ -23,7 +23,7 @@
     "test:export": "tsx scripts/test-export.ts",
     "test:typography": "tsx scripts/test-typography.ts",
     "test:ssrf": "tsx scripts/test-ssrf.ts",
-    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:scoping && npm run test:places && npm run test:autoconfig && npm run test:matching && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:sync && npm run test:comments && npm run test:export && npm run test:extract && npm run test:news",
+    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:scoping && npm run test:back && npm run test:places && npm run test:autoconfig && npm run test:matching && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:sync && npm run test:comments && npm run test:export && npm run test:extract && npm run test:news",
     "test:scoping": "tsx scripts/test-scoping.ts",
     "test:places": "tsx scripts/test-places.ts",
     "test:autoconfig": "tsx scripts/test-autoconfig.ts",
@@ -38,7 +38,14 @@
     "scraper:demo": "tsx --env-file-if-exists=.env scraper/build-demo.ts",
     "scraper:media": "tsx --env-file-if-exists=.env scraper/fetch-avatars.ts",
     "scraper:shrink": "tsx scraper/shrink-media.ts",
-    "scraper:opinions": "tsx --env-file-if-exists=.env scraper/read-opinions.ts"
+    "scraper:opinions": "tsx --env-file-if-exists=.env scraper/read-opinions.ts",
+    "test:back": "tsx scripts/test-back.ts",
+    "scraper:comments": "tsx --env-file-if-exists=.env scraper/read-comments.ts",
+    "scraper:totals": "tsx --env-file-if-exists=.env scraper/read-post-totals.ts",
+    "desk:provision": "tsx --env-file-if-exists=.env scraper/provision-desk.ts",
+    "desk:push": "tsx --env-file-if-exists=.env scraper/push-desk.ts",
+    "scraper:followers": "tsx --env-file-if-exists=.env scraper/refresh-followers.ts",
+    "desk:pull": "tsx --env-file-if-exists=.env scraper/pull-desk.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

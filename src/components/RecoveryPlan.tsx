@@ -189,10 +189,6 @@ export function RecoveryPlan({
           title="The reading is negative"
           sub="Work out what is actually driving it"
         />
-        <p className="measure text-sm leading-relaxed text-ink-3">
-          Reads the criticism above for what is actually driving it, then gives you steps you
-          can put on the task list.
-        </p>
         <Button className="mt-4" onClick={() => void run()} disabled={busy}>
           {busy ? (
             <Loader2 size={15} className="animate-spin motion-reduce:animate-none" />
@@ -217,7 +213,6 @@ export function RecoveryPlan({
           icon={<TriangleAlert size={16} aria-hidden />}
           tint="orange"
           title="What is actually wrong"
-          sub="The model's reading of the criticism above"
         />
         <p className="measure text-base leading-relaxed">{plan.reading}</p>
       </Card>
@@ -228,7 +223,6 @@ export function RecoveryPlan({
             icon={<Search size={16} aria-hidden />}
             tint="violet"
             title="Root cause of each complaint"
-            sub="Substance means do; perception means say"
           />
           <ul className="space-y-2.5">
             {plan.causes.map((c) => (

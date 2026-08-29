@@ -38,6 +38,60 @@
   # own 9s timeout — worst case is close to the platform default of 10s.
   timeout = 30
 
+[functions."suggest-posts"]
+  # One model call over an issue and the records behind it, drafting three or
+  # four short posts. The same shape as "recovery" below, and it needs the same
+  # window: on the platform's 10s default the Draft posts button would 502
+  # intermittently and the issue card would blame the network for a model that
+  # was still writing.
+  timeout = 30
+
+[functions."scan"]
+  # It had no block at all, so it ran on the platform's 10s default while
+  # reading eight mastheads with a 9s fetch timeout each. That was already over
+  # budget before any judging existed. With a subject it now also spends one
+  # model call per fifteen headlines, against a 45s deadline the function holds
+  # itself to, and a kill here would throw away a harvest already paid for.
+  timeout = 60
+
+[functions."daily-scan"]
+  # The morning pass over every registered desk, and the only place the cron can
+  # live: the function's own Config declares a path, and @netlify/functions makes
+  # `schedule` and `path` mutually exclusive, so it cannot schedule itself.
+  # 01:20 UTC is 06:50 IST, which lands the server's reading before the client's
+  # own 07:30 boundary rather than racing it. Raising this past 60 without also
+  # raising DAILY_SCAN_BUDGET_MS would just move where the kill happens.
+  timeout = 60
+  schedule = "20 1-6 * * *"
+
+[functions."desk-registry"]
+  # Opting a desk out walks its findings subcollection and deletes it in pages
+  # of 400, which does not reliably finish in 10s. A desk that asks to be erased
+  # and is only half erased is the worst outcome this endpoint has.
+  timeout = 20
+
+[functions."desk-auth"]
+  # One scrypt verification plus one Firestore read; scrypt alone can take a
+  # second on a cold function, and 10s leaves no room for a slow cold start.
+  timeout = 20
+
+[functions."post-plan"]
+  # A five-plan generation with steps and drafts is the longest single answer
+  # this product asks for, and it may run after a rate-limited provider has
+  # already been tried and failed. 60 is Netlify's synchronous ceiling.
+  timeout = 60
+
+[functions."week-compare"]
+  # One model call over a week of post titles; a long generation on a cold
+  # start does not reliably fit the 10s default.
+  timeout = 30
+
+[functions."desk-sync"]
+  # A pull reads the meta document plus one document per stored key, and a
+  # push runs a transaction over the same set. Well inside a minute, not
+  # reliably inside ten seconds.
+  timeout = 30
+
 [functions."recovery"]
   # One model call over criticism that has already been gathered, so no web
   # search and no second round trip. Well inside the window, but a plan over

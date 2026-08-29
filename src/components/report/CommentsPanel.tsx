@@ -43,7 +43,7 @@ export function CommentsPanel({ report }: { report: Report }) {
       <SectionTitle
         hint={
           total != null && total > read
-            ? `Read from the ${read} comments ${snapshot.platform} publishes without a login, of ${total.toLocaleString('en-IN')}.`
+            ? `${read} of ${total.toLocaleString('en-IN')} comments read.`
             : `Read from all ${read} comment${read === 1 ? '' : 's'} on this post.`
         }
       >
@@ -93,7 +93,7 @@ export function CommentsPanel({ report }: { report: Report }) {
 
         {read > top.length && (
           <p className="mt-3 text-xs text-ink-3">
-            All {read} are in the exported spreadsheet, on their own sheet.
+            All {read} in the export.
           </p>
         )}
       </Card>

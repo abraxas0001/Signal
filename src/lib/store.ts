@@ -109,6 +109,15 @@ export function isDemoScope(): boolean {
   return storageKey === DEMO_STORE_KEY
 }
 
+/**
+ * Is the store pointed at a handed-over desk — one opened with an office
+ * sign-in and synced to the server? Same question as `isDemoScope`, same
+ * owner: only this module knows where the store points.
+ */
+export function isDeskScope(): boolean {
+  return storageKey.startsWith(`${STORE_KEY}:desk-`)
+}
+
 /** Was the example desk open when this device last had the app loaded? */
 export function demoWasOpen(): boolean {
   try {
@@ -150,6 +159,20 @@ export function setStorageKey(next: string): void {
     /* private mode: the scope is still correct for this tab, it just will not
        survive a refresh. Losing the demo on reload is the safe direction. */
   }
+  cache = null
+  emit()
+}
+
+/**
+ * Drop the in-memory copy and tell every subscriber to re-read.
+ *
+ * For the one caller that changes what is ON DISK without moving the scope:
+ * the desk sync adopting a newer bundle from the server. `readStore` serves
+ * the cache, so a localStorage write from outside this module is invisible
+ * until something clears it — and "the disk changed, the screen did not" is
+ * exactly the staleness the sync exists to prevent.
+ */
+export function invalidateStore(): void {
   cache = null
   emit()
 }

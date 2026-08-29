@@ -2,7 +2,7 @@ import { useReducedMotion } from 'motion/react'
 import * as m from 'motion/react-m'
 import { ChevronRight, Link2, Settings as SettingsIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { GROUPS, type NavItem, type Tab } from '@/lib/nav'
+import { GROUPS, isUnlisted, type NavItem, type Tab } from '@/lib/nav'
 import { SignalGlyph } from '@/components/ui'
 import { DemoDoor, type DemoDoorProps } from '@/components/DemoDoor'
 import { pressable, spring } from '@/lib/motion'
@@ -12,14 +12,14 @@ import { pressable, spring } from '@/lib/motion'
  *
  * A bottom bar is the right answer on a phone and the wrong one on a laptop:
  * pinned to the bottom of a 1440px screen it sits as far from the reading eye
- * as the layout allows, and it only has room for five things. This product has
- * eight. So from lg: up the navigation moves to a fixed left column and the
- * caller drops TabBar.
+ * as the layout allows. So from lg: up the navigation moves to a fixed left
+ * column and the caller drops TabBar.
  *
- * Eight flat rows is a list, not a hierarchy. They are split by when they get
- * used: the screens the office opens every morning on top, the ones it goes
- * looking for below. Analyse sits above both and keeps the accent fill it has
- * in the tab bar — one product, one primary action, the same colour in both
+ * The column is short now, on purpose: four daily rows, the Analyse button
+ * above them, and Settings pinned at the foot. Everything else — Accounts,
+ * Tasks, History, People — lives on the Settings screen's tools list, per the
+ * product owner's cut in lib/nav.ts. Analyse keeps the accent fill it has in
+ * the tab bar — one product, one primary action, the same colour in both
  * layouts.
  *
  * Everything animates on transform and opacity. This column is fixed and
@@ -51,8 +51,9 @@ interface Props {
  * This file used to keep a fifth copy of the destination list, and copies are
  * what let five screens go unreachable on a phone while every list looked
  * complete on its own. Settings is filtered out here and pinned at the foot
- * instead — it is in the shared groups so the phone's More sheet still carries
- * it, since a sheet has no foot to pin anything to.
+ * instead — it stays in the shared groups because GROUPS is the one statement
+ * of the taxonomy, and a group that quietly omitted a destination would defeat
+ * the completeness check that reads it.
  */
 const SIDEBAR_GROUPS = GROUPS.map((g) => ({
   heading: g.heading,
@@ -141,6 +142,11 @@ function NavRow({
 export function SideNav({ active, onSelect, counts, demo }: Props) {
   const reduced = useReducedMotion() === true
 
+  // The tool screens open from Settings and have no row of their own, so the
+  // Settings card stays lit while one is on screen. The alternative is a
+  // column where nothing is lit, which says the reader is nowhere.
+  const settingsLit = active === 'settings' || isUnlisted(active)
+
   return (
     <m.nav
       aria-label="Main"
@@ -227,19 +233,18 @@ export function SideNav({ active, onSelect, counts, demo }: Props) {
             button there, present on every width including the phone, and a
             padlock is the one control an office reaches for in a hurry. */}
         <div className="mt-3 space-y-2 border-t border-[var(--border)] pt-3">
-          {/* First under the rule, which puts it directly beneath History —
-              the last row in the scrolling group above. That is where it was
-              asked for, and it is the right slot on its own merits: this is
-              the only control here that changes which desk you are on. */}
+          {/* First under the rule, above Settings. That is the right slot on
+              its own merits: this is the only control here that changes which
+              desk you are on. */}
           {demo && <DemoDoor {...demo} />}
 
           <button
             onClick={() => onSelect('settings')}
-            aria-current={active === 'settings' ? 'page' : undefined}
+            aria-current={settingsLit ? 'page' : undefined}
             className={cn(
-              'card card-hover flex w-full items-center gap-3 p-3 text-left',
+              'card card-hover flex w-full items-center gap-2.5 px-2.5 py-3 text-left',
               'focus-visible:rounded-[var(--radius-lg)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]',
-              active === 'settings' && 'ring-2 ring-[var(--accent)]',
+              settingsLit && 'ring-2 ring-[var(--accent)]',
             )}
           >
             <span
@@ -248,14 +253,14 @@ export function SideNav({ active, onSelect, counts, demo }: Props) {
             >
               <SettingsIcon
                 size={16}
-                strokeWidth={active === 'settings' ? 2.4 : 2}
+                strokeWidth={settingsLit ? 2.4 : 2}
                 aria-hidden
               />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-semibold text-ink">Settings</span>
               <span className="block truncate text-[11px] text-ink-3">
-                Keys, accounts & preferences
+                Keys and preferences
               </span>
             </span>
             <ChevronRight size={15} className="shrink-0 text-ink-3" aria-hidden />

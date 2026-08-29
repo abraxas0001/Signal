@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
@@ -9,6 +9,7 @@ import {
   Info,
   Megaphone,
   MessagesSquare,
+  Pencil,
   Plus,
   RefreshCw,
   ScanEye,
@@ -47,7 +48,16 @@ import {
   type ChipTone,
 } from './ui'
 import { CardHead, DonutBreakdown, Legend, PlatformBadge, RankRow } from '@/components/kit'
+import {
+  VOICE_KIND_HINT,
+  VOICE_KIND_ICON,
+  VOICE_KIND_LABEL,
+  voiceAffiliationOf,
+  voiceKindOf,
+  type VoiceKind,
+} from './briefing/InfluencerVoices'
 import { AddInfluencer, SearchInfluencers } from './AddInfluencer'
+import { useInfluencerRoster } from '@/components/settings/DeskConfig'
 import { cn, compact, full, relativeTime } from '@/lib/utils'
 import { fadeUp, listItem, listStagger } from '@/lib/motion'
 import { fetchWithTimeout } from '@/lib/net'
@@ -154,6 +164,34 @@ const STANCES = [
   'unclear',
 ] as const satisfies readonly InfluencerMention['stance'][]
 
+/**
+ * Mirrors InfluencerMention['about']. Guarded the same way STANCES is, so a
+ * value the shared type grows and this list lacks stops the build.
+ *
+ * There is no fallback member on purpose. A reading that did not say what a
+ * post is about carries no `about` at all, because the news digest groups on
+ * this field and a default would file every unanswered post under the member's
+ * own name.
+ */
+const ABOUTS = ['person', 'party', 'seat'] as const satisfies readonly NonNullable<
+  InfluencerMention['about']
+>[]
+
+/**
+ * The chip. Deliberately not the member's own name.
+ *
+ * The dashboard's news list substitutes the identity into these, which reads
+ * well beside a headline. Here the chip sits directly under the account that
+ * wrote the post, in a column of posts that are all about the same office, so
+ * repeating the name on every row is noise. "About you" carries the same
+ * claim in three characters.
+ */
+const ABOUT_LABEL: Record<NonNullable<InfluencerMention['about']>, string> = {
+  person: 'About you',
+  party: 'About your party',
+  seat: 'About your seat',
+}
+
 /* ── Reading an untrusted response ───────────────────────────────────────── */
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -197,12 +235,34 @@ function toFake(raw: unknown): FakeAssessment | null {
   }
 }
 
-function toInfluencer(raw: unknown): Influencer | null {
+/**
+ * A stored account, plus the two fields the shared record cannot carry yet.
+ *
+ * Discovery decides whether a channel is an outlet, a commentator speaking in
+ * their own name or an account campaigning for a party, and sends that
+ * alongside the shared fields. `Influencer` in shared/grievance.ts has nowhere
+ * to put it, so it rides as two optional extras that the store keeps and
+ * `voiceKindOf` reads back. An account somebody typed in by hand has neither,
+ * and reads as "kind not known" rather than being guessed at.
+ */
+interface StoredVoice extends Influencer {
+  kind?: VoiceKind
+  affiliation?: string | null
+}
+
+function toInfluencer(raw: unknown): StoredVoice | null {
   if (!isRecord(raw)) return null
   const handle = text(raw['handle'])
   const id = text(raw['id'])
   const platform = PLATFORM_OPTIONS.find((p) => p === raw['platform'])
   if (!handle || !id || !platform) return null
+
+  // Narrowed through the same reader the screen renders with, so a response
+  // carrying a kind this build does not know about becomes "unclear" rather
+  // than a chip with a raw string in it.
+  const kind = voiceKindOf(raw)
+  const affiliation = voiceAffiliationOf(raw)
+
   return {
     id,
     platform,
@@ -213,6 +273,8 @@ function toInfluencer(raw: unknown): Influencer | null {
     followers: number(raw['followers']),
     addedAt: text(raw['addedAt']) ?? new Date().toISOString(),
     note: text(raw['note']),
+    kind,
+    affiliation,
   }
 }
 
@@ -232,6 +294,12 @@ function toMention(raw: unknown): InfluencerMention | null {
     // Absent means judged: only the unfiltered path sends an explicit false.
     judged: raw['judged'] !== false,
     stance: oneOf(raw['stance'], STANCES, 'unclear'),
+    // Only when the reading actually said. The server omits it whenever the
+    // desk did not supply a name, a party and a seat, and an absent field here
+    // has to stay absent rather than becoming "person".
+    ...(ABOUTS.some((a) => a === raw['about'])
+      ? { about: oneOf(raw['about'], ABOUTS, 'person') }
+      : {}),
     sentiment: oneOf(raw['sentiment'], SENTIMENTS, 'Neutral'),
     fake: toFake(raw['fake']),
     seenAt: text(raw['seenAt']) ?? new Date().toISOString(),
@@ -307,12 +375,47 @@ function MiniStat({
  * measures engagement; inventing one would be the dishonesty this product
  * exists to avoid.
  */
+/**
+ * What kind of voice this is, as a chip.
+ *
+ * Shared by the roster card and the focused panel, because the two saying
+ * different words about one account is a class of bug this app has already
+ * had. An aligned account shows the party it works for instead of the generic
+ * label, since "BJP" is the useful half and "Party account" is the category.
+ */
+function KindChip({ influencer }: { influencer: Influencer }) {
+  const kind = voiceKindOf(influencer)
+  const affiliation = voiceAffiliationOf(influencer)
+  return (
+    <Chip
+      tone={kind === 'aligned' ? 'warning' : kind === 'unclear' ? 'neutral' : 'info'}
+      icon={VOICE_KIND_ICON[kind]}
+      title={
+        affiliation
+          ? `${VOICE_KIND_HINT[kind]} It campaigns for ${affiliation}.`
+          : VOICE_KIND_HINT[kind]
+      }
+    >
+      {/* Capped: a Chip does not wrap, and a party's full name is long enough
+          to push a 375px card sideways. The full name rides the tooltip. */}
+      <span className="block max-w-[10rem] truncate">
+        {kind === 'aligned' && affiliation ? affiliation : VOICE_KIND_LABEL[kind]}
+      </span>
+    </Chip>
+  )
+}
+
 function InfluencerCard({
   influencer,
   mentions,
+  focused,
+  onOpen,
 }: {
   influencer: Influencer
   mentions: InfluencerMention[]
+  /** Ringed, so the card the panel above is about is findable in the grid. */
+  focused: boolean
+  onOpen: (influencerId: string) => void
 }) {
   const name = influencer.displayName ?? influencer.handle
 
@@ -352,7 +455,12 @@ function InfluencerCard({
   )
 
   return (
-    <div className="card card-hover flex flex-col gap-4 p-4">
+    <div
+      className={cn(
+        'card card-hover flex flex-col gap-4 p-4',
+        focused && 'ring-2 ring-[var(--accent)]',
+      )}
+    >
       {/* The name heads the figures. The whole row is the tap target out to
           the profile when we hold a link for it. */}
       {influencer.url ? (
@@ -371,6 +479,12 @@ function InfluencerCard({
       )}
 
       <div className="flex flex-col gap-4">
+        {/* An outlet and a party worker are read differently, so the card says
+            which this is before it says anything else about it. */}
+        <div className="flex flex-wrap gap-1.5">
+          <KindChip influencer={influencer} />
+        </div>
+
         <div className="grid grid-cols-3 gap-2">
           <MiniStat
             icon={<Users size={15} />}
@@ -432,8 +546,163 @@ function InfluencerCard({
         {influencer.note && (
           <p className="text-[11px] leading-relaxed text-ink-3">{influencer.note}</p>
         )}
+
+        {/* The same action the dashboard's voices section offers, so an office
+            that arrives here directly is not worse off than one that came
+            through a link. */}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onOpen(influencer.id)}
+          disabled={focused}
+        >
+          <ScanEye size={14} />
+          {focused ? 'Showing this account' : 'Full analysis'}
+        </Button>
       </div>
     </div>
+  )
+}
+
+/**
+ * One account, opened.
+ *
+ * The panel the dashboard sends a reader to. It carries nothing the roster
+ * card does not already hold, and that is deliberate: the numbers here are the
+ * same numbers, counted the same way, so an office cannot come away with two
+ * different readings of one account depending on which screen it looked at.
+ * What it adds is scope. While this is open the post list below shows only
+ * this account, which is what "the whole analysis of it" means in practice.
+ */
+function VoiceDetail({
+  influencer,
+  mentions,
+  onClearFocus,
+}: {
+  influencer: Influencer
+  mentions: InfluencerMention[]
+  onClearFocus: () => void
+}) {
+  const name = influencer.displayName ?? influencer.handle
+
+  /**
+   * Split the stored posts the same way the rest of the app does.
+   *
+   * `judged !== false` first, because an unfiltered listing holds a
+   * struct-default stance and counting those would invent a calm nothing
+   * measured. A judged post with stance "unclear" is counted apart again: a
+   * model read it and could not call it, which is a different thing from
+   * nobody having read it, and an office acts differently on each.
+   */
+  const judged = mentions.filter((x) => x.judged !== false)
+  const unread = mentions.length - judged.length
+  const aboutYou = judged.filter((x) => x.mentionsSubject)
+  const supportive = aboutYou.filter((x) => x.stance === 'supportive').length
+  const critical = aboutYou.filter((x) => x.stance === 'critical').length
+  const neutral = aboutYou.filter((x) => x.stance === 'neutral').length
+  const unclear = aboutYou.filter((x) => x.stance === 'unclear').length
+  const suspect = judged.filter((x) => x.fake !== null && x.fake.suspicion !== 'No').length
+
+  /**
+   * One sentence, assembled from the counts that are not zero.
+   *
+   * Never a template with holes in it. "0 supportive posts" reads as a finding
+   * about an account nobody has finished reading, and this screen exists to
+   * stop exactly that.
+   */
+  const parts = [
+    critical > 0 ? `${critical} critical` : null,
+    supportive > 0 ? `${supportive} supportive` : null,
+    neutral > 0 ? `${neutral} neither way` : null,
+  ].filter((x): x is string => x !== null)
+
+  return (
+    // Accent-bordered rather than lifted: the search panel below is this
+    // screen's one lifted card, and two panels competing for first read is how
+    // a screen stops having a first read at all.
+    <Card tone="accent">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <PlatformBadge platform={influencer.platform} size={38} />
+          <div className="min-w-0">
+            <p className="truncate text-[15px] font-bold leading-tight">{name}</p>
+            <p className="truncate text-xs text-ink-3">
+              @{influencer.handle.replace(/^@/, '')}
+              {influencer.constituency ? ` · watched for ${influencer.constituency}` : ''}
+            </p>
+          </div>
+        </div>
+        <Button size="sm" variant="ghost" onClick={onClearFocus}>
+          Show every account
+        </Button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <KindChip influencer={influencer} />
+        <Chip
+          tone="neutral"
+          title={
+            influencer.followers != null
+              ? `${full(influencer.followers)} followers, read from the platform`
+              : 'Nothing has read this account’s follower count yet.'
+          }
+        >
+          {influencer.followers != null
+            ? `${compact(influencer.followers)} followers`
+            : 'Followers not read'}
+        </Chip>
+        {suspect > 0 && (
+          <Chip tone="negative" icon={<TriangleAlert size={11} />}>
+            {suspect} {suspect === 1 ? 'claim needs' : 'claims need'} checking
+          </Chip>
+        )}
+      </div>
+
+      <p className="mt-3 text-sm leading-relaxed text-ink-2">
+        {aboutYou.length === 0 ? (
+          <>
+            We hold {mentions.length} {mentions.length === 1 ? 'post' : 'posts'} from this account
+            and none of them has been read as being about you.
+          </>
+        ) : (
+          <>
+            {aboutYou.length} of the {mentions.length} posts we hold from this account are about
+            you{parts.length > 0 ? `: ${parts.join(', ')}` : ''}.
+            {unclear > 0 && (
+              <>
+                {' '}
+                {unclear} {unclear === 1 ? 'was' : 'were'} read and too short to call either way.
+              </>
+            )}
+          </>
+        )}
+        {unread > 0 && (
+          <>
+            {' '}
+            {unread} {unread === 1 ? 'post' : 'posts'} not read yet.
+          </>
+        )}
+      </p>
+
+      {influencer.note && (
+        <div className="mt-3">
+          <p className="kicker">Why this account is on the list</p>
+          <p className="mt-1 text-sm leading-relaxed text-ink-2">{influencer.note}</p>
+        </div>
+      )}
+
+      {influencer.url && (
+        <a
+          href={influencer.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold text-[var(--accent)]"
+        >
+          <ExternalLink size={13} aria-hidden />
+          Open the account on {influencer.platform}
+        </a>
+      )}
+    </Card>
   )
 }
 
@@ -453,6 +722,9 @@ function InfluencerCard({
  * counts as being about us". Editing here edits there.
  */
 function WatchTerms() {
+  // The example in the box is the reader's own seat, not the first client's.
+  const seatExample = readStore().profile?.constituency ?? 'your constituency'
+  const watchPlaceholder = `${seatExample}, the member's name…`
   const store = useStore()
   const terms = store.profile?.watchTerms ?? []
   const [draft, setDraft] = useState('')
@@ -491,15 +763,8 @@ function WatchTerms() {
       <CardHead
         icon={<Search size={16} />}
         title="Words that mean a post is about you"
-        sub="Shared with the grievance desk"
-        hint="One list for the whole office. Editing it here edits it everywhere a check runs."
         tint="violet"
       />
-      <p className="text-xs leading-relaxed text-ink-2">
-        We flag a post when it uses one of these words. Add the member&rsquo;s name, the Telugu
-        spelling, the constituency, a scheme &mdash; whatever the channels actually say. Leave
-        this empty and we will simply show you everything these accounts post.
-      </p>
 
       <div className="mt-4 flex gap-2">
         <input
@@ -511,7 +776,7 @@ function WatchTerms() {
               add()
             }
           }}
-          placeholder="Eluru, ఏలూరు, the member's name…"
+          placeholder={watchPlaceholder}
           aria-label="Add a word to look for"
           className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm shadow-[var(--e1)] outline-none transition-colors focus:border-[var(--accent)]"
         />
@@ -548,6 +813,7 @@ function WatchTerms() {
 export function Influencers({
   onClose,
   onRead,
+  focusId = null,
 }: {
   onClose: () => void
   /**
@@ -560,9 +826,59 @@ export function Influencers({
    * paste box and then opened this list.
    */
   onRead: (mention: InfluencerMention) => void
+  /**
+   * Open on one account rather than on the whole roster.
+   *
+   * The dashboard's voices section names an account and sends the reader here
+   * to read it in full. Rather than build a second reader over there, the
+   * navigation carries the id and this screen scopes itself to it: the account
+   * gets its own panel at the top and the post list below shows only its
+   * posts. There is exactly one place in this app that renders influencer
+   * detail, which is the only way the two can never disagree.
+   *
+   * Null is the ordinary case and changes nothing.
+   */
+  focusId?: string | null
 }) {
   const store = useStore()
   const reduced = useReducedMotion()
+
+  /**
+   * Which account the screen is scoped to, if any.
+   *
+   * Seeded from the prop and kept locally, because the reader can also change
+   * it from here: every roster card offers the same action, so arriving with
+   * nothing focused and then choosing an account works without a round trip
+   * through the app's navigation.
+   */
+  const [focus, setFocus] = useState<string | null>(focusId)
+
+  /**
+   * Whether the watch's controls are on screen.
+   *
+   * The watch terms, the channel search and the paste box are setup, and an
+   * office does setup once. Rendered permanently they cost two screens of
+   * scrolling before the first voice, every visit — so they live behind the
+   * pencil, on THIS screen, in place. The one exception is an empty roster:
+   * with nothing watched yet, the setup IS the screen, and hiding it behind
+   * an icon would strand whoever just arrived.
+   */
+  const [editing, setEditing] = useState(false)
+  const focusRef = useRef<HTMLDivElement | null>(null)
+
+  // Keyed on the incoming id alone. Depending on the local choice as well
+  // would fight the reader: every tap on a different card would be undone by
+  // this on the next render.
+  useEffect(() => {
+    if (focusId) setFocus(focusId)
+  }, [focusId])
+
+  // Arriving from the dashboard lands below the fold on a phone, so the panel
+  // that was asked for has to be brought to the reader rather than waiting to
+  // be scrolled to.
+  useEffect(() => {
+    if (focus) focusRef.current?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' })
+  }, [focus, reduced])
   /**
    * Where a newly added account is watched for.
    *
@@ -630,6 +946,15 @@ export function Influencers({
     for (const inf of store.influencers) map.set(inf.id, inf)
     return map
   }, [store.influencers])
+
+  /**
+   * The account the screen is scoped to, resolved against the live roster.
+   *
+   * Null when an id arrives for an account that has since been removed. The
+   * screen says so rather than silently widening back to everything, because a
+   * link that lands on the full list looks like a link that did not work.
+   */
+  const focused = focus ? (byInfluencer.get(focus) ?? null) : null
 
   /** Every stored post, grouped by the account that published it. */
   const mentionsByInfluencer = useMemo(() => {
@@ -716,8 +1041,12 @@ export function Influencers({
    */
   const mentions = useMemo(() => {
     const rows = view === 'all' ? [...store.mentions] : store.mentions.filter((x) => x.mentionsSubject)
-    return rows.sort((a, b) => byDate(a, b, sort))
-  }, [store.mentions, view, sort])
+    // Scoped to one account when the reader asked for one account. The counts
+    // above and the "waiting for you" badge deliberately do not narrow with
+    // it: a filter changes what you are looking at, never what is waiting.
+    const scoped = focus ? rows.filter((x) => x.influencerId === focus) : rows
+    return scoped.sort((a, b) => byDate(a, b, sort))
+  }, [store.mentions, view, sort, focus])
 
   /**
    * Not yet cleared by a person. The only count worth putting a badge on.
@@ -751,23 +1080,12 @@ export function Influencers({
     update((s) => ({ ...s, mentions: s.mentions.map((x) => ({ ...x, acknowledged: true })) }))
   }, [])
 
-  /** Shared by both ways onto the roster, so neither can drift from the other. */
-  const tracked = useCallback(
-    (platform: Platform, handle: string) =>
-      readStore().influencers.some(
-        (i) => i.platform === platform && i.handle.toLowerCase() === handle.toLowerCase(),
-      ),
-    [],
-  )
-
-  const addInfluencer = useCallback((influencer: Influencer) => {
-    update((s) => ({
-      ...s,
-      influencers: s.influencers.some((i) => i.id === influencer.id)
-        ? s.influencers
-        : [...s.influencers, influencer],
-    }))
-  }, [])
+  /**
+   * The roster writes, from the module Settings' "Influencer settings"
+   * section also renders through. Defining them here a second time is how the
+   * two surfaces would come to disagree about what "already watched" means.
+   */
+  const { isTracked: tracked, add: addInfluencer } = useInfluencerRoster()
 
   /**
    * Read the watched accounts again.
@@ -779,9 +1097,7 @@ export function Influencers({
   const check = useCallback(async () => {
     const current = readStore()
     if (current.influencers.length === 0) {
-      setError(
-        'You are not watching any accounts yet. Tap Suggest and we will find the channels people follow around here.',
-      )
+      setError('You are not watching any accounts yet. Tap Suggest first.')
       return
     }
 
@@ -810,10 +1126,25 @@ export function Influencers({
     setCapped([])
 
     try {
+      /**
+       * Who the reading is for.
+       *
+       * Without this the server can score a stance but cannot say whether a
+       * post is about the member, their party or their seat: the watch terms
+       * are a flat list and "Aruna", "BJP" and "Mahabubnagar" all look alike
+       * in it. All three fields or none, which is the server's own test.
+       */
+      const person = current.identity
+      const subject = {
+        name: person?.name ?? null,
+        party: person?.party ?? null,
+        seat: person?.constituency ?? current.profile?.district ?? null,
+      }
+
       const res = await fetchWithTimeout('/api/influencers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ influencers: rotated, watchTerms }),
+        body: JSON.stringify({ influencers: rotated, watchTerms, subject }),
       })
       const parsed: unknown = await res.json()
       const body = isRecord(parsed) ? parsed : {}
@@ -836,9 +1167,12 @@ export function Influencers({
        * Was this response judged by a model, or is it a raw listing?
        *
        * Mirrors the server's own test: it drops terms shorter than two
-       * characters, and reads unfiltered when nothing survives. Getting this
-       * wrong in either direction only costs a refresh, but getting it right
-       * prevents the overwrite below.
+       * characters, and reads unfiltered when nothing survives. Only used for
+       * the heading over the coverage card now. The merge below reads each
+       * row's own flag instead, which is the honest test: a scored response
+       * can still contain a post the model skipped, and inferring "everything
+       * here was judged" from the request would overwrite a real reading with
+       * that gap.
        */
       const judged = watchTerms.filter((t) => t.trim().length >= 2).length > 0
 
@@ -854,7 +1188,7 @@ export function Influencers({
           // read as hostile would silently downgrade it and drop it out of the
           // about-you view. The post itself has not changed — only how much we
           // know about it — so the richer record wins.
-          if (existing && !judged) continue
+          if (existing && existing.judged !== false && row.judged === false) continue
           byId.set(row.postUrl, existing ? { ...row, acknowledged: existing.acknowledged } : row)
         }
         return {
@@ -883,9 +1217,10 @@ export function Influencers({
 
   /** Find the channels with an audience in this seat. */
   const suggest = useCallback(async () => {
-    const subject = readStore().profile?.subject?.trim()
+    const current = readStore()
+    const subject = current.profile?.subject?.trim()
     if (!subject) {
-      setError('Set up the desk first. We need to know whose name to search for.')
+      setError('Set up the desk first.')
       return
     }
 
@@ -894,9 +1229,21 @@ export function Influencers({
     setVerified(null)
 
     try {
-      const res = await fetch(
-        `/api/influencers?constituency=${encodeURIComponent(constituency)}&subject=${encodeURIComponent(subject)}`,
-      )
+      /**
+       * The party and the state, when the desk knows them.
+       *
+       * Both only widen the search. The party adds a question that finds the
+       * accounts campaigning on either side, which a search for "<district>
+       * news" never returns, and the state stops the judge guessing which
+       * state this seat is in from a region table.
+       */
+      const query = new URLSearchParams({ constituency, subject })
+      const party = current.identity?.party?.trim()
+      const state = (current.identity?.state ?? current.profile?.state)?.trim()
+      if (party) query.set('party', party)
+      if (state) query.set('state', state)
+
+      const res = await fetch(`/api/influencers?${query.toString()}`)
       const parsed: unknown = await res.json()
       const body = isRecord(parsed) ? parsed : {}
 
@@ -952,47 +1299,93 @@ export function Influencers({
           subtitle={
             store.influencers.length
               ? `You are watching ${store.influencers.length} ${store.influencers.length === 1 ? 'account' : 'accounts'}. ${unread.length > 0 ? `${unread.length} waiting for you.` : 'Nothing new right now.'}`
-              : 'The pages and channels that move opinion where you work.'
+              : 'The channels that move opinion here.'
           }
           actions={
-            <Button variant="ghost" onClick={onClose}>
-              Back
-            </Button>
+            <>
+              {/* Shows and hides the watch's own controls, right here. It
+                  used to route to Settings, which took the reader off the
+                  screen they were configuring to configure it. */}
+              <Button
+                variant="ghost"
+                onClick={() => setEditing((v) => !v)}
+                aria-label={editing ? 'Close the watch settings' : 'Edit the watch'}
+                title={editing ? 'Close the watch settings' : 'Edit the watch'}
+                aria-pressed={editing}
+                // Square, matching the grievance desk's pencil.
+                className={cn('size-12 px-0', editing && 'bg-[var(--accent-soft)] text-[var(--accent)]')}
+              >
+                <Pencil size={16} aria-hidden />
+              </Button>
+              <Button variant="ghost" onClick={onClose}>
+                Back
+              </Button>
+            </>
           }
         />
       </m.header>
 
-      <m.div variants={fadeUp} className="mt-4">
-        <WatchTerms />
-      </m.div>
-
-      {/* Two ways onto the roster, and both end in a live read before anything
-          is stored. Search covers YouTube, which is the only platform that
-          answers a query from a server; everything else has to be named. This
-          is the screen's one lifted panel: the roster fills itself, so the
-          thing worth a reader's first look is how to steer it. */}
-      <m.div variants={fadeUp} className="mt-4">
-        <Card level="lift" className="space-y-5">
-          <SearchInfluencers
-            constituency={store.identity?.constituency ?? null}
-            suggestedQuery={
-              [store.identity?.constituency, store.identity?.state].find(Boolean)
-                ? `${[store.identity?.constituency, store.identity?.state].find(Boolean)} politics`
-                : ''
-            }
-            isTracked={tracked}
-            onAdd={addInfluencer}
+      {/* The account the reader came here to read, first.
+          Above the setup panels rather than below them: somebody who tapped a
+          named voice on the dashboard did not come here to edit watch terms,
+          and putting two screens of controls in front of the thing they asked
+          for is the app ignoring them. */}
+      {focused && (
+        <m.div variants={fadeUp} className="mt-4" ref={focusRef}>
+          <VoiceDetail
+            influencer={focused}
+            mentions={mentionsByInfluencer.get(focused.id) ?? []}
+            onClearFocus={() => setFocus(null)}
           />
+        </m.div>
+      )}
 
-          <div className="border-t border-[var(--border)] pt-5">
-            <AddInfluencer
-              constituency={store.identity?.constituency ?? null}
-              isTracked={tracked}
-              onAdd={addInfluencer}
-            />
-          </div>
-        </Card>
-      </m.div>
+      {/* Asked for by id, and gone from the roster since. Says so rather than
+          silently showing the whole list, which would look like the link had
+          simply not worked. */}
+      {focus && !focused && (
+        <m.p variants={fadeUp} className="mt-4 text-sm text-ink-2">
+          That account is no longer on your list.
+        </m.p>
+      )}
+
+      {/* Setup, behind the pencil. With nothing watched yet the setup IS the
+          screen and shows regardless — an icon a new visitor has no reason to
+          press must never be the only way to start. */}
+      {(editing || store.influencers.length === 0) && (
+        <>
+          <m.div variants={fadeUp} className="mt-4">
+            <WatchTerms />
+          </m.div>
+
+          {/* Two ways onto the roster, and both end in a live read before
+              anything is stored. Search covers YouTube, which is the only
+              platform that answers a query from a server; everything else has
+              to be named. */}
+          <m.div variants={fadeUp} className="mt-4">
+            <Card level="lift" className="space-y-5">
+              <SearchInfluencers
+                constituency={store.identity?.constituency ?? null}
+                suggestedQuery={
+                  [store.identity?.constituency, store.identity?.state].find(Boolean)
+                    ? `${[store.identity?.constituency, store.identity?.state].find(Boolean)} politics`
+                    : ''
+                }
+                isTracked={tracked}
+                onAdd={addInfluencer}
+              />
+
+              <div className="border-t border-[var(--border)] pt-5">
+                <AddInfluencer
+                  constituency={store.identity?.constituency ?? null}
+                  isTracked={tracked}
+                  onAdd={addInfluencer}
+                />
+              </div>
+            </Card>
+          </m.div>
+        </>
+      )}
 
       <m.div variants={fadeUp} className="mt-4 flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={() => void check()} disabled={busy !== null}>
@@ -1034,19 +1427,21 @@ export function Influencers({
 
       {verified && (
         <m.p variants={fadeUp} className="mt-3 text-sm text-ink-2">
-          We opened {verified.checked} {verified.checked === 1 ? 'channel' : 'channels'},{' '}
-          {verified.discarded} would not load, and added {verified.added} to your list.
+          {verified.checked} opened · {verified.discarded} would not load · {verified.added} added
         </m.p>
       )}
 
       {/* ── The roster, as profile cards ─────────────────────────────────────
           Read-only on purpose. The curated watch list went away because
-          `seedInfluencers` in lib/morning-scan.ts maintains the roster itself;
-          what remains worth showing is who is on it and what this device
-          actually knows about each of them. */}
-      {store.influencers.length > 0 && (
+          `seedInfluencers` in lib/morning-scan.ts maintains the roster itself.
+
+          Behind the pencil with the rest of the watch's furniture: WHO is
+          watched is configuration, WHAT they said is the reading. The screen
+          opens on the reading — the summary cards and the post list — and the
+          roster shows only while the pencil is lit. */}
+      {editing && store.influencers.length > 0 && (
         <m.section variants={fadeUp} className="mt-6">
-          <SectionTitle hint="Filled by the morning scan and by anything you add above. Follower counts come from the platforms themselves.">
+          <SectionTitle>
             Who you are watching
             <span className="ml-2 text-sm font-normal text-ink-3">{store.influencers.length}</span>
           </SectionTitle>
@@ -1056,6 +1451,8 @@ export function Influencers({
                 key={inf.id}
                 influencer={inf}
                 mentions={mentionsByInfluencer.get(inf.id) ?? []}
+                focused={inf.id === focus}
+                onOpen={setFocus}
               />
             ))}
           </div>
@@ -1082,8 +1479,6 @@ export function Influencers({
               <CardHead
                 icon={<MessagesSquare size={16} />}
                 title="How the coverage reads"
-                sub="Unjudged listings are not counted"
-                hint="Sentiment across the posts a model has actually read. Unjudged listings are not counted."
                 tint="violet"
               />
               {/* Ring above legend on a phone; ring beside a stacked legend
@@ -1117,7 +1512,6 @@ export function Influencers({
                 icon={<Megaphone size={16} />}
                 title="Most heard from"
                 sub="Ranked by posts we have read"
-                hint="The accounts behind the posts on this screen, by how many we have read."
                 tint="blue"
               />
               <div>
@@ -1156,12 +1550,10 @@ export function Influencers({
       <m.section variants={fadeUp} className="mt-6">
         <SectionTitle
           hint={
-            view === 'all'
-              ? 'Everything the channels you watch have posted recently.'
-              : 'What the channels people follow around here are saying about you.'
+            focused ? `Only posts from ${focused.displayName ?? focused.handle}.` : undefined
           }
         >
-          To look at
+          {focused ? `From ${focused.displayName ?? focused.handle}` : 'To look at'}
           {unread.length > 0 && (
             <span className="ml-2 text-sm font-normal text-ink-3">{unread.length} new</span>
           )}
@@ -1222,10 +1614,12 @@ export function Influencers({
             title="Nothing yet"
             body={
               store.influencers.length === 0
-                ? 'You are not watching anything yet. Tap Suggest to find the channels people follow around here.'
-                : view === 'about' && store.mentions.length > 0
-                  ? 'None of the posts we read mention you. Switch to “Everything we read” above to see what these accounts did post.'
-                  : 'These accounts have not posted anything that mentions you. Tap Check now to read them again.'
+                ? 'You are not watching anything yet. Tap Suggest.'
+                : focused
+                  ? `We hold nothing from ${focused.displayName ?? focused.handle} that fits this view.`
+                  : view === 'about' && store.mentions.length > 0
+                    ? 'None of the posts we read mention you.'
+                    : 'These accounts have not posted anything that mentions you.'
             }
           />
         ) : (
@@ -1304,7 +1698,7 @@ function MentionRow({
               <p className="mt-0.5 text-xs text-ink-3">
                 {mention.postedAt
                   ? relativeTime(mention.postedAt)
-                  : `No date on this one. We read it ${relativeTime(mention.seenAt)}`}
+                  : `No date · read ${relativeTime(mention.seenAt)}`}
               </p>
             </div>
           </div>
@@ -1333,6 +1727,18 @@ function MentionRow({
           <Chip tone={SENTIMENT_CHIP[SENTIMENT_TONE[mention.sentiment]] ?? 'neutral'}>
             {mention.sentiment}
           </Chip>
+          {/* Rendered only when the reading actually answered it. Older posts
+              and readings taken before the desk knew the member's party and
+              seat carry no `about` at all, and a chip guessed from silence
+              would be the fabrication this screen exists to catch. */}
+          {mention.mentionsSubject && mention.about && (
+            <Chip
+              tone="neutral"
+              title="What this post is really about, from the same reading that scored its stance."
+            >
+              {ABOUT_LABEL[mention.about]}
+            </Chip>
+          )}
           {!mention.mentionsSubject && (
             <Chip tone="neutral" title="One of your words showed up, but the post turned out to be about something else">
               Not about you
@@ -1389,13 +1795,11 @@ function MentionRow({
               <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
                 {unjudged ? (
                   <>
-                    Nobody has read this one yet. It came back from a check with no search
-                    words set, so we listed it without working out whether it is about you or
-                    what it says
+                    Nobody has read this one yet
                     {influencer?.followers
                       ? `. The account has ${influencer.followers.toLocaleString('en-IN')} followers`
                       : ''}
-                    . Add a search word and check again, or open it and read it yourself.
+                    . Add a search word and check again.
                   </>
                 ) : (
                   <>
@@ -1445,7 +1849,7 @@ function MentionRow({
 
             {fake && fake.signals.length === 0 && fake.suspicion === 'No' && (
               <p className="text-sm leading-relaxed text-ink-2">
-                Nothing about this one looked fabricated. It is ordinary coverage.
+                Nothing about this one looked fabricated.
               </p>
             )}
           </div>
@@ -1454,7 +1858,7 @@ function MentionRow({
         {fake?.note && (
           <p className="mt-3 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--warn-soft)] px-3 py-2 text-xs leading-relaxed text-ink-2">
             <TriangleAlert size={13} className="mt-0.5 shrink-0 text-[var(--warn)]" aria-hidden />
-            <span>{fake.note} Nobody has checked this yet, so someone should take a look.</span>
+            <span>{fake.note}</span>
           </p>
         )}
 

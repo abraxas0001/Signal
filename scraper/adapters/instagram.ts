@@ -271,9 +271,117 @@ export const instagram: PlatformAdapter = {
    * is the contract's way of saying "I have nothing to add" — the app then
    * falls through to that reader rather than treating this as an outage.
    */
-  comments: async (): Promise<AdapterResult<ScrapedComment>> => ({
-    ok: true,
-    items: [],
-    note: 'Instagram comments are left to the app’s own post reader.',
-  }),
+  /**
+   * Comments on a post page, signed in.
+   *
+   * This was a stub returning an empty list, so every Instagram account read
+   * as having no comments, including ones whose posts carry thousands.
+   *
+   * It anchors on structure, never on Instagram's class names, which are
+   * minified and rotate (`x1lliihq x193iq5w …`). Every comment row carries a
+   * "Reply" control, so the readable landmark is that word: find each one, walk
+   * up until an ancestor holds both a profile link and its own text span, and
+   * that ancestor is the row. Measured on a live post: 15 Reply controls, 15
+   * comments, while `ul li` found 3 and `article` found none.
+   *
+   * A /reel/ URL is normalised to /p/ first. The reel player renders a stripped
+   * shell with no thread at all: 1,324 characters of body and zero lists.
+   */
+  comments: async (ctx: AdapterContext, url: string): Promise<AdapterResult<ScrapedComment>> => {
+    const { page, limit } = ctx
+
+    const short = /\/(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/.exec(url)
+    if (short?.[2]) {
+      const canonical = `https://www.instagram.com/p/${short[2]}/`
+      if (!page.url().startsWith(canonical)) {
+        await ctx.pace()
+        await page.goto(canonical, { waitUntil: 'domcontentloaded' }).catch(() => {})
+      }
+    }
+    await page.waitForTimeout(6_000)
+
+    const handle = /instagram\.com\/([^/]+)\//.exec(url)?.[1]?.toLowerCase() ?? null
+
+    const collect = () =>
+      page
+        .evaluate(() => {
+          const out: { text: string; author: string | null; time: string | null }[] = []
+          const seen = new Set<Element>()
+
+          for (const el of Array.from(document.querySelectorAll('*'))) {
+            if (el.children.length !== 0) continue
+            if ((el.textContent || '').trim() !== 'Reply') continue
+
+            // Up from the Reply control until the ancestor owns a profile link
+            // and a text span: that is one comment.
+            let row: Element | null = el
+            for (let i = 0; i < 12 && row; i++) {
+              const link = row.querySelector('a[href^="/"]')
+              const spans = Array.from(row.querySelectorAll('span[dir="auto"]'))
+              if (link && spans.length > 0) break
+              row = row.parentElement
+            }
+            if (!row || seen.has(row)) continue
+            seen.add(row)
+
+            const link = row.querySelector('a[href^="/"]') as HTMLAnchorElement | null
+            const author = link ? link.pathname.replaceAll('/', '').trim() || null : null
+
+            // The row's own words: the longest text span that is not the
+            // username and not a control label.
+            const skip = new Set(['Reply', 'Translate', 'See translation', 'Like'])
+            let text = ''
+            for (const sp of Array.from(row.querySelectorAll('span[dir="auto"]'))) {
+              const t = (sp.textContent || '').trim()
+              if (!t || skip.has(t) || t === author) continue
+              if (/^[\d,.]+\s*(likes?|reply|replies)$/i.test(t)) continue
+              if (t.length > text.length) text = t
+            }
+            if (!text) continue
+
+            out.push({
+              text,
+              author,
+              time: row.querySelector('time')?.getAttribute('datetime') ?? null,
+            })
+          }
+          return out
+        })
+        .catch(() => [] as { text: string; author: string | null; time: string | null }[])
+
+    let rows = await collect()
+    for (let round = 0; round < 6 && rows.length < limit; round++) {
+      const more = page
+        .locator('[role="button"], button')
+        .filter({ hasText: /^(Load more comments|View all|more comments)/i })
+        .first()
+      if (await more.count().catch(() => 0)) {
+        await more.click({ timeout: 3_000 }).catch(() => {})
+      } else {
+        await page.mouse.wheel(0, 1_400)
+      }
+      await page.waitForTimeout(2_500)
+      const next = await collect()
+      if (next.length <= rows.length) break
+      rows = next
+    }
+
+    if (rows.length === 0) {
+      return { ok: false, reason: 'Instagram rendered no comment thread on this page.' }
+    }
+
+    return {
+      ok: true,
+      items: rows
+        .filter((r) => !(handle && r.author?.toLowerCase() === handle))
+        .slice(0, limit)
+        .map((r) => ({
+          text: r.text,
+          author: r.author,
+          likes: null,
+          publishedAt: r.time,
+          isReply: true,
+        })),
+    }
+  },
 }

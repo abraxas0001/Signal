@@ -33,6 +33,16 @@ import { fetchWithTimeout } from '@/lib/net'
  * an office can check it against the headline. Reading is a claim about what a
  * story means, and nobody should be spending a model's opinion on their behalf
  * without being asked.
+ *
+ * AND THE MORNINGS NOBODY WAS HERE FOR. This ran once on open and once more at
+ * the next 07:30 if the tab happened to still be there, which meant an office
+ * away from Friday to Tuesday came back, scanned Tuesday, and lost the other
+ * three days without ever being told they existed. On open the desk now counts
+ * the boundaries it slept through and reads back over them, capped at a week.
+ * What that can honestly recover is described on `run` below; the short version
+ * is that it reaches sources the daily scan never gets to and it stops
+ * overwriting what earlier mornings found, and it cannot conjure back a story a
+ * publisher has already rolled off the page.
  */
 
 /**
@@ -74,8 +84,116 @@ export function scanIsCurrent(iso: string | null, now: Date = new Date()): boole
   return at >= lastScanBoundary(now).getTime()
 }
 
+/**
+ * How many mornings passed with nobody here to read them.
+ *
+ * `scanIsCurrent` answers yes or no, and that was the whole of the desk's
+ * memory: an office away over a long weekend came back on Tuesday, the gate
+ * said "today's reading does not exist", one scan ran, and Friday, Saturday,
+ * Monday were simply gone. Nothing anywhere had counted them, so nothing could
+ * say they had been missed, and the dashboard's "8 mastheads were read a minute
+ * ago" was true and told the office nothing about the four days it had lost.
+ *
+ * Counting them is the first half of fixing that. Zero means today's reading
+ * already exists. Zero is also the answer for a desk that has never scanned:
+ * a first scan is not a catch-up, there is nothing behind it to catch up on.
+ */
+export function missedMornings(iso: string | null, now: Date = new Date()): number {
+  if (!iso) return 0
+  const at = Date.parse(iso)
+  if (!Number.isFinite(at)) return 0
+
+  const latest = lastScanBoundary(now).getTime()
+  if (at >= latest) return 0
+
+  // Boundaries sit 24 hours apart in wall-clock terms. India keeps no daylight
+  // saving, so this is exact here; rounding up keeps it honest by one morning
+  // rather than short by one for any desk that is not.
+  return Math.max(1, Math.ceil((latest - at) / 86_400_000))
+}
+
 /** Bound on what is kept, so the store cannot grow without limit. */
 const MAX_CANDIDATES = 60
+
+/**
+ * How many sources one request actually reads.
+ *
+ * This mirrors MAX_SOURCES in netlify/functions/lib/scan.ts. It is copied
+ * rather than imported because a browser bundle has no business pulling in a
+ * function's module, and it is load-bearing rather than decorative: the scanner
+ * reads the FIRST eight sources it is handed and drops the rest without reading
+ * them. A desk that has had four publisher tag pages seeded on top of its eight
+ * mastheads therefore has four sources it has never once been read from.
+ */
+const SOURCES_PER_REQUEST = 8
+
+/**
+ * How many missed mornings one catch-up will work through.
+ *
+ * Seven. A desk shut for a month is not owed thirty rounds of fetching other
+ * people's servers, and past about a week it would buy nothing anyway: a
+ * masthead's index carries what it is carrying now, so the rounds beyond that
+ * return today's stories again under an older heading. The cap is stated to the
+ * reader rather than applied quietly, because "we caught up" and "we caught up
+ * on the last seven of your nineteen missing mornings" are different claims.
+ */
+const CATCH_UP_DAYS = 7
+
+/**
+ * A pause between rounds.
+ *
+ * /api/persona allows ten calls in two minutes per address. A catch-up is the
+ * one path here that can fire several in a row, and tripping that limit would
+ * end the catch-up on a 429 that reads to the office as a broken scan.
+ */
+const CATCH_UP_GAP_MS = 1_500
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => window.setTimeout(r, ms))
+
+/** One request's worth of sources, split the way the endpoint wants them. */
+interface SourceWindow {
+  portals: string[]
+  customUrls: string[]
+}
+
+/**
+ * Cut the desk's sources into the slices one request can actually read.
+ *
+ * `scanPortals` builds its target list as the mastheads followed by the pasted
+ * addresses and then takes the first eight, so the order here has to match or
+ * the windows would overlap in a way neither side agrees on.
+ */
+export function sourceWindows(portals: string[], customUrls: string[]): SourceWindow[] {
+  const combined = [
+    ...portals.map((value) => ({ custom: false, value })),
+    ...customUrls.map((value) => ({ custom: true, value })),
+  ]
+  const out: SourceWindow[] = []
+  for (let i = 0; i < combined.length; i += SOURCES_PER_REQUEST) {
+    const slice = combined.slice(i, i + SOURCES_PER_REQUEST)
+    out.push({
+      portals: slice.filter((s) => !s.custom).map((s) => s.value),
+      customUrls: slice.filter((s) => s.custom).map((s) => s.value),
+    })
+  }
+  return out.length > 0 ? out : [{ portals, customUrls }]
+}
+
+/**
+ * How many rounds a catch-up runs, given how long the desk was shut.
+ *
+ * One per missed morning, capped at a week, and then capped again at the number
+ * of distinct source windows. That second cap is the honest one and it is worth
+ * being blunt about: there is no date parameter anywhere in the scan. Asking
+ * /api/persona for the same eight index pages four times returns the same four
+ * answers, so "four rounds for four missed mornings" would be four identical
+ * fetches dressed up as four days of recovery. What another round genuinely
+ * recovers is the sources the previous round never reached.
+ */
+export function catchUpRounds(missed: number, windows: number): number {
+  const wanted = Math.max(1, Math.min(missed, CATCH_UP_DAYS))
+  return Math.min(wanted, Math.max(1, windows))
+}
 
 /**
  * How long a reading of the local accounts stays fresh.
@@ -96,6 +214,23 @@ const INFLUENCER_FRESH_MS = 12 * 60 * 60 * 1000
  */
 const MAX_ACCOUNTS_PER_RUN = 6
 
+/**
+ * What a catch-up is working through, while it is working through it.
+ *
+ * Non-null only during a catch-up, so a caller can tell "reading this morning's
+ * papers" from "reading back over the four mornings you were away" without
+ * inspecting counts. The lasting account of what happened goes into `notes`,
+ * which survives the run; this does not.
+ */
+export interface CatchUpState {
+  /** Mornings that passed with no scan. Can exceed the seven-day cap. */
+  missed: number
+  /** How many rounds this catch-up will run. See `catchUpRounds`. */
+  rounds: number
+  /** Which round is in flight, counting from one. */
+  round: number
+}
+
 export interface ScanState {
   /** The local accounts are being read right now. */
   influencersBusy: boolean
@@ -109,6 +244,8 @@ export interface ScanState {
   /** Per-masthead outcome from the last run, so a dead source is visible. */
   sources: { portal: string; found: number; error: string | null }[]
   notes: string[]
+  /** Set while the desk is reading back over mornings it was closed for. */
+  catchUp: CatchUpState | null
 }
 
 interface FindResponse {
@@ -134,6 +271,7 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
   const [error, setError] = useState<string | null>(null)
   const [sources, setSources] = useState<ScanState['sources']>([])
   const [notes, setNotes] = useState<string[]>([])
+  const [catchUp, setCatchUp] = useState<CatchUpState | null>(null)
 
   // One run at a time, and never a second on a re-render. React will mount this
   // twice in development, and two concurrent scans of eight mastheads is both
@@ -163,6 +301,24 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
     return null
   })()
 
+  /**
+   * Read the papers, catching up on any mornings the desk was closed for.
+   *
+   * A single round is the ordinary morning and behaves exactly as it always
+   * did. More than one is a catch-up, and a catch-up differs in two ways that
+   * both matter to an office coming back from a long weekend.
+   *
+   * It reads EVERY source rather than the first eight. The scanner takes eight
+   * per request and drops the rest unread, so a desk with twelve sources has
+   * four it has never been read from; a desk that has been away has the time to
+   * spend on the other windows and nothing else it needs that time for.
+   *
+   * And it ADDS to the unread pile instead of replacing it. Replacing was the
+   * actual mechanism by which four days went missing: whatever Friday found and
+   * nobody read was overwritten by Tuesday's scan, so the stories did not go
+   * unread, they went un-listed. The ordinary daily scan still replaces, which
+   * is right for a desk somebody opens every morning.
+   */
   const run = useCallback(
     (force = false) => {
       if (running.current) return
@@ -179,93 +335,184 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
       // Today's reading already exists unless we are past a boundary it predates.
       if (!force && scanIsCurrent(current.lastScanAt ?? null)) return
 
+      const missed = missedMornings(current.lastScanAt ?? null)
+      const windows = sourceWindows(portals, custom)
+      const rounds = catchUpRounds(missed, windows.length)
+      // More than one missed morning is a catch-up even when the desk's sources
+      // happen to fit in one window, because the reader still needs telling
+      // that four mornings went by and what a scan can and cannot recover.
+      const catching = missed > 1
+
+      /*
+        The person and their patch — never the party.
+
+        Sending the whole watch list returned twenty-four stories for a Gadwal
+        MLA, nineteen of them national BJP items that mentioned her nowhere. A
+        member shown "24 stories mention you" above a list where none do learns
+        within a week that the number means nothing, and then misses the morning
+        it is real.
+      */
+      const aliases = planTerms(
+        person,
+        resolvePlace({
+          state: desk.state,
+          district: desk.district,
+          constituency: desk.constituency,
+        }),
+      ).persona.filter((t) => t !== person.name)
+
       running.current = true
       setBusy(true)
       setError(null)
+      setCatchUp(catching ? { missed, rounds, round: 1 } : null)
 
       void (async () => {
-        try {
-          const res = await fetchWithTimeout('/api/persona', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              action: 'find',
-              persona: person.name,
-              /*
-                The person and their patch — never the party.
+        const collected: { url: string; title: string; portal: string }[] = []
+        const seen = new Set<string>()
+        const readSources: ScanState['sources'] = []
+        const said: string[] = []
+        let failure: string | null = null
+        let completed = 0
 
-                Sending the whole watch list returned twenty-four stories for a
-                Gadwal MLA, nineteen of them national BJP items that mentioned
-                her nowhere. A member shown "24 stories mention you" above a
-                list where none do learns within a week that the number means
-                nothing, and then misses the morning it is real.
-              */
-              aliases: planTerms(
-                person,
-                resolvePlace({
-                  state: desk.state,
-                  district: desk.district,
-                  constituency: desk.constituency,
-                }),
-              ).persona.filter((t) => t !== person.name),
-              portals,
-              customUrls: custom,
-              state: desk.state ?? null,
-              // The district, not the seat — publishers issue editions by
-              // district and the seat finds no district route.
-              city: desk.district ?? desk.constituency ?? null,
-            }),
-          })
+        for (let round = 0; round < rounds; round++) {
+          // Not named `window`: this runs in a browser, and shadowing the
+          // global inside a loop that also schedules a timer is a trap laid for
+          // whoever edits it next.
+          const slice = windows[round]
+          if (!slice) break
 
-          const payload = (await res.json().catch(() => null)) as FindResponse | null
+          if (round > 0) {
+            setCatchUp({ missed, rounds, round: round + 1 })
+            await sleep(CATCH_UP_GAP_MS)
+          }
 
-          if (!res.ok) {
-            setError(
-              payload?.error ??
+          try {
+            const res = await fetchWithTimeout('/api/persona', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                action: 'find',
+                persona: person.name,
+                aliases,
+                portals: slice.portals,
+                customUrls: slice.customUrls,
+                /*
+                  The state goes only with a window that has mastheads in it.
+
+                  findPersonaMentions treats an empty portal list plus a state as
+                  "read everything published for that state", which is a sensible
+                  default for a desk that chose nothing and a trap here: a window
+                  made entirely of pasted tag pages would quietly become a second
+                  full read of the state's papers, and the round meant to reach
+                  the sources nobody has read would re-read the first eight.
+                */
+                state: slice.portals.length > 0 ? (desk.state ?? null) : null,
+                // The district, not the seat — publishers issue editions by
+                // district and the seat finds no district route.
+                city: desk.district ?? desk.constituency ?? null,
+              }),
+            })
+
+            const payload = (await res.json().catch(() => null)) as FindResponse | null
+
+            if (!res.ok) {
+              const message =
+                payload?.error ??
                 (res.status === 429
                   ? 'The papers have been read several times in a row. The next scan will run in a few minutes.'
-                  : 'The mastheads could not be read just now.'),
-            )
+                  : 'The mastheads could not be read just now.')
+              // A first round that fails is a failed scan and says so. A later
+              // one that fails still leaves real stories on the screen, so it
+              // becomes a note about what is missing rather than an error that
+              // hides what was found.
+              if (round === 0) failure = message
+              else said.push(`Round ${round + 1} of the catch-up stopped: ${message}`)
+              break
+            }
+
+            for (const raw of payload?.candidates ?? []) {
+              const url = text(raw.url)
+              const title = text(raw.title)
+              if (!url || !title || seen.has(url)) continue
+              seen.add(url)
+              collected.push({ url, title, portal: text(raw.portal) ?? 'unknown' })
+            }
+
+            for (const s of payload?.sources ?? []) {
+              readSources.push({
+                portal: text(s.portal) ?? 'unknown',
+                found: typeof s.found === 'number' ? s.found : 0,
+                error: text(s.error),
+              })
+            }
+
+            for (const note of payload?.notes ?? []) {
+              const line = text(note)
+              if (line && !said.includes(line)) said.push(line)
+            }
+
+            completed++
+          } catch {
+            if (round === 0) failure = 'Could not reach the server, so the papers were not read.'
+            else said.push(`Round ${round + 1} of the catch-up could not reach the server.`)
+            break
+          }
+        }
+
+        try {
+          if (failure) {
+            setError(failure)
             return
           }
 
-          const candidates = (payload?.candidates ?? [])
-            .map((c) => ({
-              url: text(c.url),
-              title: text(c.title),
-              portal: text(c.portal) ?? 'unknown',
-            }))
-            .filter(
-              (c): c is { url: string; title: string; portal: string } =>
-                c.url !== null && c.title !== null,
+          if (catching) {
+            said.unshift(
+              missed > CATCH_UP_DAYS
+                ? `The papers were last read ${missed} mornings ago. This catch-up covers the most recent ${CATCH_UP_DAYS} of those mornings. The ones before that were never read and cannot be read now.`
+                : `The papers were last read ${missed} mornings ago, so the desk read back over them on opening.`,
             )
-            .slice(0, MAX_CANDIDATES)
+            said.push(
+              rounds === 1
+                ? 'This desk has few enough sources to be read in one round, so one round is all it took.'
+                : completed === rounds
+                  ? `Every source on the list was read, across ${completed} rounds rather than only the first ${SOURCES_PER_REQUEST}.`
+                  : `${completed} of ${rounds} rounds finished, so some of this desk's sources were not read at all this time.`,
+            )
+            said.push(
+              'A masthead carries what is on its page now. Stories that have already rolled off it are not recoverable by a catch-up, so this is what is still published rather than everything that was published.',
+            )
+          }
 
-          setSources(
-            (payload?.sources ?? []).map((s) => ({
-              portal: text(s.portal) ?? 'unknown',
-              found: typeof s.found === 'number' ? s.found : 0,
-              error: text(s.error),
-            })),
-          )
-          setNotes((payload?.notes ?? []).map(text).filter((n): n is string => n !== null))
+          setSources(readSources)
+          setNotes(said)
 
           update((prev) => {
             // Anything already read keeps its reading. Re-finding a story the
             // office has already had analysed must not push it back into the
             // "unread" pile every morning.
             const read = new Set(prev.personaMentions.map((m) => m.url))
+            const fresh = collected.filter((c) => !read.has(c.url))
+            // A catch-up keeps what earlier mornings found underneath what this
+            // one found; an ordinary morning replaces, so a desk opened daily
+            // does not accumulate a fortnight of unread headlines.
+            const kept = catching
+              ? [
+                  ...fresh,
+                  ...prev.newsCandidates.filter(
+                    (c) => !read.has(c.url) && !fresh.some((f) => f.url === c.url),
+                  ),
+                ]
+              : fresh
             return {
               ...prev,
-              newsCandidates: candidates.filter((c) => !read.has(c.url)),
+              newsCandidates: kept.slice(0, MAX_CANDIDATES),
               lastScanAt: new Date().toISOString(),
             }
           })
-        } catch {
-          setError('Could not reach the server, so the papers were not read.')
         } finally {
           running.current = false
           setBusy(false)
+          setCatchUp(null)
         }
       })()
     },
@@ -579,7 +826,12 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
      * effect that scheduled it is not re-entered. A desk left open for several
      * days therefore refreshes on the first morning and then waits to be
      * touched, which is the honest limit of what a page can promise about a
-     * clock it does not own.
+     * clock it does not own. The catch-up in `run` is what covers the mornings
+     * after that: the next time somebody touches the tab, the missed boundaries
+     * are counted and read back over. A browser tab is not a scheduler, and the
+     * only thing that makes this desk scan while nobody is looking at it is the
+     * server-side daily scan in netlify/functions/daily-scan.mts, which an
+     * office has to opt into by name.
      */
     const nextBoundary = new Date(lastScanBoundary())
     nextBoundary.setDate(nextBoundary.getDate() + 1)
@@ -605,5 +857,5 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
     seedNewsSources,
   ])
 
-  return { busy, influencersBusy, lastAt, blocked, error, sources, notes, run }
+  return { busy, influencersBusy, lastAt, blocked, error, sources, notes, catchUp, run }
 }

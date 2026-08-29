@@ -23,12 +23,34 @@ export interface Region {
   cities: string[]
   /** True when this is a full district roll rather than a sample of cities. */
   complete: boolean
+  /**
+   * The languages this state's OWN press publishes in.
+   *
+   * Not "languages read here", which is a wider and less useful list. Punjab
+   * reads four Hindi dailies and its own press is Punjabi; the distinction is
+   * the whole point of the field.
+   *
+   * Added because "not English" had been standing in for "the local language"
+   * when a desk's opening set was picked, and the two are not the same thing.
+   * Four Hindi dailies publish a Maharashtra section and no Marathi masthead
+   * publishes a section path at all, so a Pune office was handed Amar Ujala,
+   * Dainik Bhaskar, Hindustan and Dainik Jagran ahead of Loksatta and Sakal.
+   * Every one of those is a real newspaper and not one is what Pune reads over
+   * breakfast. The Hindi titles are still offered; they are ranked as what they
+   * are, which is outside press with a page for the state.
+   *
+   * Only languages `PortalLanguage` can name are listed, so Goa carries Marathi
+   * and not Konkani. That is a gap in the union rather than a claim about Goa,
+   * and it costs nothing today because no Konkani masthead is on file.
+   */
+  languages: PortalLanguage[]
 }
 
 export const REGIONS: Region[] = [
   {
     state: 'Andhra Pradesh',
     complete: true,
+    languages: ['Telugu'],
     cities: [
       'Srikakulam', 'Parvathipuram Manyam', 'Vizianagaram', 'Visakhapatnam', 'Anakapalli',
       'Alluri Sitharama Raju', 'Kakinada', 'Konaseema', 'East Godavari', 'West Godavari',
@@ -40,6 +62,7 @@ export const REGIONS: Region[] = [
   {
     state: 'Telangana',
     complete: true,
+    languages: ['Telugu'],
     cities: [
       'Hyderabad', 'Rangareddy', 'Medchal-Malkajgiri', 'Sangareddy', 'Vikarabad', 'Siddipet',
       'Medak', 'Kamareddy', 'Nizamabad', 'Jagtial', 'Rajanna Sircilla', 'Karimnagar',
@@ -49,32 +72,49 @@ export const REGIONS: Region[] = [
       'Narayanpet', 'Adilabad', 'Nirmal', 'Mancherial', 'Komaram Bheem Asifabad',
     ],
   },
-  { state: 'Karnataka', complete: false, cities: ['Bengaluru', 'Mysuru', 'Hubballi', 'Mangaluru', 'Belagavi', 'Kalaburagi', 'Ballari', 'Davanagere', 'Shivamogga', 'Tumakuru'] },
-  { state: 'Tamil Nadu', complete: false, cities: ['Chennai', 'Coimbatore', 'Madurai', 'Tiruchirappalli', 'Salem', 'Tirunelveli', 'Erode', 'Vellore', 'Thoothukudi', 'Thanjavur'] },
-  { state: 'Maharashtra', complete: false, cities: ['Mumbai', 'Pune', 'Nagpur', 'Nashik', 'Aurangabad', 'Solapur', 'Kolhapur', 'Amravati', 'Thane', 'Navi Mumbai'] },
-  { state: 'Kerala', complete: false, cities: ['Thiruvananthapuram', 'Kochi', 'Kozhikode', 'Thrissur', 'Kollam', 'Kannur', 'Alappuzha', 'Palakkad'] },
-  { state: 'Odisha', complete: false, cities: ['Bhubaneswar', 'Cuttack', 'Rourkela', 'Berhampur', 'Sambalpur', 'Puri'] },
-  { state: 'Delhi', complete: false, cities: ['New Delhi', 'North Delhi', 'South Delhi', 'East Delhi', 'West Delhi'] },
-  { state: 'Uttar Pradesh', complete: false, cities: ['Lucknow', 'Kanpur', 'Varanasi', 'Prayagraj', 'Agra', 'Meerut', 'Noida', 'Ghaziabad', 'Gorakhpur'] },
-  { state: 'West Bengal', complete: false, cities: ['Kolkata', 'Howrah', 'Siliguri', 'Durgapur', 'Asansol'] },
-  { state: 'Gujarat', complete: false, cities: ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Bhavnagar', 'Gandhinagar'] },
-  { state: 'Rajasthan', complete: false, cities: ['Jaipur', 'Jodhpur', 'Udaipur', 'Kota', 'Ajmer', 'Bikaner'] },
-  { state: 'Madhya Pradesh', complete: false, cities: ['Bhopal', 'Indore', 'Jabalpur', 'Gwalior', 'Ujjain'] },
-  { state: 'Bihar', complete: false, cities: ['Patna', 'Gaya', 'Bhagalpur', 'Muzaffarpur', 'Darbhanga'] },
-  { state: 'Punjab', complete: false, cities: ['Ludhiana', 'Amritsar', 'Jalandhar', 'Patiala', 'Mohali'] },
-  { state: 'Haryana', complete: false, cities: ['Gurugram', 'Faridabad', 'Panipat', 'Ambala', 'Hisar'] },
-  { state: 'Assam', complete: false, cities: ['Guwahati', 'Dibrugarh', 'Silchar', 'Jorhat'] },
-  { state: 'Jharkhand', complete: false, cities: ['Ranchi', 'Jamshedpur', 'Dhanbad', 'Bokaro'] },
-  { state: 'Chhattisgarh', complete: false, cities: ['Raipur', 'Bhilai', 'Bilaspur', 'Korba'] },
-  { state: 'Uttarakhand', complete: false, cities: ['Dehradun', 'Haridwar', 'Haldwani', 'Roorkee'] },
-  { state: 'Himachal Pradesh', complete: false, cities: ['Shimla', 'Dharamshala', 'Mandi', 'Solan'] },
-  { state: 'Goa', complete: false, cities: ['Panaji', 'Margao', 'Vasco da Gama'] },
+  { state: 'Karnataka', complete: false, languages: ['Kannada'], cities: ['Bengaluru', 'Mysuru', 'Hubballi', 'Mangaluru', 'Belagavi', 'Kalaburagi', 'Ballari', 'Davanagere', 'Shivamogga', 'Tumakuru'] },
+  { state: 'Tamil Nadu', complete: false, languages: ['Tamil'], cities: ['Chennai', 'Coimbatore', 'Madurai', 'Tiruchirappalli', 'Salem', 'Tirunelveli', 'Erode', 'Vellore', 'Thoothukudi', 'Thanjavur'] },
+  { state: 'Maharashtra', complete: false, languages: ['Marathi'], cities: ['Mumbai', 'Pune', 'Nagpur', 'Nashik', 'Aurangabad', 'Solapur', 'Kolhapur', 'Amravati', 'Thane', 'Navi Mumbai'] },
+  { state: 'Kerala', complete: false, languages: ['Malayalam'], cities: ['Thiruvananthapuram', 'Kochi', 'Kozhikode', 'Thrissur', 'Kollam', 'Kannur', 'Alappuzha', 'Palakkad'] },
+  { state: 'Odisha', complete: false, languages: ['Odia'], cities: ['Bhubaneswar', 'Cuttack', 'Rourkela', 'Berhampur', 'Sambalpur', 'Puri'] },
+  { state: 'Delhi', complete: false, languages: ['Hindi'], cities: ['New Delhi', 'North Delhi', 'South Delhi', 'East Delhi', 'West Delhi'] },
+  { state: 'Uttar Pradesh', complete: false, languages: ['Hindi'], cities: ['Lucknow', 'Kanpur', 'Varanasi', 'Prayagraj', 'Agra', 'Meerut', 'Noida', 'Ghaziabad', 'Gorakhpur'] },
+  { state: 'West Bengal', complete: false, languages: ['Bengali'], cities: ['Kolkata', 'Howrah', 'Siliguri', 'Durgapur', 'Asansol'] },
+  { state: 'Gujarat', complete: false, languages: ['Gujarati'], cities: ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Bhavnagar', 'Gandhinagar'] },
+  { state: 'Rajasthan', complete: false, languages: ['Hindi'], cities: ['Jaipur', 'Jodhpur', 'Udaipur', 'Kota', 'Ajmer', 'Bikaner'] },
+  { state: 'Madhya Pradesh', complete: false, languages: ['Hindi'], cities: ['Bhopal', 'Indore', 'Jabalpur', 'Gwalior', 'Ujjain'] },
+  { state: 'Bihar', complete: false, languages: ['Hindi'], cities: ['Patna', 'Gaya', 'Bhagalpur', 'Muzaffarpur', 'Darbhanga'] },
+  { state: 'Punjab', complete: false, languages: ['Punjabi'], cities: ['Ludhiana', 'Amritsar', 'Jalandhar', 'Patiala', 'Mohali'] },
+  { state: 'Haryana', complete: false, languages: ['Hindi'], cities: ['Gurugram', 'Faridabad', 'Panipat', 'Ambala', 'Hisar'] },
+  { state: 'Assam', complete: false, languages: ['Assamese'], cities: ['Guwahati', 'Dibrugarh', 'Silchar', 'Jorhat'] },
+  { state: 'Jharkhand', complete: false, languages: ['Hindi'], cities: ['Ranchi', 'Jamshedpur', 'Dhanbad', 'Bokaro'] },
+  { state: 'Chhattisgarh', complete: false, languages: ['Hindi'], cities: ['Raipur', 'Bhilai', 'Bilaspur', 'Korba'] },
+  { state: 'Uttarakhand', complete: false, languages: ['Hindi'], cities: ['Dehradun', 'Haridwar', 'Haldwani', 'Roorkee'] },
+  { state: 'Himachal Pradesh', complete: false, languages: ['Hindi'], cities: ['Shimla', 'Dharamshala', 'Mandi', 'Solan'] },
+  // Konkani is the state language and no Konkani masthead is on file, so this
+  // names the other language a Goan desk reads rather than leaving it empty.
+  { state: 'Goa', complete: false, languages: ['Marathi'], cities: ['Panaji', 'Margao', 'Vasco da Gama'] },
 ]
 
 export const ALL_STATES: string[] = REGIONS.map((r) => r.state)
 
 export function citiesOf(state: string): string[] {
   return REGIONS.find((r) => r.state === state)?.cities ?? []
+}
+
+/**
+ * The languages a desk in this state reads, or an empty list for a place the
+ * region roll does not carry.
+ *
+ * Empty is the honest answer for free text: the pickers all accept a state
+ * nobody has listed here, and guessing a language from a name we do not
+ * recognise would be worse than saying nothing. A caller that gets nothing back
+ * should treat every masthead as non-local rather than treat every masthead as
+ * local.
+ */
+export function languagesOf(state: string | null): PortalLanguage[] {
+  if (!state) return []
+  return REGIONS.find((r) => r.state === state)?.languages ?? []
 }
 
 export function stateOfCity(city: string): string | null {
@@ -106,12 +146,36 @@ export type PortalLanguage =
   | 'Punjabi'
   | 'Assamese'
 
+/**
+ * What sort of publisher this is, where it changes how a desk should read it.
+ *
+ * Absent means an ordinary newsroom, which is what all but a handful of these
+ * are, so the field only appears where the answer is not "a newspaper or a
+ * channel".
+ *
+ * The two named kinds behave differently enough to be worth separating. A wire
+ * agency files everything for everybody: PTI's index is the whole country's
+ * news, so it is a fine safety net and a poor first choice for an office that
+ * has four papers printed in its own district. A fact-check desk is narrower
+ * still: it publishes only when a claim is already circulating, which is
+ * exactly what a member's office wants on the day a rumour starts and nothing
+ * at all on the other three hundred days.
+ *
+ * `planPortals` reads this to keep both out of a desk's opening set unless
+ * there is room after the local press. Without the field they sort as ordinary
+ * national mastheads and quietly take slots from the papers that carry mandal
+ * news.
+ */
+export type PortalKind = 'agency' | 'factcheck'
+
 export interface NewsPortal {
   label: string
   host: string
   /** The page Signal reads to find today's stories. */
   indexUrl: string
   language: PortalLanguage
+  /** A wire agency or a fact-check desk. Absent for an ordinary newsroom. */
+  kind?: PortalKind
   /**
    * Which states this masthead actually covers. 'all' for national papers.
    *
@@ -131,11 +195,32 @@ export interface NewsPortal {
    * publish RSS: an open, machine-readable format the publisher maintains on
    * purpose, so it is far steadier than scraping an index whose markup changes
    * without warning, and it is a few kilobytes instead of a megabyte of
-   * homepage. Every feed named here was fetched and parsed as RSS or Atom; a
-   * masthead with no `rssUrl` is one whose feed we looked for and could not
-   * find, not one we did not try.
+   * homepage. On an entry that is not marked `unverified`, every feed named
+   * here was fetched and parsed as RSS or Atom, and a masthead with no `rssUrl`
+   * is one whose feed we looked for and could not find rather than one we did
+   * not try. On an `unverified` entry neither claim holds; see that field.
    */
   rssUrl?: string
+  /**
+   * True when nobody has fetched this masthead's index or feed from this
+   * codebase yet.
+   *
+   * The registry's older entries were each read before they were added, which
+   * is what lets the comment above promise that a missing `rssUrl` means a feed
+   * that does not exist. The batch added when the office asked for "most news
+   * portal we can" was assembled from the mastheads an Indian political desk
+   * reads, not from a crawl, so the address may be right and the exact section
+   * path may not be.
+   *
+   * Marking them is the difference between a list and a claim. A reader of this
+   * file can see which rows are evidence and which are intent; `planPortals`
+   * ranks a checked masthead above an unchecked one at equal footing, so a
+   * desk's opening set is drawn from sources known to answer; and a dead entry
+   * shows up as a named error in the scan's per-source report rather than as a
+   * quiet morning. Clear the flag on an entry once it has been fetched and seen
+   * to return stories.
+   */
+  unverified?: true
   /**
    * When a publisher slugs its sections by district, the template that builds
    * one. Signal still reads the generic index if the district page turns out to
@@ -384,13 +469,29 @@ export const PORTALS: NewsPortal[] = [
         ? `https://www.andhrajyothy.com/${teluguStateSegment(state)}`
         : null,
   },
-  /*
-   * V6 Velugu was dropped here, and the reason is worth keeping: it publishes
-   * a live RSS feed but files every article at the site root — /cm-revanth-
-   * unveils-sarvai-papanna-goud-statue-on-tank-bund — and the scanner only
-   * accepts a link two segments deep, so every read of its index found nothing
-   * at all. It belongs back on this list the day the scan reads `rssUrl`.
-   */
+  {
+    /*
+     * V6 Velugu was dropped from this list once, and it is back because both
+     * reasons it was dropped for have gone.
+     *
+     * It files every article at the site root — /cm-revanth-unveils-sarvai-
+     * papanna-goud-statue-on-tank-bund — and the scanner used to require a link
+     * two segments deep, so every read of its index found nothing at all.
+     * `looksLikeArticle` now accepts a single segment carrying four hyphens or
+     * more, which that address does. The scan also reads `rssUrl` in preference
+     * to the index, so the feed is what will actually be fetched.
+     *
+     * Scoped to Telangana alone rather than both Telugu states: this is a
+     * Telangana channel, and an Andhra Pradesh desk offered it would be reading
+     * somebody else's assembly.
+     */
+    label: 'V6 Velugu',
+    host: 'v6velugu.com',
+    indexUrl: 'https://www.v6velugu.com/',
+    language: 'Telugu',
+    states: ['Telangana'],
+    rssUrl: 'https://www.v6velugu.com/feed/',
+  },
   {
     label: 'NTV Telugu',
     host: 'ntvtelugu.com',
@@ -404,7 +505,13 @@ export const PORTALS: NewsPortal[] = [
     host: 'ntnews.com',
     indexUrl: 'https://www.ntnews.com/',
     language: 'Telugu',
-    states: TELUGU_STATES,
+    // Both Telugu states before, which was never true: this paper prints no
+    // Andhra Pradesh edition, and the claim cost it as much as it cost an
+    // Andhra desk. A masthead serving one state has more of every page about
+    // that state, and the planner scores it accordingly, so declaring two
+    // states pushed the largest Telangana daily below a channel that publishes
+    // for both.
+    states: ['Telangana'],
     rssUrl: 'https://www.ntnews.com/feed',
   },
   {
@@ -492,6 +599,91 @@ export const PORTALS: NewsPortal[] = [
       Telangana: 'https://telugu.news18.com/commonfeeds/v1/tel/rss/telangana.xml',
     }),
   },
+  /*
+   * The rest of the Telugu press, added when the office said "we need to track
+   * news channel very perfectly bcs they post most of the things, so keep most
+   * news portal we can".
+   *
+   * Every entry below carries `unverified` because it was written from the
+   * mastheads a Telangana desk reads rather than from a crawl. Where the exact
+   * section path was not certain the site root is used, which is the address
+   * least likely to move; a wrong section would 404 and cost the whole source,
+   * while a root page costs only precision.
+   *
+   * The same caution decides which of these declare an `rssUrl`. The scan reads
+   * the feed INSTEAD of the index wherever one is named, and a feed that
+   * answers 404 returns nothing at all rather than falling back, so a feed is
+   * only claimed here where the publisher's platform makes the address
+   * predictable: WordPress at /feed/, and the ABP language sites, whose three
+   * verified siblings in this file all serve /news/feed.
+   */
+  {
+    label: 'Nava Telangana',
+    host: 'navatelangana.com',
+    indexUrl: 'https://www.navatelangana.com/',
+    language: 'Telugu',
+    // The Telangana daily of the CPI(M) after the bifurcation; Prajasakti
+    // below is the masthead that kept publishing for Andhra Pradesh. They are
+    // separate papers, not editions of one, so they are scoped separately.
+    states: ['Telangana'],
+  },
+  {
+    label: 'Mana Telangana',
+    host: 'manatelangana.news',
+    indexUrl: 'https://www.manatelangana.news/',
+    language: 'Telugu',
+    states: ['Telangana'],
+  },
+  {
+    label: 'Prajasakti',
+    host: 'prajasakti.com',
+    indexUrl: 'https://prajasakti.com/',
+    language: 'Telugu',
+    states: TELUGU_STATES,
+  },
+  {
+    label: 'Visalaandhra',
+    host: 'visalaandhra.com',
+    indexUrl: 'https://www.visalaandhra.com/',
+    language: 'Telugu',
+    states: ['Andhra Pradesh'],
+  },
+  {
+    label: 'ABN Andhra Jyothy',
+    host: 'abnandhrajyothy.com',
+    indexUrl: 'https://www.abnandhrajyothy.com/',
+    language: 'Telugu',
+    // The channel, which is a separate newsroom from the andhrajyothy.com
+    // paper above and files different stories. Both are listed because an
+    // office watching one is not watching the other.
+    states: TELUGU_STATES,
+  },
+  {
+    label: 'ABP Desam',
+    host: 'telugu.abplive.com',
+    indexUrl: 'https://telugu.abplive.com/',
+    language: 'Telugu',
+    states: TELUGU_STATES,
+    rssUrl: 'https://telugu.abplive.com/news/feed',
+  },
+  {
+    label: 'Zee Telugu News',
+    // The same host as the Hindi and Bengali Zee entries, which is how this
+    // publisher files its languages. Two rows may share a host; the scanner
+    // compares hosts to decide whether a link belongs to the page it came
+    // from, and all three answer to this one.
+    host: 'zeenews.india.com',
+    indexUrl: 'https://zeenews.india.com/telugu',
+    language: 'Telugu',
+    states: TELUGU_STATES,
+  },
+  {
+    label: 'Tolivelugu',
+    host: 'tolivelugu.com',
+    indexUrl: 'https://www.tolivelugu.com/',
+    language: 'Telugu',
+    states: TELUGU_STATES,
+  },
   {
     label: 'The Hans India',
     host: 'thehansindia.com',
@@ -506,6 +698,65 @@ export const PORTALS: NewsPortal[] = [
       'Andhra Pradesh': 'https://www.thehansindia.com/rss/andhra-pradesh',
       Telangana: 'https://www.thehansindia.com/rss/telangana',
     }),
+  },
+
+  /*
+   * English mastheads published for the two Telugu states.
+   *
+   * These are not national papers with a southern section. They are Hyderabad
+   * and Vijayawada newsrooms whose whole output is this patch, which makes them
+   * worth more to a Mahabubnagar office than a Delhi front page, and worth less
+   * than the Telugu press, which is what carries mandal-level news.
+   *
+   * Telangana Today is the pointed omission this batch fixes. `looksLikeArticle`
+   * in the scanner was rewritten around it — its tag page for a sitting MP
+   * carried twenty-eight stories about her and the scanner rejected every one —
+   * and the masthead itself was still not on this list, so no desk was reading
+   * it in the first place.
+   */
+  {
+    label: 'Telangana Today',
+    host: 'telanganatoday.com',
+    indexUrl: 'https://telanganatoday.com/',
+    language: 'English',
+    states: ['Telangana'],
+    rssUrl: 'https://telanganatoday.com/feed',
+  },
+  {
+    label: 'The Siasat Daily',
+    host: 'siasat.com',
+    indexUrl: 'https://www.siasat.com/',
+    language: 'English',
+    // Hyderabad's own English daily. Scoped to Telangana rather than both
+    // Telugu states because its reporting is the city and the state around it.
+    states: ['Telangana'],
+    rssUrl: 'https://www.siasat.com/feed/',
+  },
+  {
+    label: 'Sakshi Post',
+    host: 'sakshipost.com',
+    indexUrl: 'https://www.sakshipost.com/',
+    language: 'English',
+    states: TELUGU_STATES,
+  },
+  {
+    label: 'Gulte',
+    host: 'gulte.com',
+    indexUrl: 'https://www.gulte.com/',
+    language: 'English',
+    states: TELUGU_STATES,
+    rssUrl: 'https://www.gulte.com/feed/',
+  },
+  {
+    label: 'The News Minute',
+    host: 'thenewsminute.com',
+    indexUrl: 'https://www.thenewsminute.com/',
+    language: 'English',
+    // The southern five, the same footprint as The New Indian Express below.
+    states: SOUTHERN_STATES,
+    // Quintype serves /stories.rss, which is the address fourteen verified
+    // mastheads in this file already answer on.
+    rssUrl: 'https://www.thenewsminute.com/stories.rss',
   },
 
   /* ── Hindi ──────────────────────────────────────────────────────────────── */
@@ -1232,6 +1483,154 @@ export const PORTALS: NewsPortal[] = [
       SOUTHERN_STATES.includes(state)
         ? `https://www.deccanchronicle.com/southern-states/${slug(state)}`
         : null,
+  },
+  /*
+   * The rest of the national English press, added in the same batch and under
+   * the same caution: `unverified` on every row, the site root or a long-lived
+   * section for the index, and an `rssUrl` only where the publisher's platform
+   * makes the address predictable.
+   *
+   * None of these declares a `statePath`. Several do publish state pages, but
+   * an unchecked state path is worse than no state path: `indexUrlFor` would
+   * prefer it over the general index, and a 404 there costs the whole source
+   * for that scan. The general index is the honest fallback until somebody
+   * fetches the sections.
+   */
+  {
+    label: 'India Today',
+    host: 'indiatoday.in',
+    indexUrl: 'https://www.indiatoday.in/india',
+    language: 'English',
+    states: 'all',
+  },
+  {
+    label: 'The Quint',
+    host: 'thequint.com',
+    indexUrl: 'https://www.thequint.com/news/india',
+    language: 'English',
+    states: 'all',
+    rssUrl: 'https://www.thequint.com/stories.rss',
+  },
+  {
+    label: 'The Wire',
+    host: 'thewire.in',
+    indexUrl: 'https://thewire.in/politics',
+    // The index is a JavaScript shell with zero anchors for a server; the CMS
+    // feed is the real door. Verified live: 126 items of XML.
+    rssUrl: 'https://cms.thewire.in/feed',
+    language: 'English',
+    states: 'all',
+  },
+  {
+    label: 'Scroll.in',
+    host: 'scroll.in',
+    indexUrl: 'https://scroll.in/',
+    language: 'English',
+    states: 'all',
+  },
+  {
+    label: 'Firstpost',
+    host: 'firstpost.com',
+    indexUrl: 'https://www.firstpost.com/india/',
+    language: 'English',
+    states: 'all',
+  },
+  {
+    label: 'The Federal',
+    host: 'thefederal.com',
+    indexUrl: 'https://thefederal.com/',
+    language: 'English',
+    states: 'all',
+  },
+  {
+    label: 'The Economic Times',
+    host: 'economictimes.indiatimes.com',
+    indexUrl: 'https://economictimes.indiatimes.com/news/india',
+    language: 'English',
+    states: 'all',
+    // The same publisher and the same feed path as the verified Times of India
+    // entry above, on that group's other masthead.
+    rssUrl: 'https://economictimes.indiatimes.com/rssfeedstopstories.cms',
+  },
+  {
+    label: 'Business Standard',
+    host: 'business-standard.com',
+    indexUrl: 'https://www.business-standard.com/india-news',
+    language: 'English',
+    states: 'all',
+  },
+  {
+    label: 'Mint',
+    host: 'livemint.com',
+    indexUrl: 'https://www.livemint.com/politics',
+    language: 'English',
+    states: 'all',
+  },
+
+  /* ── Wire services and fact-checkers ────────────────────────────────────── */
+  /*
+   * Two kinds of source a member's office needs and should not open the morning
+   * with, which is why they carry `kind` and why `planPortals` gives them the
+   * last slot rather than an early one.
+   *
+   * A wire agency is the floor under everything else: when a story about the
+   * member breaks nationally it is on the wire before it is in any paper, and
+   * the wire files it whether or not a masthead the desk follows picks it up.
+   *
+   * A fact-check desk answers a different question entirely. The grievance
+   * record already carries a `fake` field, and the office's real need is to
+   * know whether a claim now circulating about the member has been ruled on by
+   * somebody whose job that is. These four publish nothing on a quiet week and
+   * are the first thing to read on a bad one.
+   *
+   * All are marked national because that is what they are. The consequence
+   * worth knowing: the persona tracker adds every `states: 'all'` masthead
+   * underneath a desk's own choices, so these lengthen that list.
+   */
+  {
+    label: 'ANI',
+    host: 'aninews.in',
+    indexUrl: 'https://www.aninews.in/category/national/general-news/',
+    language: 'English',
+    kind: 'agency',
+    states: 'all',
+  },
+  {
+    label: 'Alt News',
+    host: 'altnews.in',
+    indexUrl: 'https://www.altnews.in/',
+    language: 'English',
+    kind: 'factcheck',
+    states: 'all',
+    rssUrl: 'https://www.altnews.in/feed/',
+  },
+  {
+    label: 'BOOM',
+    host: 'boomlive.in',
+    indexUrl: 'https://www.boomlive.in/fact-check',
+    language: 'English',
+    kind: 'factcheck',
+    states: 'all',
+  },
+  {
+    label: 'Factly',
+    host: 'factly.in',
+    indexUrl: 'https://factly.in/',
+    language: 'English',
+    kind: 'factcheck',
+    states: 'all',
+    rssUrl: 'https://factly.in/feed/',
+  },
+  {
+    label: 'The Quint WebQoof',
+    // The Quint's fact-check desk, on the same host as the masthead above. It
+    // is a separate row because the two answer different questions and a desk
+    // should be able to follow the fact-checks without the news feed.
+    host: 'thequint.com',
+    indexUrl: 'https://www.thequint.com/news/webqoof',
+    language: 'English',
+    kind: 'factcheck',
+    states: 'all',
   },
 ]
 

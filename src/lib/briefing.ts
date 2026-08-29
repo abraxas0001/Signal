@@ -1,10 +1,19 @@
 import type { ActionItem, GrievanceRecord, Recommendation } from '@shared/grievance'
 import { PRIORITY_RANK } from '@shared/taxonomy'
 import type { Identity } from '@shared/identity'
+import type { Report } from '@shared/types'
 import type { PersonaMention } from '@/components/Persona'
 import type { Store } from '@/lib/store'
-import { full } from '@/lib/utils'
+import { compact, full } from '@/lib/utils'
 import { listHandles, readStandingCache, type Standing, type TrackedHandle } from '@/lib/handles'
+import {
+  countVerdicts,
+  readVerdicts,
+  verdictFor,
+  worthShowing,
+  type RelevanceCounts,
+  type Verdict,
+} from '@/lib/news-relevance'
 
 /**
  * What the dashboard is actually about.
@@ -244,8 +253,29 @@ export interface Perception {
  * pages. The panel shows whichever it has, says which, and never implies the
  * other.
  */
-export function perceptionOf(mentions: PersonaMention[], since: number): Perception {
-  const recent = mentions.filter((m) => (at(m.seenAt) ?? at(m.publishedAt) ?? 0) >= since)
+export function perceptionOf(
+  mentions: PersonaMention[],
+  since: number,
+  verdicts?: Map<string, Verdict>,
+): Perception {
+  /*
+    Stories judged unrelated do not get a vote on how the press reads this
+    person, because they are not about this person. A cricket report that
+    matched the word "Aruna" was counted here as one more neutral story, and
+    six of them in a week were enough to move the headline figure and to talk
+    the panel out of saying the coverage had turned.
+
+    Coverage of the seat and of the party is still counted. It is not a
+    mistake in the way sport is: an office answers for what is written about
+    its district and its party, and a reporter will put both to the member.
+  */
+  // Opened once. Resolving it per story would parse the whole cache blob for
+  // every headline in the window.
+  const cache = verdicts ?? readVerdicts()
+  const recent = mentions.filter(
+    (m) =>
+      (at(m.seenAt) ?? at(m.publishedAt) ?? 0) >= since && worthShowing(verdictFor(m.url, cache)),
+  )
 
   let supportive = 0
   let critical = 0
@@ -458,7 +488,39 @@ export interface NewsItem {
   reason: 'suspect' | 'critical' | 'action' | 'recent'
   /** Suspected fabricated, recycled or misleading. */
   suspect: boolean
+  /**
+   * Whether the relevance check thinks this is about the member at all.
+   *
+   * Carried on every item, including the ones that pass, because a screen has
+   * to be able to say "about your seat rather than about you" and "nobody has
+   * checked this one" on the cards it shows.
+   */
+  verdict: Verdict
 }
+
+export interface NewsSelection {
+  /** Ranked, capped, and everything the rule says may be shown. */
+  shown: NewsItem[]
+  /**
+   * Judged unrelated, kept rather than dropped.
+   *
+   * A filter the reader cannot open is a filter they cannot check, and this one
+   * is a model's opinion about a headline. The office must be able to see what
+   * was taken away from them and disagree with it.
+   */
+  hidden: NewsItem[]
+  /** The arithmetic behind both lists, so a screen can report it honestly. */
+  counts: RelevanceCounts
+}
+
+/**
+ * How many hidden stories are carried for the reveal.
+ *
+ * The count reported to the reader is the true one; this only bounds how many
+ * rows are built, because a quiet week of word matching can produce dozens of
+ * sport results and none of them is worth the render cost until somebody asks.
+ */
+const HIDDEN_LIMIT = 20
 
 /**
  * Rank, then take a few.
@@ -467,12 +529,20 @@ export interface NewsItem {
  * fabricated outranks four routine mentions filed this morning, and a screen
  * that sorts by clock alone buries it. Order is: anything flagged as suspect,
  * then anything critical that needs an answer, then everything else by recency.
+ *
+ * The relevance verdict is applied before the ranking rather than after, and
+ * that ordering matters: a fabricated-looking cricket story would otherwise
+ * take the top slot on the dashboard and the lead sentence with it, on the
+ * strength of a coincidental word match.
  */
-export function newsWorthNoticing(
+export function newsSelection(
   mentions: PersonaMention[],
   since: number,
   limit = 6,
-): NewsItem[] {
+  verdicts?: Map<string, Verdict>,
+): NewsSelection {
+  const cache = verdicts ?? readVerdicts()
+
   const scored = mentions
     .filter((m) => (at(m.seenAt) ?? at(m.publishedAt) ?? 0) >= since)
     .map((mention): NewsItem & { rank: number; when: number } => {
@@ -496,17 +566,34 @@ export function newsWorthNoticing(
         mention,
         reason,
         suspect,
+        verdict: verdictFor(mention.url, cache),
         rank,
         when: at(mention.publishedAt) ?? at(mention.seenAt) ?? 0,
       }
     })
     .sort((a, b) => b.rank - a.rank || b.when - a.when)
 
-  return scored.slice(0, limit).map(({ mention, reason, suspect }) => ({
+  const strip = ({ mention, reason, suspect, verdict }: NewsItem): NewsItem => ({
     mention,
     reason,
     suspect,
-  }))
+    verdict,
+  })
+
+  return {
+    shown: scored.filter((s) => worthShowing(s.verdict)).slice(0, limit).map(strip),
+    hidden: scored.filter((s) => !worthShowing(s.verdict)).slice(0, HIDDEN_LIMIT).map(strip),
+    counts: countVerdicts(scored.map((s) => s.verdict)),
+  }
+}
+
+/** The shown half on its own, for callers that do not report the filter. */
+export function newsWorthNoticing(
+  mentions: PersonaMention[],
+  since: number,
+  limit = 6,
+): NewsItem[] {
+  return newsSelection(mentions, since, limit).shown
 }
 
 /* ── what to do ──────────────────────────────────────────────────────────── */
@@ -893,6 +980,20 @@ export interface Briefing {
   /** What the accounts with a local audience are saying. */
   voice: InfluencerVoice
   news: NewsItem[]
+  /**
+   * Stories the relevance check set aside, ranked the same way as the shown
+   * ones and capped, so the screen can offer to reveal them.
+   */
+  newsHidden: NewsItem[]
+  /**
+   * What the relevance check did to this window.
+   *
+   * Exposed so a screen can say "six stories were hidden as unrelated" instead
+   * of quietly showing fewer cards. A filter nobody is told about is
+   * indistinguishable from a scan that found nothing, and this desk has already
+   * been accused of both.
+   */
+  newsFilter: RelevanceCounts
   suspect: NewsItem[]
   suggestions: Suggestion[]
   issues: RankedIssue[]
@@ -918,10 +1019,23 @@ export function briefingOf(store: Store, now: Date = new Date()): Briefing {
   const since = now.getTime() - WINDOW_DAYS * DAY_MS
   const identity = store.identity
 
-  const news = newsWorthNoticing(store.personaMentions, since)
+  /*
+    Opened once and threaded through everything that reads news, so the whole
+    dashboard is drawn from one snapshot of the verdicts. Two reads a few
+    milliseconds apart could straddle a morning scan finishing and land a
+    screen where the news list has filtered a story the counts still describe.
+
+    Keyed to the person this desk is set up for: a verdict is a claim about one
+    named member, and a cache judged for somebody else must not be allowed to
+    hide real coverage of this one.
+  */
+  const verdicts = readVerdicts(identity?.name ?? null)
+
+  const selection = newsSelection(store.personaMentions, since, 6, verdicts)
+  const news = selection.shown
   const suspect = news.filter((n) => n.suspect)
   const mood = moodOf()
-  const perception = perceptionOf(store.personaMentions, since)
+  const perception = perceptionOf(store.personaMentions, since, verdicts)
   const voice = influencerVoiceOf(store, since)
 
   const openActions = store.actions.filter(isOpen)
@@ -965,6 +1079,8 @@ export function briefingOf(store: Store, now: Date = new Date()): Briefing {
     perception,
     voice,
     news,
+    newsHidden: selection.hidden,
+    newsFilter: selection.counts,
     suspect,
     suggestions: suggestionsFrom(
       news.map((n) => n.mention),
@@ -986,4 +1102,339 @@ export function briefingOf(store: Store, now: Date = new Date()): Briefing {
     overdue,
     windowLabel: 'Last 7 days',
   }
+}
+
+/* ── the desk's own posts, as arithmetic ─────────────────────────────────── */
+
+/** The latest follower reading a handle carries, or null when never read. */
+export function latestFollowersOf(h: TrackedHandle): number | null {
+  for (let i = h.snapshots.length - 1; i >= 0; i--) {
+    const f = h.snapshots[i]?.followers
+    if (typeof f === 'number') return f
+  }
+  return null
+}
+
+/**
+ * One of the office's own posts, flattened out of the latest snapshots.
+ *
+ * `measured` guards the difference between "nobody reacted" and "the platform
+ * published nothing": a YouTube video with views and no like count must not be
+ * averaged in as a post that got zero reactions, because that zero was never
+ * measured.
+ */
+export interface OwnPost {
+  url: string
+  platform: TrackedHandle['platform']
+  title: string | null
+  thumbnailUrl: string | null
+  likes: number | null
+  comments: number | null
+  shares: number | null
+  views: number | null
+  /** True only when the platform published at least one reaction figure. */
+  measured: boolean
+  /** Likes plus comments plus shares, over the figures actually published. */
+  reactions: number
+}
+
+export function ownPostsOf(handles: TrackedHandle[]): OwnPost[] {
+  const posts: OwnPost[] = []
+  const seen = new Set<string>()
+  for (const h of handles) {
+    const latest = h.snapshots[h.snapshots.length - 1]
+    for (const p of latest?.posts ?? []) {
+      if (seen.has(p.url)) continue
+      seen.add(p.url)
+      const likes = p.likes ?? null
+      const comments = p.comments ?? null
+      const shares = p.shares ?? null
+      posts.push({
+        url: p.url,
+        platform: h.platform,
+        title: p.title ?? null,
+        thumbnailUrl: p.thumbnailUrl ?? null,
+        likes,
+        comments,
+        shares,
+        views: p.views ?? null,
+        measured: likes != null || comments != null || shares != null,
+        reactions: (likes ?? 0) + (comments ?? 0) + (shares ?? 0),
+      })
+    }
+  }
+  return posts
+}
+
+/* ── reach by platform ───────────────────────────────────────────────────── */
+
+export interface PlatformReach {
+  platform: TrackedHandle['platform']
+  accounts: number
+  /** Latest follower readings summed. Null when no account was ever read. */
+  followers: number | null
+  /** Posts stored in the latest snapshots. */
+  posts: number
+  /**
+   * The accounts' LIFETIME post counts summed, as their own profile headers
+   * state them. Null where the platform publishes no such figure — never the
+   * stored-post count dressed up as a total.
+   */
+  postsTotal: number | null
+  /** Reactions summed over stored posts. Null when none were published. */
+  reactions: number | null
+  /** Views summed, for the platforms that publish views instead of likes. */
+  views: number | null
+}
+
+/**
+ * The desk's reach, platform by platform — real sums over the latest stored
+ * readings, and nothing else. A platform whose accounts were never read shows
+ * null followers rather than a zero, because zero followers is a finding and
+ * an unread account is not.
+ */
+export function platformReachOf(handles: TrackedHandle[]): PlatformReach[] {
+  const byPlatform = new Map<TrackedHandle['platform'], PlatformReach>()
+  for (const h of handles) {
+    const entry =
+      byPlatform.get(h.platform) ??
+      ({ platform: h.platform, accounts: 0, followers: null, posts: 0, postsTotal: null, reactions: null, views: null } as PlatformReach)
+    entry.accounts += 1
+    const f = latestFollowersOf(h)
+    if (f != null) entry.followers = (entry.followers ?? 0) + f
+    const latest = h.snapshots[h.snapshots.length - 1]
+    if (typeof latest?.postsTotal === 'number') {
+      entry.postsTotal = (entry.postsTotal ?? 0) + latest.postsTotal
+    }
+    for (const p of latest?.posts ?? []) {
+      entry.posts += 1
+      if (p.likes != null || p.comments != null || p.shares != null) {
+        entry.reactions = (entry.reactions ?? 0) + (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0)
+      }
+      if (p.views != null) entry.views = (entry.views ?? 0) + p.views
+    }
+    byPlatform.set(h.platform, entry)
+  }
+  return [...byPlatform.values()].sort((a, b) => (b.followers ?? 0) - (a.followers ?? 0))
+}
+
+/* ── what lands and what does not ────────────────────────────────────────── */
+
+export const FORMAT_IMAGE = 'Posts with a picture'
+export const FORMAT_TEXT = 'Text-only posts'
+
+export interface LandsFinding {
+  kind: 'format' | 'platform' | 'topic'
+  /** What the finding is about: a format, a platform, or a topic. */
+  label: string
+  /** The real number that justifies it, written out. */
+  evidence: string
+  /** Ratio against the typical post for buckets; mean sentiment for topics. */
+  value: number
+}
+
+export interface LandsReading {
+  /** Posts whose reactions the platform actually published. */
+  measuredPosts: number
+  /** Posts a full report exists for. */
+  readPosts: number
+  /** Below five measured posts no claim is made at all. */
+  thin: boolean
+  typicalReactions: number | null
+  working: LandsFinding[]
+  notLanding: LandsFinding[]
+}
+
+/**
+ * What lands and what does not, computed rather than opined.
+ *
+ * Two bucketings of the office's own posts — picture against text-only, and
+ * platform against platform — each compared to the desk's typical post by
+ * measured reactions. Where a full report exists for a post, its sentiment
+ * score adds a third reading: which topics were received warmly and which drew
+ * criticism, from the analysis that actually read the comments.
+ *
+ * A bucket needs three posts before it may speak, and the whole section needs
+ * five measured posts. Below that the honest output is "too thin", not a
+ * trend line drawn through two dots.
+ */
+export function whatLandsOf(posts: OwnPost[], reports: Map<string, Report>): LandsReading {
+  const measured = posts.filter((p) => p.measured)
+  const typical =
+    measured.length > 0 ? measured.reduce((s, p) => s + p.reactions, 0) / measured.length : null
+  const thin = measured.length < 5
+
+  const working: LandsFinding[] = []
+  const notLanding: LandsFinding[] = []
+
+  const ratioX = (r: number): string => `${(Math.round(r * 10) / 10).toFixed(1)}x`
+
+  if (!thin && typical != null && typical > 0) {
+    const bucket = (kind: 'format' | 'platform', label: string, subset: OwnPost[]): void => {
+      // Two posts is an anecdote; three is the floor for calling it a pattern.
+      if (subset.length < 3) return
+      const avg = subset.reduce((s, p) => s + p.reactions, 0) / subset.length
+      const ratio = avg / typical
+      const evidence = `${subset.length} posts average ${compact(Math.round(avg))} reactions, ${ratioX(ratio)} your typical ${compact(Math.round(typical))}.`
+      if (ratio >= 1.25) working.push({ kind, label, evidence, value: ratio })
+      else if (ratio <= 0.75) notLanding.push({ kind, label, evidence, value: ratio })
+    }
+
+    bucket('format', FORMAT_IMAGE, measured.filter((p) => p.thumbnailUrl))
+    bucket('format', FORMAT_TEXT, measured.filter((p) => !p.thumbnailUrl))
+    for (const platform of new Set(measured.map((p) => p.platform))) {
+      bucket('platform', platform, measured.filter((p) => p.platform === platform))
+    }
+  }
+
+  // The topic readings, from reports that actually exist. Kept behind the same
+  // thin gate: this section either has enough evidence to speak or says so.
+  const topicScores = new Map<string, number[]>()
+  let readPosts = 0
+  for (const p of posts) {
+    const analysis = reports.get(p.url)?.analysis
+    if (!analysis) continue
+    readPosts += 1
+    const topic = analysis.topics.primary
+    if (!topic) continue
+    const scores = topicScores.get(topic) ?? []
+    scores.push(analysis.sentiment.score)
+    topicScores.set(topic, scores)
+  }
+  if (!thin) {
+    for (const [topic, scores] of topicScores) {
+      const avg = scores.reduce((s, v) => s + v, 0) / scores.length
+      const n = scores.length
+      const noun = n === 1 ? 'post' : 'posts'
+      if (avg >= 15) {
+        working.push({
+          kind: 'topic',
+          label: topic,
+          evidence: `${n} ${noun} read at +${Math.round(avg)} in the full analysis.`,
+          value: avg,
+        })
+      } else if (avg <= -15) {
+        notLanding.push({
+          kind: 'topic',
+          label: topic,
+          evidence: `${n} ${noun} read at ${Math.round(avg)} in the full analysis.`,
+          value: avg,
+        })
+      }
+    }
+  }
+
+  // Buckets lead, ranked by how far they sit from typical; topics follow,
+  // ranked by score. The two kinds measure different things, so they are
+  // ordered within their kind rather than pretending to share a scale.
+  const byKind = (list: LandsFinding[], dir: 1 | -1): LandsFinding[] => {
+    const buckets = list.filter((f) => f.kind !== 'topic').sort((a, b) => dir * (b.value - a.value))
+    const topics = list.filter((f) => f.kind === 'topic').sort((a, b) => dir * (b.value - a.value))
+    return [...buckets, ...topics].slice(0, 4)
+  }
+
+  return {
+    measuredPosts: measured.length,
+    readPosts,
+    thin,
+    typicalReactions: typical != null ? Math.round(typical) : null,
+    working: byKind(working, 1),
+    notLanding: byKind(notLanding, -1),
+  }
+}
+
+/* ── what to post next ───────────────────────────────────────────────────── */
+
+export interface NextCard {
+  /** One imperative sentence. */
+  line: string
+  /** The real number underneath that justifies it. */
+  evidence: string
+}
+
+/**
+ * Recommendations assembled from arithmetic that already ran — the lands
+ * reading, the platform reach sums and the full reports. No model is called
+ * here and nothing is invented: every card quotes the figure that earned it,
+ * and when no figure earned anything the caller renders one honest card
+ * instead.
+ */
+export function nextPostsOf(input: {
+  lands: LandsReading
+  reach: PlatformReach[]
+  posts: OwnPost[]
+  reports: Map<string, Report>
+}): NextCard[] {
+  const { lands, reach, posts, reports } = input
+  const cards: NextCard[] = []
+
+  const imperative = (f: LandsFinding, positive: boolean): string => {
+    if (f.kind === 'platform') {
+      return positive ? `Post more on ${f.label}.` : `Rethink what you publish on ${f.label}.`
+    }
+    if (f.label === FORMAT_IMAGE) {
+      return positive ? 'Lead with a picture or a video.' : 'Change what the pictures show.'
+    }
+    return positive ? 'Write more text posts.' : 'Give text-only posts a picture.'
+  }
+
+  /**
+   * Compressed re-statements, never the WhatLands evidence verbatim. These
+   * cards sit three sections below the card that already prints the full
+   * sentence, and the same string twice on one page reads as a stutter. The
+   * imperative carries the advice; one short figure earns it.
+   */
+  const bucketFigure = (f: LandsFinding): string =>
+    `${f.label}: ${Math.round(f.value * 10) / 10}x your typical post.`
+  const topicFigure = (f: LandsFinding): string =>
+    `Reads at ${f.value > 0 ? '+' : ''}${Math.round(f.value)} in your posts.`
+
+  const bestBucket = lands.working.find((f) => f.kind !== 'topic')
+  if (bestBucket) cards.push({ line: imperative(bestBucket, true), evidence: bucketFigure(bestBucket) })
+
+  const worstBucket = lands.notLanding.find((f) => f.kind !== 'topic')
+  if (worstBucket) cards.push({ line: imperative(worstBucket, false), evidence: bucketFigure(worstBucket) })
+
+  const bestTopic = lands.working.find((f) => f.kind === 'topic')
+  if (bestTopic) cards.push({ line: `Say more about ${bestTopic.label}.`, evidence: topicFigure(bestTopic) })
+
+  const worstTopic = lands.notLanding.find((f) => f.kind === 'topic')
+  if (worstTopic) {
+    cards.push({ line: `Answer the criticism on ${worstTopic.label}.`, evidence: topicFigure(worstTopic) })
+  }
+
+  // Reach with nothing published against it: followers were measured on a
+  // platform whose latest collection stored no posts at all.
+  const idle = reach
+    .filter((r) => (r.followers ?? 0) > 0 && r.posts === 0)
+    .sort((a, b) => (b.followers ?? 0) - (a.followers ?? 0))[0]
+  if (idle) {
+    cards.push({
+      line: `Publish on ${idle.platform}.`,
+      evidence: `${compact(idle.followers)} followers there and no post in the last collection to reach them.`,
+    })
+  }
+
+  // If the lands reading was too thin to speak, the best-read post can still
+  // carry one card: its score is section 2's arithmetic, not an invention.
+  if (cards.length < 3) {
+    let best: { post: OwnPost; score: number; headline: string } | null = null
+    for (const p of posts) {
+      const analysis = reports.get(p.url)?.analysis
+      if (!analysis || analysis.sentiment.score < 15) continue
+      if (!best || analysis.sentiment.score > best.score) {
+        best = { post: p, score: analysis.sentiment.score, headline: analysis.headline }
+      }
+    }
+    if (best) {
+      cards.push({
+        line: 'Repeat what worked in your best-read post.',
+        evidence: `"${best.headline}" read at +${Math.round(best.score)}${
+          best.post.measured ? ` with ${compact(best.post.reactions)} reactions` : ''
+        }.`,
+      })
+    }
+  }
+
+  return cards.slice(0, 5)
 }

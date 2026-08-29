@@ -456,7 +456,10 @@ export function PageHeader({
           {kicker && <p className="kicker">{kicker}</p>}
           <h1
             className={cn(
-              'hed text-[clamp(1.6rem,1.2rem+1.6vw,2.25rem)] leading-[1.1]',
+              // `display`, not `hed`: this is the one line on the screen that
+              // is allowed to have a voice, and it is always Latin-or-Indic
+              // hero text, which is exactly what the serif is scoped to.
+              'display text-[clamp(1.7rem,1.25rem+1.9vw,2.6rem)]',
               kicker && 'mt-1.5',
             )}
           >
@@ -471,7 +474,10 @@ export function PageHeader({
       {actions && (
         // shrink-0 so a long title never crushes the buttons into two words per
         // line, which is what happened on the grievance desk at 1024px.
-        <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+        // justify-end matters only on phones, where this cluster is a row of
+        // its own under the title: left-aligned it read as loose furniture
+        // sitting under the heading rather than as the header's controls.
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div>
       )}
     </div>
   )

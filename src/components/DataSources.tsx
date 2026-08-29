@@ -187,10 +187,6 @@ export function DataSources() {
             sub="What this deployment can read right now"
             tint="blue"
           />
-          <p className="text-sm leading-relaxed text-ink-2">
-            Everything below that is off is a real limit, not a bug. Each one says what it
-            would take.
-          </p>
           {summary.total > 0 && (
             <ProgressRow
               className="mt-3"

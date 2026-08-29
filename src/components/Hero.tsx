@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import * as m from 'motion/react-m'
 import { AnimatePresence } from 'motion/react'
-import { ArrowRight, CircleAlert, ClipboardPaste, Link2, ShieldCheck, Sparkles } from 'lucide-react'
+import { ArrowRight, CircleAlert, ClipboardPaste, Link2, Sparkles } from 'lucide-react'
 import { Mascot } from './Mascot'
 import { HeroPreview } from './HeroPreview'
 import { Button, Chip } from './ui'
 import { ease, haptic, listItem, listStagger, wordIn, wordStagger } from '@/lib/motion'
 import { cn } from '@/lib/utils'
+import { readStore } from '@/lib/store'
 
 /**
  * Platforms we have a dedicated adapter for, shown so expectations are set.
@@ -48,6 +49,17 @@ export function Hero({
   onClose?: () => void
   initialUrl?: string
 }) {
+  /**
+   * The dateline seat. `readStore` rather than `useStore`: the hero is the
+   * analyse screen's static opening and has no reason to re-render on every
+   * store write, and the seat does not change mid-visit.
+   */
+  const deskName = (() => {
+    const p = readStore().profile
+    const seat = p?.district ?? p?.constituency
+    return seat && seat.trim() ? `${seat} desk` : 'Your desk'
+  })()
+
   const [url, setUrl] = useState(initialUrl)
   const [error, setError] = useState<string | null>(null)
   const [canPaste, setCanPaste] = useState(false)
@@ -114,7 +126,12 @@ export function Hero({
       <m.div variants={listItem} className="mt-5 flex items-center gap-3">
         <Mascot state="idle" size={44} className="shrink-0" />
         <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
-          <span className="kicker text-[var(--accent)]">Eluru desk</span>
+          {/* Whose desk, read from the store, not a hardcoded seat. This said
+              "Eluru desk" for every office: the string survived from the first
+              client's build and shipped to a demo whose flagship seat is
+              Mahabubnagar. A dateline that names the wrong district is worse
+              than none. */}
+          <span className="kicker text-[var(--accent)]">{deskName}</span>
           <span aria-hidden className="h-3 w-px bg-[var(--rule)]" />
           <span className="kicker">Telugu · Hindi · English</span>
         </div>
@@ -241,19 +258,6 @@ export function Hero({
           Three facts that answer the questions a new user actually has, then
           the output itself. A form that describes its result is asking to be
           imagined; showing the result is the whole difference. */}
-      <m.div variants={listItem} className="mt-6 grid grid-cols-3 gap-3">
-        {[
-          ['14', 'platforms'],
-          ['0', 'API keys needed'],
-          ['~4s', 'per post'],
-        ].map(([value, label]) => (
-          <div key={label} className="card px-3 py-3.5 text-center sm:px-4">
-            <p className="tnum text-xl font-bold tracking-[-0.02em] text-ink">{value}</p>
-            <p className="mt-1 text-2xs leading-tight text-ink-3">{label}</p>
-          </div>
-        ))}
-      </m.div>
-
       <m.div variants={listItem} className="mt-7">
         <HeroPreview onOpen={onOpenExample} />
       </m.div>
@@ -270,15 +274,6 @@ export function Hero({
         </div>
       </m.div>
 
-      <m.div
-        variants={listItem}
-        className="mt-6 flex items-start gap-2.5 rounded-[var(--radius-md)] bg-[var(--surface-2)] px-4 py-3"
-      >
-        <ShieldCheck size={15} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
-        <p className="text-xs leading-relaxed text-ink-3">
-          Public posts only. Nothing is stored on a server, so your history stays on this device.
-        </p>
-      </m.div>
     </m.div>
   )
 }

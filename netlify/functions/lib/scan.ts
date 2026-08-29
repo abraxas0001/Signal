@@ -16,6 +16,19 @@ import { feedUrlFor, indexUrlFor, PORTALS, type NewsPortal } from '../../../shar
  * candidates to the grievance endpoint in batches the caller controls. The
  * operator sees what was found before any of it is read.
  *
+ * WHAT THE WORDS CANNOT DO. Matching is whole-word containment over the
+ * headline and the address, and that is all it will ever be. It cannot see
+ * "the Mahabubnagar MP wrote to the Speaker", because the office watches names
+ * and that headline carries none of them, and it happily admits a cricket
+ * report that shares a surname with the member. Both were reported by the
+ * office as bugs and neither is fixable inside a string comparison.
+ *
+ * So the harvest gained a second mode. `harvest: 'wide'` keeps the unmatched
+ * links too, flagged `matched: []`, ranked below the matched ones and capped.
+ * Nothing in here judges them: relevance.ts does that, and the caller decides
+ * what to show. The default is unchanged, because a wide harvest with nothing
+ * reading it is a worse screen than a narrow one.
+ *
  * WHAT THIS CANNOT DO, and says so rather than pretending: several Telugu
  * publishers serve their district edition on the reader's location, not the
  * URL. Fetched from a server the same address returns the state or national
@@ -32,19 +45,73 @@ export interface Candidate {
   matched: string[]
 }
 
+/**
+ * How much of each masthead to keep.
+ *
+ * "matched" is the original behaviour and the default: only stories carrying
+ * one of the desk's words come back. "wide" keeps everything article-shaped and
+ * flags the ones no word touched with `matched: []`, so something downstream
+ * can read them and decide.
+ *
+ * The reason for the second mode is the reason this file was rewritten. Word
+ * matching cannot see a headline that says "the Mahabubnagar MP wrote to the
+ * Speaker", because the office's watch words are names and that headline has
+ * none of them. The desk reported a quiet week while the paper was carrying
+ * her. Widening the harvest is only half the fix and on its own it makes things
+ * worse, so nothing here changes unless the caller asks for it by name.
+ */
+export type HarvestMode = 'matched' | 'wide'
+
 export interface ScanResult {
   candidates: Candidate[]
   /** Per-masthead outcome, so a dead source is visible rather than silent. */
   sources: { portal: string; url: string; found: number; error: string | null }[]
   notes: string[]
+  /** Which mode actually ran, so a caller never has to infer it. */
+  harvest: HarvestMode
+  /**
+   * How many of `candidates` carried a word the desk watches.
+   *
+   * In "matched" mode this equals candidates.length. In "wide" mode the gap
+   * between the two is the whole point: it is the number of stories the old
+   * pipeline would have thrown away unread.
+   */
+  matchedCount: number
 }
 
 /** How many index pages one request will read, and how long each may take. */
-const MAX_SOURCES = 8
+/**
+ * Raised from 8 with the registry at 135 portals.
+ *
+ * At 8 the lane quota in planPortals came out 4 local / 2 other-local /
+ * 2 national / 0 wire, so the wire lane never opened and the agency feeds
+ * could never be selected at all. 12 yields 6/3/2/1 and lets every lane in.
+ * Moves in step with PORTAL_BUDGET in src/lib/autoconfig.ts, and depends on
+ * the 60s timeout this function now has in netlify.toml.
+ */
+const MAX_SOURCES = 12
 const FETCH_TIMEOUT_MS = 9_000
 /** Per masthead, so one busy homepage cannot crowd out the others. */
 const PER_SOURCE_CAP = 40
 const TOTAL_CAP = 120
+
+/**
+ * The bounds a wide harvest works inside.
+ *
+ * WIDE_SCAN_BOUND is deliberately far above the cap, and that gap is load
+ * bearing. A feed is read in publication order, so stopping at the cap would
+ * keep forty unmatched items from the top of the file and drop the tag match
+ * sitting at position ninety. Everything is collected first and the ranking
+ * decides what survives, which costs one in-memory sort and no extra network.
+ *
+ * WIDE_TOTAL_CAP is sized against what can actually be judged rather than
+ * against what can be found. Ninety candidates is six batches of fifteen, which
+ * is already more than one function window will pay for; returning three
+ * hundred would only produce a longer list of stories nobody read.
+ */
+const WIDE_SCAN_BOUND = 300
+const WIDE_PER_SOURCE_CAP = 45
+const WIDE_TOTAL_CAP = 90
 
 /**
  * Does this link look like a story rather than a section?
@@ -131,6 +198,63 @@ export function worthKeeping(
   return matched.some((tag) => !broad.has(tag))
 }
 
+/**
+ * Where a link sits in a wide harvest, highest first.
+ *
+ * Three tiers rather than the two that "matched and unmatched" suggests,
+ * because a story matching only a broad word is a real third case. In matched
+ * mode worthKeeping throws it away, which is right when nothing downstream can
+ * read it: a party name alone returns the national wire. In wide mode it is
+ * precisely the material a judge needs in order to say "this is about the
+ * party, not about her", so it is ranked between the two rather than binned.
+ */
+function tierOf(c: Candidate, broad: Set<string>, hasNarrow: boolean): number {
+  if (worthKeeping(c.matched, broad, hasNarrow)) return 2
+  return c.matched.length > 0 ? 1 : 0
+}
+
+/** Best tier first, then most words matched. Stable, so feed order survives. */
+function byRank(broad: Set<string>, hasNarrow: boolean) {
+  return (a: Candidate, b: Candidate): number =>
+    tierOf(b, broad, hasNarrow) - tierOf(a, broad, hasNarrow) ||
+    b.matched.length - a.matched.length
+}
+
+/**
+ * One link from each masthead in turn, rather than all of one then all of the
+ * next.
+ *
+ * Whatever sits at the top of this list is what gets read, because judging is
+ * metered and only the first few dozen candidates are affordable. Left in
+ * source order, a single busy feed contributing forty-five unmatched links
+ * would spend the entire budget and the other seven papers would never be
+ * looked at. That is the "we miss news" complaint wearing a different coat.
+ */
+function interleaveByPortal(items: Candidate[]): Candidate[] {
+  const queues = new Map<string, Candidate[]>()
+  for (const c of items) {
+    const q = queues.get(c.portal)
+    if (q) q.push(c)
+    else queues.set(c.portal, [c])
+  }
+
+  const out: Candidate[] = []
+  const lists = [...queues.values()]
+  for (let round = 0; out.length < items.length; round++) {
+    let placed = false
+    for (const list of lists) {
+      const c = list[round]
+      if (!c) continue
+      out.push(c)
+      placed = true
+    }
+    // Every queue is exhausted. Without this a mismatch between the counts
+    // would spin forever rather than returning a short list.
+    if (!placed) break
+  }
+  return out
+}
+
 export function matchTags(title: string, url: string, tags: string[]): string[] {
   if (tags.length === 0) return []
   const haystack = `${fold(title)} ${fold(decodeURIComponent(url))}`
@@ -184,6 +308,7 @@ function readFeed(
   tags: string[],
   broad: Set<string>,
   hasNarrow: boolean,
+  wide: boolean,
 ): Candidate[] {
   const out: Candidate[] = []
   const seen = new Set<string>()
@@ -207,11 +332,15 @@ function readFeed(
     seen.add(url)
 
     const matched = matchTags(title, url, tags)
-    if (tags.length > 0 && !worthKeeping(matched, broad, hasNarrow)) continue
+    // In wide mode the words stop being the gate. A link nothing matched is
+    // kept and flagged `matched: []` for a judge to rule on downstream.
+    if (!wide && tags.length > 0 && !worthKeeping(matched, broad, hasNarrow)) continue
     out.push({ url, title, portal: label, matched })
-    if (out.length >= PER_SOURCE_CAP) break
+    if (out.length >= (wide ? WIDE_SCAN_BOUND : PER_SOURCE_CAP)) break
   }
-  return out
+  return wide
+    ? [...out].sort(byRank(broad, hasNarrow)).slice(0, WIDE_PER_SOURCE_CAP)
+    : out
 }
 
 /** CDATA and the five XML entities. Feeds use both, often in one document. */
@@ -244,8 +373,9 @@ async function readSource(
   isFeed: boolean,
   broad: Set<string>,
   hasNarrow: boolean,
+  wide: boolean,
 ): Promise<{ found: Candidate[]; error: string | null }> {
-  if (!isFeed) return readIndex(label, url, tags, broad, hasNarrow)
+  if (!isFeed) return readIndex(label, url, tags, broad, hasNarrow, wide)
 
   let page
   try {
@@ -258,9 +388,9 @@ async function readSource(
   }
 
   const looksLikeFeed = /<(?:rss|feed|channel)[\s>]/i.test(page.body.slice(0, 2_000))
-  if (!looksLikeFeed) return readIndex(label, page.url, tags, broad, hasNarrow)
+  if (!looksLikeFeed) return readIndex(label, page.url, tags, broad, hasNarrow, wide)
 
-  return { found: readFeed(page.body, label, tags, broad, hasNarrow), error: null }
+  return { found: readFeed(page.body, label, tags, broad, hasNarrow, wide), error: null }
 }
 
 /** Read one index page and pull the stories off it. */
@@ -270,6 +400,7 @@ async function readIndex(
   tags: string[],
   broad: Set<string>,
   hasNarrow: boolean,
+  wide: boolean,
 ): Promise<{ found: Candidate[]; error: string | null }> {
   let page
   try {
@@ -316,7 +447,7 @@ async function readIndex(
   }
 
   $('a[href]').each((_, el) => {
-    if (found.length >= PER_SOURCE_CAP) return
+    if (found.length >= (wide ? WIDE_SCAN_BOUND : PER_SOURCE_CAP)) return
     const href = $(el).attr('href') ?? ''
     // A headline is a sentence; navigation is a word or two.
     const title = headlineFor($(el))
@@ -338,12 +469,18 @@ async function readIndex(
     // With words given, only matching stories are worth the operator's time —
     // and a story matching only a broad word like a party name is not one of
     // them. See worthKeeping.
-    if (tags.length > 0 && !worthKeeping(matched, broad, hasNarrow)) return
+    //
+    // Unless the caller asked for a wide harvest, in which case the words rank
+    // rather than gate, and the judging happens after this file is done.
+    if (!wide && tags.length > 0 && !worthKeeping(matched, broad, hasNarrow)) return
 
     found.push({ url, title, portal: label, matched })
   })
 
-  return { found, error: null }
+  return {
+    found: wide ? [...found].sort(byRank(broad, hasNarrow)).slice(0, WIDE_PER_SOURCE_CAP) : found,
+    error: null,
+  }
 }
 
 export interface ScanInput {
@@ -370,10 +507,20 @@ export interface ScanInput {
    * stories, none of them about the member, on a screen claiming they are.
    */
   broadTags?: string[]
+  /**
+   * "matched" is the default and is exactly what every existing caller gets.
+   *
+   * Opt in to "wide" only when something downstream is going to read the
+   * unmatched links and rule on them. A wide harvest handed straight to a
+   * screen is ninety stories about a state, which is worse than the twenty the
+   * words found. See HarvestMode.
+   */
+  harvest?: HarvestMode
 }
 
 export async function scanPortals(input: ScanInput): Promise<ScanResult> {
   const notes: string[] = []
+  const wide = input.harvest === 'wide'
   const targets: { label: string; url: string; isFeed: boolean }[] = []
 
   for (const name of input.portals) {
@@ -418,7 +565,15 @@ export async function scanPortals(input: ScanInput): Promise<ScanResult> {
 
   const results = await Promise.all(
     capped.map(async (t) => {
-      const { found, error } = await readSource(t.label, t.url, input.tags, t.isFeed, broad, hasNarrow)
+      const { found, error } = await readSource(
+        t.label,
+        t.url,
+        input.tags,
+        t.isFeed,
+        broad,
+        hasNarrow,
+        wide,
+      )
       return { portal: t.label, url: t.url, found, error }
     }),
   )
@@ -431,18 +586,53 @@ export async function scanPortals(input: ScanInput): Promise<ScanResult> {
     }
   }
 
-  const candidates = [...byUrl.values()]
-    // Most words matched first: a story naming the segment AND the subject is
-    // more likely to be the office's business than one naming either alone.
-    .sort((a, b) => b.matched.length - a.matched.length)
-    .slice(0, TOTAL_CAP)
+  const deduped = [...byUrl.values()]
+  const total = wide ? WIDE_TOTAL_CAP : TOTAL_CAP
 
-  if (byUrl.size > TOTAL_CAP) {
-    notes.push(`Found ${byUrl.size} stories and kept the ${TOTAL_CAP} best matches.`)
+  /*
+    Ordering is the budget.
+
+    In matched mode this is the original sort and nothing else. In wide mode the
+    order decides which stories a metered judge can afford to read, so the tag
+    matches lead (they are the ones the desk already believes in) and the
+    unmatched follow, spread across the mastheads rather than taken paper by
+    paper.
+  */
+  const candidates = wide
+    ? (() => {
+        const tiers: Candidate[][] = [[], [], []]
+        for (const c of deduped) tiers[tierOf(c, broad, hasNarrow)]?.push(c)
+        return [
+          ...(tiers[2] ?? []).sort((a, b) => b.matched.length - a.matched.length),
+          ...interleaveByPortal(tiers[1] ?? []),
+          ...interleaveByPortal(tiers[0] ?? []),
+        ].slice(0, total)
+      })()
+    : deduped
+        // Most words matched first: a story naming the segment AND the subject
+        // is more likely to be the office's business than one naming either
+        // alone.
+        .sort((a, b) => b.matched.length - a.matched.length)
+        .slice(0, total)
+
+  const matchedCount = candidates.filter((c) =>
+    input.tags.length === 0 ? false : worthKeeping(c.matched, broad, hasNarrow),
+  ).length
+
+  if (byUrl.size > total) {
+    notes.push(
+      wide
+        ? `Read ${byUrl.size} stories and kept the ${total} most likely to belong here. The rest were not judged and are not listed.`
+        : `Found ${byUrl.size} stories and kept the ${total} best matches.`,
+    )
   }
   if (input.tags.length === 0) {
     notes.push(
       'No words were given, so this is everything the mastheads are carrying, not just your patch.',
+    )
+  } else if (wide) {
+    notes.push(
+      `Kept every story these papers are carrying, not only the ones using your words. ${matchedCount} of ${candidates.length} carried a word you watch.`,
     )
   }
 
@@ -455,5 +645,7 @@ export async function scanPortals(input: ScanInput): Promise<ScanResult> {
       error: r.error,
     })),
     notes,
+    harvest: wide ? 'wide' : 'matched',
+    matchedCount,
   }
 }

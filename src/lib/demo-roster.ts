@@ -26,10 +26,12 @@
  * the analyse screen. The two do not interact.)
  */
 
+import type { OpinionSurvey } from '@/lib/opinion'
 import {
   handleId,
   replaceAllHandles,
   saveStandingCache,
+  saveStandingNote,
   type Standing,
   type TrackedHandle,
 } from '@/lib/handles'
@@ -46,6 +48,17 @@ export interface DemoPost {
   comments: number | null
   shares: number | null
   thumbnailUrl?: string | null
+  /**
+   * How this post reads toward each principal it names, judged once at build
+   * time by a model reading the real headline (scraper/gen-extras.ts), plus
+   * which watch word matched: the person, the party, or the seat. Only creator
+   * posts carry this; a politician's own posts are never scored against
+   * themselves.
+   */
+  stances?: Record<
+    string,
+    { stance: 'supportive' | 'critical' | 'neutral'; about: 'person' | 'party' | 'seat' }
+  >
 }
 
 export interface DemoHandle {
@@ -55,6 +68,14 @@ export interface DemoHandle {
   displayName: string | null
   avatarUrl: string | null
   followers: number | null
+  /** Lifetime post count off the profile header. Absent where unpublished. */
+  postsTotal?: number | null
+  /**
+   * Earlier follower readings, oldest first, written by scraper:followers
+   * when it archives the reading it replaces. Each becomes a dated snapshot,
+   * which is what the growth card needs to say anything.
+   */
+  followerHistory?: { takenAt: string; followers: number | null }[]
   takenAt: string
   posts: DemoPost[]
   /** Present only when the read failed. `posts` is then empty and means nothing. */
@@ -83,6 +104,13 @@ export interface DemoPerson {
   /** Native-script spellings; see scraper/roster.ts for why they matter. */
   aliases?: string[]
   handles: DemoHandle[]
+  /**
+   * The app's own grounded opinion survey, run once per person at build time
+   * through /api/opinion (scraper/gen-extras.ts). A real reading of published
+   * coverage, not a synthesised one, which is why it can be seeded into the
+   * store as if the reader had tapped the button themselves.
+   */
+  opinion?: OpinionSurvey
 }
 
 /**
@@ -190,9 +218,16 @@ function toTracked(h: DemoHandle, person: DemoPerson, own: boolean): TrackedHand
     snapshots: h.failure
       ? []
       : [
+          // Archived follower readings first, oldest to newest, each a dated
+          // snapshot with no posts: the posts belong to the LATEST reading,
+          // and every consumer of posts reads the last snapshot.
+          ...(h.followerHistory ?? [])
+            .filter((r) => r.takenAt < h.takenAt)
+            .map((r) => ({ takenAt: r.takenAt, followers: r.followers, posts: [] })),
           {
             takenAt: h.takenAt,
             followers: h.followers,
+            postsTotal: h.postsTotal ?? null,
             posts: h.posts.map((p) => ({
               url: p.url,
               title: p.title,
@@ -258,8 +293,13 @@ export function applyPrincipal(roster: DemoRoster, principalKey: string): Tracke
    */
   for (const person of cast) {
     for (const h of person.handles) {
+      const id = handleId(h.platform, h.handle)
+      // The refusal is as much a reading as the score. Without it the card
+      // cannot tell "we read eight posts and found nothing" from "we never
+      // looked", and says the second about accounts we did read.
+      if (h.standingNote) saveStandingNote(id, h.standingNote)
       if (!h.standing) continue
-      saveStandingCache(handleId(h.platform, h.handle), h.standing as Standing)
+      saveStandingCache(id, h.standing as Standing)
     }
   }
 
@@ -402,6 +442,12 @@ export function applyPrincipal(roster: DemoRoster, principalKey: string): Tracke
       resolvedAt: roster.generatedAt,
     },
     onboardedAt: prev.onboardedAt ?? new Date().toISOString(),
+    /**
+     * The person-level coverage reading, so "what people think" is populated
+     * the moment the desk opens instead of asking the visitor to spend a
+     * grounded search the demo has already spent for them.
+     */
+    opinion: principal.opinion ?? null,
     ...buildDemoContent(roster, principalKey),
     // Stamped so the influencer screen does not offer to go and find a roster
     // it already has, and the morning scan does not run against a desk nobody

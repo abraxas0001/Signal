@@ -363,14 +363,7 @@ function DimensionRow({
             </span>
           </span>
         </div>
-      ) : (
-        <div className="mt-2.5 flex items-start justify-center gap-2 rounded-xl bg-[var(--surface-2)] px-3 py-2.5">
-          <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
-          <p className="text-xs leading-relaxed text-ink-3">
-            The search returned no placement for either of them on this, so no bars are drawn.
-          </p>
-        </div>
-      )}
+      ) : null}
 
       {/* ── The evidence. The reason the row exists; the bars only say which of
           the two paragraphs to read first. Two columns from lg up, straddling
@@ -457,7 +450,10 @@ function VsControl({
         style={
           state === 'busy'
             ? undefined
-            : { background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 130%)' }
+            : { background: 'var(--accent)' }  /* Was accent-to-accent-2, which is the
+               blue-into-purple sweep that reads as generated. One accent,
+               flat: the banner is already carrying meaning through its
+               content and does not need decoration to be noticed. */
         }
       >
         {state === 'busy' ? (
@@ -765,7 +761,7 @@ export function HeadToHead({
     <m.section variants={fadeUp} className="space-y-4">
       <SectionTitle
         eyebrow="Head to head"
-        hint="Read from published coverage on both people, not from follower counts."
+        hint="From published coverage."
       >
         {identity.name} against {rival.name}
       </SectionTitle>
@@ -882,9 +878,7 @@ export function HeadToHead({
                   <div className="min-w-0">
                     <p className="text-[15px] font-bold text-ink">The shape of it</p>
                     <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
-                      Both people across every dimension at once. The figures are the model's
-                      0 to 100 placements from the coverage it read, comparable with each other
-                      not measurements of anything.
+                      Both people across every dimension at once.
                     </p>
                   </div>
                 </div>
@@ -945,10 +939,6 @@ export function HeadToHead({
             {showTable && (
               <div className="mt-3 overflow-x-auto rounded-2xl bg-[var(--surface-2)] p-4">
                 <table className="w-full text-left text-xs">
-                  <caption className="pb-2.5 text-left text-xs leading-relaxed text-ink-3">
-                    Placements on a 0 to 100 scale, assigned by the model from the coverage it
-                    read. Comparable with each other; not measurements of anything.
-                  </caption>
                   <thead>
                     <tr className="border-b border-[var(--rule)] text-ink-3">
                       <th scope="col" className="py-1.5 pr-3 font-medium">

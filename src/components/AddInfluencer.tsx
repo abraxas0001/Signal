@@ -59,15 +59,12 @@ function outlook(platform: Platform, available: boolean): { tone: 'positive' | '
   if (available) {
     return {
       tone: 'positive',
-      line: 'Posts can be listed, so this account is scanned on every check.',
+      line: 'Scanned on every check.',
     }
   }
   return {
     tone: 'warning',
-    line:
-      `${platform} does not publish this account's posts to a server, so a check cannot read them. ` +
-      'Its reach is still tracked, and posts you analyse by hand still count. ' +
-      'A licensed data provider turns the automatic reading on. See Settings.',
+    line: `Reach is tracked, but posts on ${platform} cannot be scanned.`,
   }
 }
 
@@ -151,17 +148,10 @@ export function SearchInfluencers({
 
   return (
     <div>
-      <CardHead
-        icon={<Search size={16} />}
-        title="Find channels by subject"
-        sub="Every channel is read before it is offered"
-        tint="blue"
-      />
+      <CardHead icon={<Search size={16} />} title="Find channels by subject" tint="blue" />
       <p className="text-xs leading-relaxed text-ink-2">
-        Searches YouTube&rsquo;s own index, so every channel below exists. Each one is then read
-        for its subscriber count. <strong className="font-semibold">Check that count before you
-        add one</strong>: a lookalike with the right name and two subscribers is the thing worth
-        noticing.
+        <strong className="font-semibold">Check the subscriber count before you add one</strong>:
+        a lookalike with the right name and two subscribers is the thing worth noticing.
       </p>
 
       {/* Stacked on a phone: side by side, the button left the input ~170px —
@@ -367,16 +357,10 @@ export function AddInfluencer({
 
   return (
     <div>
-      <CardHead
-        icon={<AtSign size={16} />}
-        title="Watch a particular account"
-        sub="Read live before anything is stored"
-        tint="violet"
-      />
+      <CardHead icon={<AtSign size={16} />} title="Watch a particular account" tint="violet" />
       <p className="text-xs leading-relaxed text-ink-2">
         Paste a channel, page or profile link: a YouTube channel, an Instagram page, a Facebook
-        creator. Suggest only searches YouTube, because it is the one platform that answers a
-        search from a server; everything else has to be named.
+        creator.
       </p>
 
       {/* Phone: the link box takes the full first line, the platform picker

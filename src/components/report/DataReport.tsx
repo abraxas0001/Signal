@@ -125,15 +125,13 @@ export function DataReport({
             {headline(snapshot, total)}
           </h1>
 
-          <p className="mt-3 text-base leading-relaxed text-ink-2">
-            {measured > 0
-              ? `${measured} ${measured === 1 ? 'figure' : 'figures'} read straight from ${
-                  snapshot.platform === 'Twitter/X' ? 'X' : snapshot.platform
-                }, plus the post itself.`
-              : `The post came through, but ${
-                  snapshot.platform === 'Twitter/X' ? 'X' : snapshot.platform
-                } published no engagement figures for it.`}
-          </p>
+          {measured === 0 && (
+            <p className="mt-3 text-base leading-relaxed text-ink-2">
+              {`The post came through, but ${
+                snapshot.platform === 'Twitter/X' ? 'X' : snapshot.platform
+              } published no engagement figures for it.`}
+            </p>
+          )}
 
           {snapshot.publishedAt && (
             <div className="mt-4 flex items-center gap-1.5 text-sm text-ink-3">
@@ -157,7 +155,6 @@ export function DataReport({
           <CardHead
             icon={<TrendingUp size={15} />}
             title="How it landed"
-            sub="Every figure names its source"
             tint="blue"
           />
           <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
@@ -196,7 +193,7 @@ export function DataReport({
           </div>
 
           <p className="mt-3 text-xs leading-relaxed text-ink-3">
-            Read straight from the platform. Tap any figure to correct it.
+            Tap any figure to correct it.
           </p>
 
           {eng.engagementRate != null && (
@@ -300,16 +297,11 @@ export function DataReport({
             {/* The old section hint, kept whole and visible — it is the line
                 that stops this map being read as a verified position. */}
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
-              Read from the profile — the account&rsquo;s own words, not a verified position.
+              Self-reported location.
             </p>
           </Card>
         </m.section>
       )}
-
-      <m.p variants={fadeUp} className="text-center text-xs text-ink-3">
-        Read from {snapshot.platform === 'Twitter/X' ? 'X' : snapshot.platform} in{' '}
-        {(report.meta.durationMs / 1000).toFixed(1)}s
-      </m.p>
 
       {/* ── Sticky action ───────────────────────────────────────────────── */}
       <div className="docked z-20 border-t border-[var(--border)] bg-[var(--surface-1)]/92 pb-3 pt-3 backdrop-blur-xl">

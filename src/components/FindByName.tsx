@@ -310,8 +310,8 @@ export function FindByName({
         candidates.length === 0 &&
         !/^https?:\/\//i.test(query.trim()) && (
           <p className="mt-2 text-xs leading-relaxed text-ink-3">
-            Nobody by that name is in the public index. That is common below
-            state level. Paste the profile address below instead.
+            Nobody by that name is in the public index. Paste the profile address
+            below instead.
           </p>
         )}
 
@@ -349,8 +349,7 @@ export function FindByName({
 
           {suggestions.length === 0 ? (
             <p className="mt-2 text-xs leading-relaxed text-ink-3">
-              Nothing is recorded for {identity?.name ?? picked?.name} in the public sources this
-              reads. That is common, and is not proof they have no accounts.
+              No accounts on record for {identity?.name ?? picked?.name}. Paste one below.
             </p>
           ) : (
             <>
@@ -410,7 +409,7 @@ export function FindByName({
             <>
               <p className="kicker mt-4">Channels YouTube lists for this name</p>
               <p className="mt-1 text-xs leading-relaxed text-ink-3">
-                These exist because YouTube returned them. Whether one is theirs is for you to check.
+                Whether one is theirs is for you to check.
               </p>
               <ul className="mt-1.5 space-y-2">
                 {untracked.map((f) => {
@@ -454,10 +453,8 @@ export function FindByName({
       )}
 
       <p className={cn('mt-3 text-xs leading-relaxed text-ink-3')}>
-        The public record covers every platform but is filled in by volunteers, so it is often thin.
-        The search covers YouTube only. Facebook, Instagram, X and LinkedIn answer no search from a
-        server at all, so accounts there have to be pasted in below. Check a handle before adding
-        it: an impersonator&rsquo;s account is exactly the thing worth noticing.
+        Check a handle before adding it: an impersonator&rsquo;s account is exactly the thing
+        worth noticing.
       </p>
     </div>
   )

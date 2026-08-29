@@ -7,7 +7,6 @@ import {
   ExternalLink,
   Radar,
   ShieldCheck,
-  MessageSquareHeart,
   GitCompareArrows,
   Info,
   AtSign,
@@ -39,6 +38,7 @@ import { geocodePlace } from './gazetteer'
 import { SuggestedAccounts } from './SuggestedAccounts'
 import { FindByName } from './FindByName'
 import { HeadToHead, type RivalRef } from './HeadToHead'
+import { CompareTable } from './CompareTable'
 import { useStore } from '@/lib/store'
 import { cn, compact } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
@@ -64,6 +64,7 @@ import {
   type Standing,
 } from '@/lib/handles'
 import { fetchWithTimeout } from '@/lib/net'
+import { useBackToDismiss } from '@/lib/nav-history'
 
 /**
  * The account dashboard.
@@ -256,6 +257,9 @@ export function Dashboard({
    * across two people plus a structuring call.
    */
   const [versus, setVersus] = useState<RivalRef | null>(null)
+  // The head to head takes the whole window, so back closes it rather than
+  // leaving the comparison screen.
+  useBackToDismiss(versus !== null, useCallback(() => setVersus(null), []))
   /**
    * Whether the rival search has been asked for.
    *
@@ -1076,7 +1080,6 @@ export function Dashboard({
             label="Readings kept"
             value={kpis.readingsKept}
             tint="orange"
-            deltaLabel="Snapshots stored on this device only"
           />
         </m.div>
       )}
@@ -1096,11 +1099,7 @@ export function Dashboard({
               icon={<MapPin size={16} />}
               tint="blue"
               title={ground ? `Your ground: ${ground.name}` : identity ? 'Your ground' : 'Where this desk sits'}
-              sub={
-                identity
-                  ? 'The seat this desk watches, on the map.'
-                  : 'Set who this desk is for to light its seat here.'
-              }
+              sub={identity ? undefined : 'Set who this desk is for.'}
             />
             {identity && (identity.role || identity.party || identity.state) && (
               <div className="-mt-1 mb-4 flex flex-wrap items-center gap-1.5">
@@ -1136,29 +1135,21 @@ export function Dashboard({
                     {/* The short column would otherwise leave a strip of dead
                         white beside the tall map, so the honesty of the pin
                         gets said out loud instead of left in a code comment. */}
-                    <div className="flex items-start gap-2.5 rounded-2xl bg-[var(--surface-2)] p-4">
-                      <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
-                      <p className="text-xs leading-relaxed text-ink-3">
-                        Placed with the offline gazetteer on this device. The seat name never
-                        leaves it. A seat the map does not know lights nothing rather than a guess.
-                      </p>
-                    </div>
                   </>
                 ) : identity ? (
                   <div className="flex items-start gap-2.5 rounded-2xl bg-[var(--surface-2)] p-4">
                     <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
                     <p className="text-xs leading-relaxed text-ink-3">
                       {identity.constituency || identity.district || identity.state
-                        ? `We track ${identity.constituency ?? identity.district ?? identity.state}, but it is not on the offline map yet, so nothing is pinned rather than dropped somewhere plausible.`
-                        : 'No seat is set for this desk yet, so there is nowhere to light.'}
+                        ? `${identity.constituency ?? identity.district ?? identity.state} is not on the map yet.`
+                        : 'No seat is set for this desk yet.'}
                     </p>
                   </div>
                 ) : (
                   <div className="rounded-2xl bg-[var(--surface-2)] p-4">
                     <p className="text-[15px] font-semibold text-ink">No person set yet</p>
                     <p className="mt-1 text-xs leading-relaxed text-ink-3">
-                      Once this desk knows whose it is, its constituency is lit here and the
-                      whole screen fills in around it.
+                      Set who this desk is for.
                     </p>
                   </div>
                 )}
@@ -1168,29 +1159,9 @@ export function Dashboard({
         </m.section>
       )}
 
-      {/* ── Growth across your accounts ──────────────────────────────────
-          One line per tracked account over every follower reading kept here.
-          The subject is drawn in the subject colour; the accounts it watches
-          take the validated series palette. Drawn only where a line can be:
-          two placed readings, or the card stays away. */}
-      {mode === 'accounts' && growth && (
-        <m.section variants={fadeUp}>
-          <Card>
-            <CardHead
-              icon={<TrendingUp size={16} />}
-              tint="violet"
-              title="Growth across your accounts"
-              sub="One line per tracked account."
-            />
-            <LineChart labels={growth.labels} series={growth.series} formatValue={compact} />
-            {/* The provenance line, kept whole. CardHead's one-line sub would
-                truncate exactly the half that matters on a phone. */}
-            <p className="mt-3 text-xs text-ink-3">
-              Followers across every reading stored on this device. Never estimated between them.
-            </p>
-          </Card>
-        </m.section>
-      )}
+      {/* The "Growth across your accounts" line chart that sat here is gone
+          at the owner's request; the dashboard's growth card carries the same
+          readings as plain deltas. */}
 
       {/* ── Followers across your accounts ───────────────────────────────
           The gradient board from the reference, brand-badge leads, the desk's
@@ -1318,9 +1289,7 @@ export function Dashboard({
           <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-[var(--surface-2)] px-3.5 py-3">
             <Info size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
             <p className="text-xs leading-relaxed text-ink-3">
-              YouTube, Bluesky and Mastodon are pulled automatically. Facebook, Instagram and
-              LinkedIn do not publish a post list without a login. Those show what we can read, and
-              fill in as you analyse individual posts.
+              Some platforms show followers only.
             </p>
           </div>
         </Card>
@@ -1346,7 +1315,7 @@ export function Dashboard({
             size="sm"
             onClick={() => void syncAll()}
             disabled={busy != null}
-            title="Read every tracked account slowly and keep what comes back. Gated platforms only publish a post list this way, so this takes minutes rather than seconds."
+            title="A slow full read. Takes minutes."
           >
             <RefreshCw size={14} className={busy === 'sync-all' ? 'animate-spin' : ''} />
             {busy === 'sync-all' ? 'Syncing…' : 'Sync now'}
@@ -1380,6 +1349,36 @@ export function Dashboard({
         />
       )}
 
+      {/* ── The comparison table ─────────────────────────────────────────
+          The primary content of this tab: the subject's column first, one
+          column per watched person, and a chip row that adds and removes
+          columns. It replaces the card stack that used to live here, which
+          made the reader hold four readings in their head to compare two
+          people. The table reuses this component's data outright: the same
+          `handles`, the same cached `standings`, and the same readOpinion
+          plumbing drive both modes, so there is exactly one version of every
+          number. */}
+      {mode === 'compare' && !versus && handles.length > 0 && (
+        <m.section variants={fadeUp}>
+          <SectionTitle>
+            Side by side
+          </SectionTitle>
+          <CompareTable
+            handles={handles}
+            identity={identity}
+            standings={standings}
+            readingId={reading}
+            readingPhase={readingPhase}
+            onReadOpinion={(h) => void readOpinion(h)}
+            onCompareRecord={identity ? (ref) => setVersus(ref) : undefined}
+            onTracked={(next, created) => {
+              setHandles(next)
+              void refresh([created])
+            }}
+          />
+        </m.section>
+      )}
+
       {/* ── Who to compare against, found rather than typed ───────────────
           Behind a press. Working out who a member is measured against is a
           model call and a dozen live profile reads, and it was running its way
@@ -1396,10 +1395,6 @@ export function Dashboard({
               tint="violet"
               title={`Compare ${primary.displayName ?? primary.handle} against rivals`}
             />
-            <p className="text-sm leading-relaxed text-ink-2">
-              Finds who this account is actually measured against: a member is compared
-              with other members, not with a national leader. It then reads each one live.
-            </p>
             <Button size="sm" className="mt-3" onClick={() => setShowRivals(true)}>
               <Radar size={15} />
               Look for comparisons
@@ -1411,11 +1406,7 @@ export function Dashboard({
       {mode === 'compare' && !versus && primary && showRivals && (
         <m.section variants={fadeUp}>
           <SectionTitle
-            hint={
-              rivals
-                ? `${rivals.checked} handles were checked against the live platforms; ${rivals.discarded} did not resolve and were dropped.`
-                : 'Worked out from who this account belongs to. A head of government is measured against different people than a district legislator.'
-            }
+            hint={rivals ? `${rivals.checked} checked · ${rivals.discarded} dropped` : undefined}
           >
             Who {primary.displayName ?? primary.handle} is measured against
           </SectionTitle>
@@ -1435,10 +1426,6 @@ export function Dashboard({
                   <Radar size={14} className={finding ? 'animate-spin' : ''} />
                   {finding ? 'Working out who matters…' : 'Find competitors'}
                 </Button>
-                <p className="mt-3 text-xs text-ink-3">
-                  Costs one model call. The answer is kept on this device, so it is
-                  only paid once.
-                </p>
               </div>
             ) : (
               <>
@@ -1544,243 +1531,9 @@ export function Dashboard({
                     </ul>
                   </div>
                 ))}
-
-                <p className="mt-4 text-xs text-ink-3">
-                  Names and reasons come from the model and may be out of date. Every
-                  handle above was fetched from the platform, so follower counts are
-                  live, and any account that did not resolve was dropped rather than
-                  shown.
-                </p>
               </>
             )}
           </Card>
-        </m.section>
-      )}
-
-      {/* ── What people think ───────────────────────────────────────────── */}
-      {mode === 'compare' && !versus && compared.length > 0 && (
-        <m.section variants={fadeUp}>
-          <SectionTitle hint="Read from the comments on each account's recent posts, not from follower counts. This is the measure the other seven cannot give you.">
-            What people think
-          </SectionTitle>
-          <div className="space-y-3">
-            {compared.map((h) => {
-              const st = standings[h.id]
-              const busy = reading === h.id
-              return (
-                <Card key={h.id} tone={h.own ? 'accent' : undefined}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <PlatformBadge platform={h.platform} size={24} />
-                      <span className="truncate text-sm font-semibold text-ink">
-                        {h.displayName ?? h.handle}
-                      </span>
-                      {h.own && <Chip tone="accent">you</Chip>}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      {/*
-                        Head to head, from the row the office is already
-                        looking at.
-
-                        A Compare button existed, but only inside the rival
-                        DISCOVERY list, which appears after paying for a
-                        /api/rivals search. So an office that had added its own
-                        account and an opponent by hand could see both sitting
-                        in this list and had no way to put them against each
-                        other. The one question the screen is named for could
-                        not be asked from it.
-
-                        Only on the accounts the office does not run: comparing
-                        somebody with themselves is not a question.
-
-                        NOTE the disabled test. `busy` inside this map is a
-                        different variable from the component-level `busy` and
-                        means "this row is reading opinion"; using it here
-                        would be wrong but harmless, while using the outer one
-                        would disable the button permanently. It is deliberately
-                        gated on `identity` alone, which is what HeadToHead
-                        actually requires.
-                      */}
-                      {!h.own && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={!identity}
-                          title={
-                            identity
-                              ? `Compare ${identity.name} against ${h.displayName ?? h.handle}`
-                              : 'Set up the desk first, so there is somebody to compare against.'
-                          }
-                          onClick={() =>
-                            setVersus({
-                              /*
-                               * The display name is the best name available.
-                               * A tracked handle stores no role, party or seat,
-                               * so the search is given less to work with than
-                               * a discovered rival gets. The state comes from
-                               * the desk, because a rival tracked by this
-                               * office is almost always in the same one, and
-                               * naming it stops the search wandering to a
-                               * namesake in another state.
-                               */
-                              name: h.displayName ?? h.handle,
-                              state: identity?.state ?? null,
-                              followers: h.snapshots.at(-1)?.followers ?? null,
-                              platforms: [h.platform],
-                              profileUrl: h.profileUrl,
-                              photoUrl: h.avatarUrl,
-                            })
-                          }
-                        >
-                          <GitCompareArrows size={14} />
-                          Compare
-                        </Button>
-                      )}
-                      {!st && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy || reading != null}
-                          onClick={() => void readOpinion(h)}
-                        >
-                          <MessageSquareHeart size={14} />
-                          {busy
-                            ? readingPhase === 'searching'
-                              ? 'Reading the record…'
-                              : readingPhase === 'structuring'
-                                ? 'Weighing it up…'
-                                : 'Reading comments…'
-                            : 'Read opinion'}
-                        </Button>
-                      )}
-                    </span>
-                  </div>
-
-                  {st && (
-                    <>
-                      {/* The score, with its scale attached.
-                          A bare "0" beside "read from 10 published sources"
-                          reads as "nothing found" — the opposite of what it
-                          means, which is that praise and criticism balanced
-                          out. "+45" and "−30" carry their own scale; zero is
-                          the one value on a signed axis that does not, so it
-                          is the one value that has to be told where it sits.
-                          A score that was never produced says so instead of
-                          borrowing zero's place on the axis. */}
-                      <div className="mt-3 flex items-end gap-3">
-                        {st.score === null ? (
-                          <span className="tnum text-3xl font-bold leading-none text-ink-3">&mdash;</span>
-                        ) : (
-                          <span
-                            className="tnum text-3xl font-bold leading-none"
-                            style={{
-                              color:
-                                st.score > 15
-                                  ? 'var(--pos)'
-                                  : st.score < -15
-                                    ? 'var(--neg)'
-                                    : 'var(--warn)',
-                            }}
-                          >
-                            {st.score > 0 ? '+' : st.score === 0 ? '±' : ''}
-                            {st.score}
-                          </span>
-                        )}
-                        <span className="pb-0.5">
-                          <span className="block text-sm font-semibold text-ink">{st.label}</span>
-                          <span className="block text-xs text-ink-3">
-                            {st.score === null
-                              ? 'No score came back for this reading.'
-                              : st.source === 'record'
-                                ? `On a scale of −100 to +100, from ${st.sources?.length ?? 0} published ${
-                                    (st.sources?.length ?? 0) === 1 ? 'source' : 'sources'
-                                  }`
-                                : `On a scale of −100 to +100, from ${st.commentsRead} comments across ${st.postsRead} posts`}
-                          </span>
-
-                          {/* The two sides the score is the difference of.
-                              Without these a zero is unreadable: praise 85 /
-                              criticism 85 and praise 5 / criticism 5 both come
-                              to zero and mean opposite things — a fight, and
-                              invisibility. The number answers "which way"; only
-                              these answer "how much is being said at all". */}
-                          {st.favourable != null && st.hostile != null && (
-                            <span className="mt-1 block text-xs text-ink-3">
-                              <span className="text-[var(--pos)]">Praise {st.favourable}</span>
-                              <span className="px-1.5 text-ink-3">·</span>
-                              <span className="text-[var(--neg)]">Criticism {st.hostile}</span>
-                              <span className="pl-1.5 text-ink-3">each out of 100</span>
-                            </span>
-                          )}
-                        </span>
-                      </div>
-
-                      {/* The split, as one bar. Three numbers in a row would be
-                          read as three facts; this reads as one shape.
-
-                          Drawn ONLY for a comment reading. The split comes from
-                          counting what individual people wrote, and a reading of
-                          published coverage has nothing to count — so a record
-                          reading gets no bar rather than a bar derived from its
-                          score. That derivation would put an invented
-                          percentage in the one place on this card that looks
-                          most like a measurement. */}
-                      {st.source !== 'record' && (
-                        <>
-                          <div className="mt-3 flex h-2 overflow-hidden rounded-full">
-                            <span style={{ width: `${st.positive}%`, background: 'var(--pos)' }} />
-                            <span style={{ width: `${st.neutral}%`, background: 'var(--ink-3)', opacity: 0.35 }} />
-                            <span style={{ width: `${st.negative}%`, background: 'var(--neg)' }} />
-                          </div>
-                          <p className="mt-1.5 text-xs text-ink-3">
-                            {st.positive}% positive · {st.neutral}% neutral · {st.negative}% negative
-                          </p>
-                        </>
-                      )}
-
-                      {st.source === 'record' && (
-                        <p className="mt-2 text-xs leading-relaxed text-ink-3">
-                          {st.caveats?.[0] ??
-                            'Read from published coverage, not from a survey of constituents.'}
-                        </p>
-                      )}
-
-                      {st.summary && (
-                        <p className="mt-3 text-sm leading-relaxed text-ink">{st.summary}</p>
-                      )}
-
-                      {/* Criticism first. It is the half an office has to act on,
-                          and putting praise above it buries the work. */}
-                      {st.criticism.length > 0 && (
-                        <div className="mt-3">
-                          <p className="kicker">What they complain about</p>
-                          <ul className="mt-1.5 space-y-1">
-                            {st.criticism.slice(0, 3).map((c, i) => (
-                              <li key={i} className="text-xs text-ink-2">
-                                • {c}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {st.praise.length > 0 && (
-                        <div className="mt-2.5">
-                          <p className="kicker">What they praise</p>
-                          <ul className="mt-1.5 space-y-1">
-                            {st.praise.slice(0, 2).map((c, i) => (
-                              <li key={i} className="text-xs text-ink-2">
-                                • {c}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </Card>
-              )
-            })}
-          </div>
         </m.section>
       )}
 
@@ -1793,9 +1546,7 @@ export function Dashboard({
           on the compare tab. */}
       {mode === 'accounts' && handles.filter((h) => h.snapshots.length).length > 1 && (
         <m.section variants={fadeUp}>
-          <SectionTitle hint="Seven measures. An account can lead on reach and lose everywhere else.">
-            Head to head
-          </SectionTitle>
+          <SectionTitle>Head to head</SectionTitle>
           <Card>
             {/* Not a table.
                 
@@ -1874,11 +1625,6 @@ export function Dashboard({
                 {verdict}
               </p>
             )}
-
-            <p className="mt-3 text-xs text-ink-3">
-              Measured from the most recent reading of each account. A dash means the
-              platform does not publish that figure, not that it is zero.
-            </p>
           </Card>
         </m.section>
       )}
@@ -1890,7 +1636,7 @@ export function Dashboard({
           interactions the platforms actually publish. */}
       {mode === 'accounts' && topPosts.length > 0 && (
         <m.section variants={fadeUp}>
-          <SectionTitle hint="Ranked by likes and comments within each side, so a larger rival cannot crowd your own posts off the strip.">
+          <SectionTitle hint="Ranked by likes and comments.">
             Most engaging posts
           </SectionTitle>
           <div className="space-y-4">
@@ -2096,8 +1842,7 @@ export function Dashboard({
 
                     {s.postsPerWeek != null && (
                       <p className="mt-3 text-xs text-ink-3">
-                        About {s.postsPerWeek} posts a week, across the last {s.posts} we
-                        can see.
+                        About {s.postsPerWeek} posts a week.
                       </p>
                     )}
 
@@ -2131,9 +1876,6 @@ export function Dashboard({
               title="Nothing tracked yet"
               sub="Start with one of these"
             />
-            <p className="text-xs text-ink-3">
-              They are public accounts that read cleanly.
-            </p>
             <ul className="mt-3 space-y-2">
               {[
                 { url: 'https://www.youtube.com/@narendramodi', label: 'Narendra Modi', note: 'YouTube · 3.13 crore', platform: 'YouTube' },
@@ -2172,8 +1914,7 @@ export function Dashboard({
               title="Nothing to compare yet"
             />
             <p className="text-sm leading-relaxed text-ink-2">
-              Add at least one account under Accounts, then come back here to put it
-              against a rival.
+              Add an account under Accounts first.
             </p>
             <Button className="mt-3" size="sm" variant="outline" onClick={onClose}>
               Back to accounts
@@ -2182,29 +1923,9 @@ export function Dashboard({
         </m.section>
       )}
 
-      {mode === 'compare' && !versus && handles.length > 0 &&
-        handles.filter((h) => statsFor(h.snapshots.at(-1)).engagementRate != null).length < 2 && (
-          <m.section variants={fadeUp}>
-            <Card>
-              <CardHead
-                icon={<GitCompareArrows size={16} />}
-                tint="orange"
-                title="Not enough read to compare"
-              />
-              <p className="text-sm leading-relaxed text-ink-2">
-                A comparison needs two accounts with a follower count and at least one post
-                read. Refresh them under Accounts.
-              </p>
-              <Button className="mt-3" size="sm" variant="outline" onClick={onClose}>
-                Back to accounts
-              </Button>
-            </Card>
-          </m.section>
-        )}
-
-      <m.p variants={fadeUp} className="text-center text-xs text-ink-3">
-        Everything here is stored on this device only, never on a server.
-      </m.p>
+      {/* The old "not enough read to compare" card is gone on purpose: the
+          table above renders with any tracked account and says per cell what
+          is missing and how to fill it, which is more useful than a wall. */}
     </m.div>
   )
 }

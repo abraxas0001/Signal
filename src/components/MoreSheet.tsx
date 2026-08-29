@@ -6,34 +6,23 @@ import { Avatar } from './ui'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { ease, spring } from '@/lib/motion'
 import { cn } from '@/lib/utils'
-import { OVERFLOW_GROUPS, badgeOf, type Tab } from '@/lib/nav'
+import { OVERFLOW_GROUPS, badgeOf, isUnlisted, type Tab } from '@/lib/nav'
 import { DemoDoor, type DemoDoorProps } from '@/components/DemoDoor'
 import { isDemoScope, subscribe } from '@/lib/store'
 
 /**
- * The rest of the app, on a phone.
+ * The desk's own sheet, on a phone: whose desk this is, the Settings row, the
+ * example-desk door and Lock.
  *
- * The bottom bar has five slots and this product has ten destinations. Four of
- * them plus the raised Analyse control earn a permanent place; the rest were
- * supposed to be reached from the dashboard, and measurably were not — of the
- * dashboard's seventeen navigation call sites exactly one is unconditional, and
- * Settings' only route sits inside a branch that runs when the news scan is
- * BROKEN. So on a working desk, Settings could not be opened at all.
+ * Settings is back in `OVERFLOW_GROUPS` — it gave its bar slot to Influencers
+ * when the product owner asked for that button back — so the loop below
+ * renders it again, exactly as promised when the list was kept through its
+ * empty spell: one edit in lib/nav.ts, no UI work here.
  *
- * THE OBJECTION THIS OVERRIDES, because it is written down and deserves an
- * answer rather than a silent edit. TabBar says: "it is why there is no 'More'
- * button: an overflow menu would mean the bar had failed to choose."
- *
- * That was right about a smaller problem. It counts eight destinations and two
- * delegated; there are ten and five, and one of the five is Settings. And the
- * bar did choose — what failed was the counterparty. The comment names a
- * contract, "they are reached from the dashboard", which the dashboard does not
- * keep on an empty desk. The app therefore already HAD an overflow menu: an
- * invisible one that appeared only when a fetch failed. A labelled door is not
- * a worse answer than that; it is the same answer, made honest.
- *
- * The four daily screens and the primary action are untouched. This adds a
- * door, it does not re-rank anything.
+ * The sheet's other three jobs never depended on the destination list: the
+ * header avatar needs somewhere to open, Lock belongs behind the member's own
+ * face, and the example desk needs a door on every width — the sidebar's is
+ * lg:+ only.
  */
 
 /**
@@ -171,7 +160,12 @@ export function MoreSheet({
                   <ul aria-label={group.heading} className="space-y-1">
                     {group.items.map((item) => {
                       const badge = badgeOf(counts?.[item.id])
-                      const isActive = active === item.id
+                      // The tool screens open from Settings' own list and have
+                      // no row anywhere on the phone, so the Settings row here
+                      // stays lit while one of them is open — the same rule
+                      // the sidebar's foot card applies.
+                      const isActive =
+                        active === item.id || (item.id === 'settings' && isUnlisted(active))
                       return (
                         <li key={item.id}>
                           <button

@@ -7,7 +7,9 @@ import {
   indexUrlFor,
   feedUrlFor,
   citiesOf,
+  languagesOf,
   type NewsPortal,
+  type PortalLanguage,
 } from '@shared/regions'
 import { update } from '@/lib/store'
 
@@ -38,11 +40,33 @@ import { update } from '@/lib/store'
 /** How specifically a masthead can be read for this desk. */
 export type PortalReach = 'district' | 'state' | 'general'
 
+/**
+ * Which shelf of the news-stand a masthead sits on, for this desk.
+ *
+ * Reach answers "how narrowly can we address this publisher", which is a fact
+ * about their URLs. This answers "whose paper is it", which is a fact about
+ * their newsroom, and where the two disagree the second is the one that
+ * matters. The Hindu publishes a /telangana section, so its reach is 'state'.
+ * Namasthe Telangana publishes no section paths at all, so its reach is
+ * 'general'. The first is a national daily's regional page and the second is
+ * the state's largest Telugu daily reporting its districts every morning, and
+ * a ranking that knows only about reach puts them in that order.
+ *
+ * It did. Ranking the Mahabubnagar desk by reach alone returned Sakshi,
+ * Eenadu, Andhra Jyothy, Deccan Chronicle, The Hindu, The New Indian Express,
+ * The Hans India and 10TV: four English mastheads, and exactly one of the
+ * Telugu channels the office asked for, on the day it said "we need to track
+ * news channel very perfectly bcs they post most of the things".
+ */
+export type PortalLane = 'local' | 'localOther' | 'national' | 'wire'
+
 export interface PlannedPortal {
   label: string
   host: string
   language: string
   reach: PortalReach
+  /** Which shelf this came off, so the spread below is checkable. */
+  lane: PortalLane
   /** The exact page the scan will read, so the choice is checkable. */
   indexUrl: string
   hasFeed: boolean
@@ -70,66 +94,288 @@ export interface DeskPlan {
  * How many mastheads the desk starts with.
  *
  * The scanner reads at most eight index pages in one request (MAX_SOURCES in
- * lib/scan.ts) and each one is a live fetch of somebody else's server. Handing
- * it twelve would mean four are silently dropped every morning — the exact
- * failure mode this file exists to avoid — so the plan stops where the scanner
- * does, and says how many it left out.
+ * netlify/functions/lib/scan.ts) and each one is a live fetch of somebody
+ * else's server. Planning more than the scanner reads does not read more
+ * papers; it reads the first eight of a longer list and files a note saying the
+ * rest were skipped, which is a desk that believes it is watching twelve papers
+ * and is watching eight.
+ *
+ * So this number and MAX_SOURCES are one decision written in two files, and
+ * they have to move together. There is a third: test-autoconfig.ts asserts the
+ * plan never exceeds what the scanner reads, against a literal 8. Raising the
+ * budget alone breaks that test, which is the intended behaviour rather than an
+ * inconvenience: it is the assertion that stops these two drifting apart.
+ *
+ * Exported so the scanner's cap and this one can be compared in a test rather
+ * than restated as a literal in a third place.
  */
-const PORTAL_BUDGET = 8
+export const PORTAL_BUDGET = 12
+
+/**
+ * The four shelves, in the order a desk should be filled from them.
+ *
+ * Own state and own language first, then the state's English press, then the
+ * national front pages, then the wires. That is the order an office reads in,
+ * and the order matters more than it looks: the lanes are filled to their quota
+ * in this sequence, so when a state has fewer local papers than its quota the
+ * spare slots run downhill to the national end rather than the other way.
+ */
+const LANE_ORDER: PortalLane[] = ['local', 'localOther', 'national', 'wire']
+
+/**
+ * Whose paper is this, from the desk's point of view.
+ *
+ * `states` carries most of the answer already: a masthead that names states is
+ * printed for those states, and one marked 'all' is a national title with a
+ * regional page at best. `kind` separates the wires and the fact-check desks,
+ * which are national in a different sense again.
+ *
+ * The language half used to read `portal.language === 'English'`, on the theory
+ * that anything else must be the state's own tongue. That theory is false in
+ * exactly the places it matters. Four Hindi dailies publish a Maharashtra
+ * section and every Marathi masthead publishes none, so a Pune desk counted
+ * Amar Ujala, Dainik Bhaskar, Hindustan and Dainik Jagran as its local press
+ * and got one Marathi title in eight. `languages` on the region roll answers
+ * the question properly.
+ *
+ * 'localOther' is therefore "printed for this state, in a language the state
+ * does not read", which is English nearly always and Hindi in Goa.
+ */
+function laneOf(portal: NewsPortal, spoken: PortalLanguage[]): PortalLane {
+  if (portal.kind) return 'wire'
+  if (portal.states === 'all') return 'national'
+  return spoken.includes(portal.language) ? 'local' : 'localOther'
+}
+
+/**
+ * How the shelves divide a budget.
+ *
+ * Half to the state's own press, a quarter to its English papers, a quarter to
+ * the national front pages, and a wire only once there are ten slots to spend.
+ * The shares are the argument of this whole file in numbers: a member's office
+ * is reported on locally, so most of the budget goes where the reporting is,
+ * and the national quarter exists because the day the member is national news
+ * is the day the desk must not be reading eight district editions.
+ *
+ * Each lane may fall short of its quota. A thin state has no local press at
+ * all, and 22 states have no wire in the registry that is not already national,
+ * so the caller fills what is left over by rank and the shares stay a
+ * preference rather than a promise.
+ */
+function laneQuota(budget: number): Record<PortalLane, number> {
+  const wire = budget >= 10 ? 1 : 0
+  const rest = Math.max(0, budget - wire)
+  const local = Math.max(1, Math.round(rest * 0.5))
+  const localOther = Math.max(1, Math.round(rest * 0.25))
+  return { local, localOther, national: Math.max(0, rest - local - localOther), wire }
+}
+
+/** A scored candidate: what the plan will show, plus why it was chosen. */
+type ScoredPortal = PlannedPortal & { rank: number }
+
+/**
+ * The hundreds column of a masthead's score, by shelf.
+ *
+ * The gaps are 100 and every other bonus totals less than that, which is the
+ * property `scorePortal` explains and test-autoconfig.ts asserts.
+ */
+const LANE_BASE: Record<PortalLane, number> = {
+  local: 500,
+  localOther: 400,
+  national: 200,
+  wire: 100,
+}
+
+/**
+ * How good a source this masthead is for this desk, as one number.
+ *
+ * The lane decides the hundreds and everything else decides the rest, because
+ * whose paper it is outweighs every other consideration here. Inside a lane:
+ *
+ *   reach     a district edition (+90) beats a state section (+40) beats a
+ *             homepage, because it is the difference between this
+ *             constituency's news and the whole state's.
+ *   focus     a masthead printed for one state (+20) beats one printed for two
+ *             or three (+10) beats a regional group, because a smaller
+ *             footprint means more of every page is about this desk.
+ *   checked   a masthead somebody has actually fetched (+12) beats one added
+ *             from a reading list, because an opening set should be drawn from
+ *             sources known to answer. See `unverified` in shared/regions.ts.
+ *   feed      a publisher offering RSS (+6) beats one whose index has to be
+ *             scraped: the feed is steadier and returns ten times as many
+ *             stories.
+ *
+ * The bonuses total less than the gap between two lanes at the same reach, and
+ * that is deliberate rather than incidental. It is what makes the sorted list
+ * monotonic in lane inside any one reach, so a Telugu paper read at its state
+ * section can never fall below an English one read at its state section.
+ * test-autoconfig.ts asserts exactly that. A non-English masthead marked
+ * `states: 'all'` would break it, so if one is ever added, the lanes and not
+ * the language are what need revisiting.
+ */
+function scorePortal(
+  portal: NewsPortal,
+  place: ResolvedPlace,
+  spoken: PortalLanguage[],
+): ScoredPortal {
+  const districtUrl = place.district ? indexUrlFor(portal, place.district, place.state) : null
+  const stateUrl = indexUrlFor(portal, null, place.state)
+
+  // `indexUrlFor` falls back silently, so "did the district route work" is
+  // answered by comparing what came back, not by trusting that it did.
+  const hasDistrict = Boolean(
+    districtUrl && districtUrl !== portal.indexUrl && districtUrl !== stateUrl,
+  )
+  const hasState = stateUrl !== portal.indexUrl
+
+  const lane = laneOf(portal, spoken)
+  const hasFeed = feedUrlFor(portal, place.district, place.state) !== null
+  const footprint = portal.states === 'all' ? 0 : portal.states.length
+
+  return {
+    label: portal.label,
+    host: portal.host,
+    language: portal.language,
+    reach: hasDistrict ? 'district' : hasState ? 'state' : 'general',
+    lane,
+    indexUrl: hasDistrict ? districtUrl! : stateUrl,
+    hasFeed,
+    rank:
+      LANE_BASE[lane] +
+      // A fact-check desk publishes only when a claim is circulating, so it is
+      // the last thing to spend a slot on and the first thing to want on a bad
+      // morning. Below the wires, above nothing.
+      (portal.kind === 'factcheck' ? -40 : 0) +
+      (hasDistrict ? 90 : hasState ? 40 : 0) +
+      (footprint === 1 ? 20 : footprint > 0 && footprint <= 4 ? 10 : 0) +
+      (portal.unverified ? 0 : 12) +
+      (hasFeed ? 6 : 0),
+  }
+}
+
+const byRank = (a: ScoredPortal, b: ScoredPortal): number =>
+  b.rank - a.rank || a.label.localeCompare(b.label)
 
 /**
  * Which mastheads to read, and in what order.
  *
- * Ranked by how specifically each one can be pointed at this desk, because that
- * is what decides whether the scan comes back with this constituency's news or
- * the whole state's. A paper with a district edition for Mahabubnagar is worth
- * more to a Gadwal office than a national daily, whatever their circulations.
+ * Two decisions, and they are not the same decision. Which eight is a question
+ * about spread; what order to list them in is a question about merit. Taking
+ * the top eight by rank answers the second and gets the first wrong, and that
+ * became the whole problem when the registry grew from 102 mastheads to 134.
+ * Adding twelve more Telugu titles changed a Telangana desk's opening set by
+ * nothing at all, because four English mastheads publish a /telangana page and
+ * not one Telugu channel publishes a section path, so the four sat above every
+ * new arrival no matter how many arrived. The office had just said the channels
+ * are where the news is, and expanding the registry could not put one there.
  *
- * Language is a tiebreak rather than a filter. The registry already restricts
- * by state, and the local-language papers are the ones that actually carry
- * mandal-level news — but an office that reads only English must not end up
- * with an empty desk, so English titles are kept, just lower.
+ * So the lanes take their quota in turn (see `laneQuota`), any slots a thin
+ * lane could not fill run to the next, and the chosen set is then sorted by
+ * rank for display, so the office still reads them best first.
+ *
+ * Nothing here filters. Every masthead the registry holds for this state stays
+ * available on the grievance desk's own picker; this only decides which ones a
+ * desk starts with, and `omitted` says how many it did not.
  */
 function planPortals(place: ResolvedPlace): { portals: PlannedPortal[]; omitted: number } {
   if (!place.state) return { portals: [], omitted: 0 }
 
-  const available = portalsForState(place.state)
+  const spoken = languagesOf(place.state)
+  const scored = portalsForState(place.state).map((portal: NewsPortal) =>
+    scorePortal(portal, place, spoken),
+  )
+  scored.sort(byRank)
 
-  const scored = available.map((portal: NewsPortal) => {
-    const districtUrl = place.district ? indexUrlFor(portal, place.district, place.state) : null
-    const stateUrl = indexUrlFor(portal, null, place.state)
+  const quota = laneQuota(PORTAL_BUDGET)
+  const chosen: ScoredPortal[] = []
+  const taken = new Set<ScoredPortal>()
 
-    // `indexUrlFor` falls back silently, so "did the district route work" is
-    // answered by comparing what came back, not by trusting that it did.
-    const hasDistrict = Boolean(districtUrl && districtUrl !== portal.indexUrl && districtUrl !== stateUrl)
-    const hasState = stateUrl !== portal.indexUrl
-
-    const reach: PortalReach = hasDistrict ? 'district' : hasState ? 'state' : 'general'
-    const indexUrl = hasDistrict ? districtUrl! : stateUrl
-
-    return {
-      label: portal.label,
-      host: portal.host,
-      language: portal.language,
-      reach,
-      indexUrl,
-      hasFeed: feedUrlFor(portal, place.district, place.state) !== null,
-      // District beats state beats general; within a tier, a paper in the
-      // region's own language beats an English one.
-      rank:
-        (hasDistrict ? 200 : hasState ? 100 : 0) +
-        (portal.language === 'English' ? 0 : 10) +
-        (portal.rssUrl ? 1 : 0),
+  for (const lane of LANE_ORDER) {
+    let filled = 0
+    for (const candidate of scored) {
+      if (chosen.length >= PORTAL_BUDGET || filled >= quota[lane]) break
+      if (candidate.lane !== lane || taken.has(candidate)) continue
+      chosen.push(candidate)
+      taken.add(candidate)
+      filled += 1
     }
-  })
+  }
 
-  scored.sort((a, b) => b.rank - a.rank || a.label.localeCompare(b.label))
+  // Whatever the quotas could not place. A state with two local papers and no
+  // wire must still leave here with eight sources rather than four.
+  for (const candidate of scored) {
+    if (chosen.length >= PORTAL_BUDGET) break
+    if (taken.has(candidate)) continue
+    chosen.push(candidate)
+    taken.add(candidate)
+  }
 
-  const chosen = scored.slice(0, PORTAL_BUDGET)
+  chosen.sort(byRank)
   return {
     portals: chosen.map(({ rank: _rank, ...rest }) => rest),
     omitted: Math.max(0, scored.length - chosen.length),
   }
+}
+
+/**
+ * The spread, in a sentence, for an office looking at the plan before it runs.
+ *
+ * A count of papers says nothing about whether the desk is pointed at itself.
+ * "Four Telugu papers and two national mastheads" is checkable against what the
+ * office knows it reads, and it is the line that makes a bad plan visible: a
+ * Mahabubnagar desk whose mix comes back as six national mastheads has a
+ * registry problem, and the office should not have to open a URL to see it.
+ */
+function describeMix(portals: PlannedPortal[], state: string): string | null {
+  const parts: string[] = []
+  const of = (lane: PortalLane): PlannedPortal[] => portals.filter((p) => p.lane === lane)
+  const noun = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
+
+  /**
+   * The one language a lane is written in, or null when it holds several.
+   *
+   * Naming it is the point of the sentence. "Four Telugu papers" is something a
+   * Mahabubnagar office can check against what it actually reads; "four local
+   * papers" is a number it has to take on trust.
+   */
+  const solelyIn = (list: PlannedPortal[]): string | null => {
+    const languages = [...new Set(list.map((p) => p.language))]
+    return languages.length === 1 ? (languages[0] ?? null) : null
+  }
+
+  const local = of('local')
+  if (local.length > 0) {
+    const language = solelyIn(local)
+    parts.push(
+      language
+        ? `${local.length} ${language} ${local.length === 1 ? 'paper' : 'papers'}`
+        : `${noun(local.length, 'paper', 'papers')} in the languages of ${state}`,
+    )
+  }
+
+  const other = of('localOther')
+  if (other.length > 0) {
+    const language = solelyIn(other)
+    parts.push(
+      `${other.length}${language ? ` ${language}` : ''} ${
+        other.length === 1 ? 'paper' : 'papers'
+      } printed for ${state}`,
+    )
+  }
+
+  const national = of('national')
+  if (national.length > 0) {
+    parts.push(noun(national.length, 'national masthead', 'national mastheads'))
+  }
+
+  const wire = of('wire')
+  if (wire.length > 0) {
+    parts.push(noun(wire.length, 'wire or fact-check desk', 'wire and fact-check desks'))
+  }
+
+  const last = parts.pop()
+  if (!last) return null
+  return `The mix is ${parts.length > 0 ? `${parts.join(', ')}, and ${last}` : last}.`
 }
 
 /**
@@ -266,6 +512,11 @@ export function planDesk(identity: Identity): DeskPlan {
         `None of these papers publish a separate ${place.district} edition, so the scan reads their state pages and relies on the search words below to find local stories.`,
       )
     }
+
+    // Below three papers the mix is self-evident from the list itself, and a
+    // sentence restating it is noise on a screen that already has plenty.
+    const mix = portals.length >= 3 ? describeMix(portals, place.state) : null
+    if (mix) notes.push(mix)
   }
 
   if (identity.handles.length === 0) {

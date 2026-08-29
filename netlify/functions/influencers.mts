@@ -1,5 +1,6 @@
 import type { Config, Context } from '@netlify/functions'
 import { discoverInfluencers, influencerId, scanMentions } from './lib/influencers'
+import type { WatchSubject } from './lib/influencers'
 import type { Influencer } from '../../shared/grievance'
 import { PLATFORMS } from '../../shared/taxonomy'
 import type { Platform } from '../../shared/taxonomy'
@@ -7,8 +8,10 @@ import type { Platform } from '../../shared/taxonomy'
 /**
  * The influencer watch.
  *
- *   GET  /api/influencers?constituency=Eluru&subject=...   who to watch
- *   POST /api/influencers  { influencers, watchTerms }      what they said
+ *   GET  /api/influencers?constituency=…&subject=…[&party=…][&state=…]
+ *        who to watch, and what kind of voice each one is
+ *   POST /api/influencers  { influencers, watchTerms, subject? }
+ *        what they said, judged
  *
  * Split by method because the two cost different things and are wanted at
  * different times. Discovery is a model call plus a dozen live profile checks
@@ -22,6 +25,12 @@ import type { Platform } from '../../shared/taxonomy'
  * rather than only the mentions. The client has no other way to find out that
  * six of its fourteen accounts were never read, and an office told nothing is
  * happening when nothing was looked at is worse off than before it had the tool.
+ *
+ * `party`, `state` and `subject` are all optional and all additive. Two callers
+ * already exist that send none of them, and both must keep working exactly as
+ * they did: the party and state only add questions to the search plan, and the
+ * subject only unlocks the "is this about the member, the party or the seat"
+ * question. Without them the answer is narrower, never wrong.
  */
 
 /** Enough for a constituency roster; beyond this the scan cannot finish. */
@@ -73,7 +82,7 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
   const started = Date.now()
 
   if (req.method === 'POST') {
-    let body: { influencers?: unknown; watchTerms?: unknown }
+    let body: { influencers?: unknown; watchTerms?: unknown; subject?: unknown }
     try {
       body = (await req.json()) as typeof body
     } catch {
@@ -96,8 +105,26 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
       )
     }
 
+    /**
+     * Who the reading is for, when the caller knows.
+     *
+     * Absent from every request written before this existed, so it is read
+     * defensively and an absent or malformed block is simply an empty desk.
+     * The scan then judges stance without judging what the post is about,
+     * which is the honest narrower answer rather than a guess.
+     */
+    const raw = body.subject
+    const subject: WatchSubject =
+      raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? {
+            name: str((raw as Record<string, unknown>)['name']),
+            party: str((raw as Record<string, unknown>)['party']),
+            seat: str((raw as Record<string, unknown>)['seat']),
+          }
+        : {}
+
     try {
-      const scan = await scanMentions(influencers, watchTerms)
+      const scan = await scanMentions(influencers, watchTerms, subject)
       return Response.json(
         { ms: Date.now() - started, ...scan },
         { headers: { 'Cache-Control': 'no-store' } },
@@ -130,8 +157,14 @@ export default async (req: Request, _ctx: Context): Promise<Response> => {
     )
   }
 
+  // Both optional. They widen the search plan towards individual commentators
+  // and party accounts, and they tell the judge which state this seat is in
+  // rather than leaving it to the region table's guess.
+  const party = params.get('party')?.trim() ?? null
+  const state = params.get('state')?.trim() ?? null
+
   try {
-    const discovery = await discoverInfluencers(constituency, subject)
+    const discovery = await discoverInfluencers(constituency, subject, { party, state })
     return Response.json(
       { ms: Date.now() - started, ...discovery },
       { headers: { 'Cache-Control': 'no-store' } },

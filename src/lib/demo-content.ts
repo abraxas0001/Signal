@@ -420,8 +420,23 @@ export function buildDemoContent(roster: DemoRoster, principalKey: string): Demo
       if (h.failure) continue
       const influencerId = `demo_inf_${creator.key}_${h.platform}`
 
+      /**
+       * The roster records what each account IS in prose ("News channel",
+       * "Fact-checker"); the voices screen reads the discovery vocabulary
+       * ('outlet' | 'commentator' | 'aligned'). Without the mapping every demo
+       * voice wore a "Kind not known" chip under a name the dataset knows
+       * perfectly well, on the one screen meant to show the product working.
+       */
+      const voiceKind =
+        creator.kind === 'Commentator'
+          ? 'commentator'
+          : /channel|news|fact/i.test(creator.kind)
+            ? 'outlet'
+            : 'unclear'
+
       influencers.push({
         id: influencerId,
+        kind: voiceKind,
         platform: h.platform,
         handle: h.handle,
         displayName: creator.name,
@@ -438,9 +453,22 @@ export function buildDemoContent(roster: DemoRoster, principalKey: string): Demo
         const raw = post.title ?? ''
         const text = raw.toLowerCase()
         if (!text) continue
-        if (!terms.some((t) => text.includes(t))) continue
-        // Checked after the term match, so the cost is paid only on things that
-        // were going to be shown.
+
+        /**
+         * Judged OR matched, not matched-then-judged.
+         *
+         * The gate here used to be the word match alone, and on this dataset
+         * that reduced the flagship desk to a single mention: the watched
+         * Telangana accounts hold 409 posts and exactly one contains the
+         * literal string "D. K. Aruna", because Telugu headlines write her
+         * name in Telugu or call her "the Mahabubnagar MP". The build-time
+         * judge (scraper/gen-extras.ts, relevance phase) reads every headline
+         * against every principal, so a judgement is now sufficient on its
+         * own; the word match survives as the fallback for posts collected
+         * after the last judging pass.
+         */
+        const judged = post.stances?.[principalKey]
+        if (!judged && !terms.some((t) => text.includes(t))) continue
         if (UNPUBLISHABLE.test(raw)) continue
 
         mentions.push({
@@ -460,14 +488,21 @@ export function buildDemoContent(roster: DemoRoster, principalKey: string): Demo
            * the briefing entirely, so a desk with forty real posts naming it
            * read "Local-account posts: 0".
            *
-           * The tone is still genuinely unknown, and `stance: 'unclear'` now
-           * says so on its own: the briefing counts these as posts that name
-           * the member, keeps them out of the for/against verdict, and shows
-           * them under "Not read yet" rather than as neutral.
+           * Tone comes from the build-time reading above when there is one,
+           * and stays 'unclear' when there is not: the briefing counts an
+           * unclear mention as a post that names the member, keeps it out of
+           * the for/against verdict, and shows it under "Not read yet" rather
+           * than pretending neutrality was measured.
            */
           judged: true,
-          stance: 'unclear',
-          sentiment: 'Neutral',
+          stance: judged?.stance ?? 'unclear',
+          about: judged?.about,
+          sentiment:
+            judged?.stance === 'supportive'
+              ? 'Positive'
+              : judged?.stance === 'critical'
+                ? 'Negative'
+                : 'Neutral',
           fake: null,
           seenAt: roster.generatedAt,
           acknowledged: false,

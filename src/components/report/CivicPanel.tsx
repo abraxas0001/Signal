@@ -37,7 +37,7 @@ export function CivicPanel({ civic }: { civic: CivicReading }) {
 
   return (
     <section className="space-y-4">
-      <SectionTitle hint="Shown because this post concerns public services or officials.">
+      <SectionTitle>
         What this means for you
       </SectionTitle>
 

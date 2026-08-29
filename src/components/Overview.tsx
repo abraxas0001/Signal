@@ -269,10 +269,6 @@ export function Overview({
             title="Read a post"
             sub="Any public link, in any language"
           />
-          <p className="text-sm leading-relaxed text-ink-2">
-            Paste a link to any public post and get what it says, what it means, and what
-            people made of it.
-          </p>
           <Button className="mt-4" size="sm" onClick={onAnalyse}>
             <Link2 size={14} /> Read a post
           </Button>
@@ -286,7 +282,7 @@ export function Overview({
 
       {/* ── What we can see, per platform ───────────────────────────────── */}
       <m.section variants={fadeUp}>
-        <SectionTitle hint="Each platform gates a different thing, and the gates move. Measured, not assumed.">
+        <SectionTitle>
           What we can read
         </SectionTitle>
         <Card>
@@ -348,20 +344,12 @@ export function Overview({
               title="Track your first account"
               sub="Start with a YouTube channel"
             />
-            <p className="text-sm leading-relaxed text-ink-3">
-              Add a YouTube channel to get posts, engagement and comments. Facebook and
-              Instagram will show follower counts.
-            </p>
             <Button className="mt-4" size="sm" onClick={onAccounts}>
               <LayoutGrid size={14} /> Add an account
             </Button>
           </Card>
         </m.div>
       )}
-
-      <m.p variants={fadeUp} className="text-center text-xs text-ink-3">
-        Public posts only. Everything is stored on this device, never on a server.
-      </m.p>
     </m.div>
   )
 }

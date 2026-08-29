@@ -58,7 +58,13 @@
   --font-telugu: 'Noto Sans Telugu', 'Nirmala UI', Gautami, ui-sans-serif, system-ui, sans-serif;
 
   /* Fluid type: interpolates 360px -> 1280px viewport. */
-  --text-2xs: clamp(0.6875rem, 0.663rem + 0.109vw, 0.75rem);
+  /* 12px flat, not a clamp down to 11.
+     This is the smallest step in the scale, so it is the floor, and it was
+     interpolating to 11.03px at 390px: below the floor the rest of the app
+     now holds, on the labels inside charts and severity chips where the text
+     is already competing with a coloured ground. It reaches 12px at the top
+     of the range anyway, so there was never much interpolation to lose. */
+  --text-2xs: 0.75rem;
   --text-xs: clamp(0.75rem, 0.726rem + 0.109vw, 0.8125rem);
   --text-sm: clamp(0.875rem, 0.851rem + 0.109vw, 0.9375rem);
   --text-base: clamp(1rem, 0.976rem + 0.109vw, 1.0625rem);
@@ -196,8 +202,15 @@
 
   /* Data gradients — the premium tell in every reference shot. Each runs
      light→dark within ONE hue family so bar length stays the encoding. */
-  --grad-blue: linear-gradient(90deg, #46c6f5 0%, #2563eb 100%);
-  --grad-violet: linear-gradient(135deg, #a78bfa 0%, #6d28d9 100%);
+  /* Depth, not decoration.
+     These were a cyan-to-blue and a light-to-deep-violet sweep, used 44 times
+     across progress bars, chart columns and the raised nav button. A gradient
+     that travels ACROSS hues is the single most recognisable mark of a
+     generated interface, and it is the thing the owner meant by "looks ai
+     generated". A gradient within ONE hue reads as a lit surface instead, so
+     the sheen stays and the rainbow goes. */
+  --grad-blue: linear-gradient(180deg, #4f83f1 0%, #2563eb 100%);
+  --grad-violet: linear-gradient(180deg, #8b5cf6 0%, #6d28d9 100%);
   --grad-sunset: linear-gradient(90deg, #f6a723 0%, #db2777 100%);
   --grad-mint: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
 
@@ -276,8 +289,8 @@
     --chart-4: #8b5cf6;
     --chart-5: #db2777;
 
-    --grad-blue: linear-gradient(90deg, #38bdf8 0%, #3b82f6 100%);
-    --grad-violet: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+    --grad-blue: linear-gradient(180deg, #6ba3fb 0%, #3b82f6 100%);
+    --grad-violet: linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%);
     --grad-sunset: linear-gradient(90deg, #f59e0b 0%, #db2777 100%);
     --grad-mint: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
 
@@ -335,8 +348,8 @@
   --chart-3: #0d9488;
   --chart-4: #8b5cf6;
   --chart-5: #db2777;
-  --grad-blue: linear-gradient(90deg, #38bdf8 0%, #3b82f6 100%);
-  --grad-violet: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+  --grad-blue: linear-gradient(180deg, #6ba3fb 0%, #3b82f6 100%);
+  --grad-violet: linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%);
   --grad-sunset: linear-gradient(90deg, #f59e0b 0%, #db2777 100%);
   --grad-mint: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
   --aurora-1: #16233d;
@@ -1391,4 +1404,268 @@ select option,
   stroke-width: 1.5;
   stroke-dasharray: 2 4;
   stroke-linecap: round;
+}
+
+/* ===========================================================================
+   The phone type floor.
+
+   THE PROBLEM THIS FIXES. This file defines a full fluid scale at the top,
+   --text-2xs through --text-5xl, every step a clamp() interpolating 360px to
+   1280px. It is used exactly once: in this file. Every component reaches past
+   it for a hardcoded pixel value instead, and `text-[11px]` alone appears 50
+   times. Measured on a 390px viewport, the single most common text size in the
+   running app was 11px across 93 elements, with 13px section sub-headings
+   sitting BELOW the 14px body text they were meant to introduce.
+
+   So the phone was not rendering a phone design. It was rendering the desktop
+   design at desktop sizes in a third of the width, which is what makes the
+   alignment look accidental and the spacing look arbitrary.
+
+   WHY THIS IS A FLOOR AND NOT A SCALE-DOWN. The instinct is to shrink text on
+   small screens. That is backwards for reading: a phone is held closer and has
+   less room per line, so small text has to get BIGGER to stay legible while
+   headings get smaller to stop eating the screen. Headings already scale down
+   through their own clamp(). This block does the other half.
+
+   WHY IT TARGETS THE UTILITY CLASSES DIRECTLY. Replacing 85 hardcoded call
+   sites across twenty components would be a large diff with a typo in it, and
+   the next `text-[11px]` anybody adds would reintroduce the bug. Matching the
+   utilities means the floor holds for code that has not been written yet.
+   Tailwind is imported on line 1, so these later rules win on source order at
+   equal specificity. Desktop is untouched.
+   ========================================================================= */
+
+@media (max-width: 639px) {
+  /* Nothing renders below 12px. Anything smaller is decoration pretending to
+     be information. */
+  .text-\[10px\],
+  .text-\[10\.5px\] {
+    font-size: 12px;
+  }
+
+  /* Meta lines: timestamps, counts, the second line of a card. */
+  .text-\[11px\],
+  .text-\[11\.5px\] {
+    font-size: 12.5px;
+  }
+
+  .text-\[12px\],
+  .text-\[12\.5px\] {
+    font-size: 13px;
+  }
+
+  /* 13px was doing two jobs: small body, and sub-headings that then sat under
+     the 14px body they introduced. Raised so the hierarchy reads the right way
+     round. */
+  .text-\[13px\] {
+    font-size: 14px;
+  }
+
+  /* Tailwind's own steps, which the app uses for body and controls. */
+  .text-xs {
+    font-size: 13px;
+  }
+  .text-sm {
+    font-size: 15px;
+  }
+
+  /* The two label classes hardcode 11px and 10.5px, below the floor. Uppercase
+     and widely tracked, they are the hardest text in the app to read small. */
+  .kicker {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+  }
+  .eyebrow {
+    font-size: 11.5px;
+    letter-spacing: 0.08em;
+  }
+}
+
+/* A scroller that carries no scrollbar. The row it is used on is short and
+   edge-bled, so the cut-off chip is the affordance; a bar under it on a phone
+   is 8px of furniture doing the same job worse. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ===========================================================================
+   Phone spacing and hierarchy.
+   ========================================================================= */
+
+@media (max-width: 639px) {
+  /* `.section-head` wraps, and its action is a 44px tap target, so at 390px
+     every section spent a full row plus 16px of gap on a link that had just
+     wrapped underneath a two-line hint. The target stays 44px; the gap that
+     made it look stranded does not. */
+  .section-head {
+    gap: 0.125rem 1rem;
+    margin-bottom: 0.625rem;
+  }
+
+  /* Sections need to outrank body text by more than a point. With body at 15px
+     an 18px heading is a 1.2x step, which reads as bold body rather than as a
+     new section. */
+  .section-head h2 {
+    font-size: 20px;
+    letter-spacing: -0.015em;
+  }
+
+  /* The provenance line under a heading. Kept, because where a number came
+     from is the point of this product, but set at meta weight so it stops
+     competing with the heading it explains. */
+  .section-head p {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+}
+
+/* The bottom bar's labels, and the one text style deliberately below the phone
+   floor.
+
+   The floor exists so information is legible. A tab label is not carrying the
+   information: the icon above it is, inside a 56px target, and the label
+   reinforces. Raising these to 12.5px pushed "Dashboard" and "Grievances" to
+   5px apart in a five-slot bar at 390px, which is worse for the reader than
+   the point of type it bought them. Its own class, so the exemption is a
+   decision somebody made rather than a rule that quietly failed to match.
+*/
+.tab-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.005em;
+}
+
+/* Chart axis labels follow the phone floor too.
+
+   SVG text does not inherit the utility overrides above, so these stayed at
+   11px while everything around them moved up. They are the numbers a reader
+   squints at hardest, sitting on a tinted plot area at the edge of the chart,
+   so they were the worst place in the app to leave below the floor. */
+@media (max-width: 639px) {
+  .chart-axis-label {
+    font-size: 12px;
+  }
+}
+
+/* ===========================================================================
+   Calm the surfaces, and give the display a voice.
+
+   TWO THINGS WERE MAKING THIS LOOK UNDESIGNED, and they compound.
+
+   First, every single thing was a card. `--bg` is a tinted blue grey, `.card`
+   is white with a blue drop shadow, and the app puts a card around the
+   toolbar, around the filter row, around the empty-state button, around each
+   section, and then cards inside those. Eight floating white slabs stacked
+   down a tinted page is not a layout, it is a mosaic, and no amount of
+   spacing fixes it because the shadows keep every element at the same
+   apparent depth. A working app surface is calm: flat panes separated by
+   rules, with elevation spent only on things that genuinely float above the
+   page. So the card keeps its border and loses the drop shadow, and `.panel`
+   exists for the toolbars and filter rows that were never cards to begin with.
+
+   Second, one typeface was doing every job. `--font-display` and `--font-ui`
+   were both Inter, which is the "no typographic decision was made" signal, and
+   Instrument Serif was already self-hosted, already declared, and used
+   nowhere: `.hed`'s own comment says the serif "retires" and the headline
+   becomes Inter at 700. Bringing it back on the display sizes costs no bytes
+   and is the difference between a page that was styled and a page that was
+   designed.
+
+   It is deliberately NOT on `.hed`. Section headings run at 18 to 20px where a
+   display serif is weak, and its file carries Latin only, so an Indic heading
+   would silently fall through to a substitute. `.display` is opt-in, used at
+   hero sizes, and carries its own Indic carve-out below.
+   ========================================================================= */
+
+.card {
+  box-shadow: none;
+  border-color: var(--border);
+}
+:root:not([data-theme='light']) .card {
+  box-shadow: none;
+}
+
+/* Elevation is now a claim about floating, so it is spelled out where it is
+   meant: the card that is genuinely lifted off the page on hover, and the
+   sheets and popovers that sit above everything. */
+.card-hover:hover {
+  box-shadow: var(--e2);
+}
+
+/* A pane that groups without pretending to float. Toolbars, filter rows and
+   the strips that hold controls: they belong to the page, not on top of it. */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+
+/* The display voice. Latin only by design, so every run that is not Latin
+   falls back before it can break. */
+.display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  line-height: 1.04;
+}
+:lang(te) .display,
+:lang(te).display,
+:lang(hi) .display,
+:lang(hi).display,
+.te .display,
+.te.display,
+.display.te {
+  font-family: var(--font-telugu);
+  font-weight: 700;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+
+/* Pill tabs meet the touch floor.
+
+   .pill-tab is unlayered CSS written after the Tailwind import, so its 2.25rem
+   min-height beats a min-h-11 utility on the same element and both window
+   controls (the engagement card's and the comparison table's) rendered 36px on
+   a phone. Desktop keeps the compact 36px pill, which is right for a pointer. */
+@media (max-width: 639px) {
+  .pill-tab {
+    min-height: 2.75rem;
+  }
+}
+
+/* A grain the eye does not see and the surface does.
+
+   Every plane in this app is a flat fill, which is what makes a screenshot of
+   it look like a render rather than a product. One fixed overlay, no repaint,
+   no pointer events, at an opacity low enough that it registers as texture
+   rather than as dirt. SVG feTurbulence so it costs no request. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.022;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root:not([data-theme='light']) body::after {
+  opacity: 0.03;
+}
+
+/* Headings break where a human would break them, not where the box ends. */
+h1,
+h2,
+h3,
+.display,
+.hed {
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
 }

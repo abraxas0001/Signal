@@ -20,19 +20,12 @@ import { BAR_SIDE, type Tab } from '@/lib/nav'
  * carrying the accent gradient, because a tab bar where everything looks
  * equally important tells the user nothing about what to do first.
  *
- * There are TEN destinations and five slots, and this comment used to say eight
- * and two. That undercount is why the rule it stated stopped working: it also
- * said the rest "are reached from the dashboard", and the dashboard does not
- * keep that promise on an empty desk — of its seventeen navigation call sites
- * exactly one is unconditional, and Settings' only route runs when the news
- * scan is BROKEN. Five screens were reachable by no route at all at 360px.
- *
- * The same comment argued that a "More" button "would mean the bar had failed
- * to choose". The bar did choose, and its four daily screens are unchanged. It
- * is the delegation that failed — and an app whose overflow menu appears only
- * when a fetch fails already had one, just an invisible one. So slot five is
- * now a labelled door, and `lib/nav.ts` makes the compiler check that every
- * destination is behind one.
+ * There are TEN destinations and five slots. The product owner's cut is the
+ * one drawn in `lib/nav.ts`: the two daily reads on the left, Influencers and
+ * Compare on the right, Analyse in the centre. Settings left the bar for the
+ * More sheet, and its "Your desk's tools" list is still the unconditional
+ * route to the screens with no slot at all — the compiler check in nav.ts
+ * holds every destination to having one.
  *
  * Everything animates on transform and opacity only. This bar is fixed and
  * composited above scrolling content, so animating width, height or a
@@ -46,18 +39,14 @@ export type { Tab }
 interface Props {
   active: Tab
   onSelect: (tab: Tab) => void
-  /** Unreviewed grievance records and unacknowledged mentions. */
+  /** Row badges. A key that is absent or zero shows no badge. */
   counts?: Partial<Record<Tab, number>>
 }
 
 /**
- * Four side slots and the raised centre. The fifth used to be History; it is
- * now More, and History moved into the sheet behind it.
- *
- * History was the weakest of the five: it is a log of past readings, looked at
- * occasionally, while Settings — which shares its new home — could not be
- * opened on a phone at all. Swapping which of the two is one tap away and which
- * is two costs the reader almost nothing and buys five screens a route.
+ * Four side slots and the raised centre: dashboard, grievances | analyse |
+ * influencers, compare. Derived from BAR so this file cannot drift from the
+ * list the compiler checks.
  */
 const SIDE = BAR_SIDE
 
@@ -96,7 +85,7 @@ function TabButton({
           </span>
         )}
       </span>
-      <span className="text-[11px] font-medium leading-none">{label}</span>
+      <span className="tab-label">{label}</span>
 
       {/* The active mark: a tiny dot under the label, scaled rather than
           grown, and not the only signal — colour, stroke weight and
@@ -115,10 +104,10 @@ function TabButton({
 }
 
 export function TabBar({ active, onSelect, counts }: Props) {
-  // Overflow screens light the More slot instead of borrowing the dashboard's,
-  // so the bar always shows where the reader actually is. `personas` is
-  // unlisted, and falls back to the dashboard because it has no slot at all.
-  const lit = (id: Tab): boolean => active === id || (id === 'dashboard' && active === 'personas')
+  // Settings and its tool screens light nothing here: Settings left the bar
+  // for the More sheet, whose own row carries the lit state for all of them.
+  // A bar slot lit for a screen it does not open would be worse than none.
+  const lit = (id: Tab): boolean => active === id
 
   return (
     <nav

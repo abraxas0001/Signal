@@ -160,7 +160,7 @@ export const PEOPLE: Person[] = [
     name: 'Challa Vamshi Chand Reddy',
     party: 'Indian National Congress',
     partyTag: 'INC',
-    role: 'INC, Mahabubnagar — runner-up, 2024 Lok Sabha',
+role: 'INC, Mahabubnagar, runner-up, 2024 Lok Sabha',
     office: { constituency: 'Mahabubnagar', state: 'Telangana', district: 'Mahabubnagar' },
     aliases: ['వంశీ', 'వంశీచంద్', 'చల్లా', 'మహబూబ్ నగర్'],
     handles: [
@@ -242,7 +242,7 @@ export const PEOPLE: Person[] = [
     name: 'Manne Srinivas Reddy',
     party: 'Bharat Rashtra Samithi',
     partyTag: 'BRS',
-    role: 'Former MP, Mahabubnagar (2019–24)',
+role: 'Former MP, Mahabubnagar (2019 to 24)',
     office: { constituency: 'Mahabubnagar', state: 'Telangana', district: 'Mahabubnagar' },
     aliases: ['మన్నె', 'శ్రీనివాస్ రెడ్డి', 'మహబూబ్ నగర్'],
     handles: [
@@ -373,7 +373,7 @@ export const PAIRINGS: Pairing[] = [
     rivals: [
       {
         key: 'vamshi',
-        why: 'Lost Mahabubnagar to her in 2024 by about 4,500 votes — 506,247 to her 510,747, the narrowest margin in Telangana — and remains the Congress claimant on the seat.',
+why: 'Lost Mahabubnagar to her in 2024 by about 4,500 votes, 506,247 to her 510,747, the narrowest margin in Telangana, and remains the Congress claimant on the seat.',
       },
       {
         key: 'manne',
@@ -381,16 +381,16 @@ export const PAIRINGS: Pairing[] = [
       },
       {
         key: 'revanth',
-        why: 'His own assembly seat, Kodangal, is one of the seven segments inside her Lok Sabha constituency, and the two trade attacks over the Palamuru–Rangareddy lift irrigation scheme.',
+why: 'His own assembly seat, Kodangal, is one of the seven segments inside her Lok Sabha constituency, and the two trade attacks over the Palamuru-Rangareddy lift irrigation scheme.',
       },
     ],
   },
   {
     principal: 'modi',
     rivals: [
-      { key: 'rahul', why: 'Leader of the Opposition in the Lok Sabha — the constitutional counterweight on the same floor of the same House.' },
+{ key: 'rahul', why: 'Leader of the Opposition in the Lok Sabha, the constitutional counterweight on the same floor of the same House.' },
       { key: 'kharge', why: 'Congress national president and Leader of the Opposition in the Rajya Sabha: the party-head counterpart in national messaging.' },
-      { key: 'akhilesh', why: 'His party took 37 of Uttar Pradesh’s 80 seats in 2024 — the third-largest bloc in the House, in the state where Modi holds Varanasi.' },
+{ key: 'akhilesh', why: 'His party took 37 of Uttar Pradesh’s 80 seats in 2024, the third-largest bloc in the House, in the state where Modi holds Varanasi.' },
     ],
   },
   {
@@ -405,16 +405,16 @@ export const PAIRINGS: Pairing[] = [
     principal: 'revanth',
     rivals: [
       { key: 'ktr', why: 'BRS working president and the principal opposition attacker on his government; publicly challenged him to an open debate on governance and the agrarian crisis.' },
-      { key: 'bandi', why: 'Union Minister of State for Home Affairs and two-term Karimnagar MP — the BJP’s most aggressive day-to-day critic of his record.' },
-      { key: 'kishan', why: 'The senior-most Telangana BJP figure in the Union Cabinet, and the one who rebuts him directly on Centre–State disputes.' },
+{ key: 'bandi', why: 'Union Minister of State for Home Affairs and two-term Karimnagar MP, the BJP’s most aggressive day-to-day critic of his record.' },
+{ key: 'kishan', why: 'The senior-most Telangana BJP figure in the Union Cabinet, and the one who rebuts him directly on Centre-State disputes.' },
     ],
   },
   {
     principal: 'ktr',
     rivals: [
-      { key: 'revanth', why: 'The Chief Minister whose Congress unseated the BRS government in December 2023 — the man KTR names almost daily.' },
+{ key: 'revanth', why: 'The Chief Minister whose Congress unseated the BRS government in December 2023, the man KTR names almost daily.' },
       { key: 'bandi', why: 'KTR’s own Sircilla seat sits inside Bandi Sanjay’s Karimnagar Lok Sabha constituency, which he won in 2024 by 2.25 lakh votes.' },
-      { key: 'ramchander', why: 'BJP’s Telangana state president — his direct organisational counterpart, party chief against party working president.' },
+{ key: 'ramchander', why: 'BJP’s Telangana state president, his direct organisational counterpart, party chief against party working president.' },
     ],
   },
 ]

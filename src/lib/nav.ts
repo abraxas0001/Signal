@@ -9,6 +9,7 @@ import {
   Megaphone,
   Newspaper,
   Settings as SettingsIcon,
+  Swords,
   UserSearch,
 } from 'lucide-react'
 
@@ -41,6 +42,7 @@ export type Tab =
   | 'accounts'
   | 'compare'
   | 'actions'
+  | 'weekly'
   | 'settings'
 
 export interface NavItem {
@@ -64,37 +66,52 @@ export const NAV = {
   history: { id: 'history', label: 'History', Icon: Clock },
   settings: { id: 'settings', label: 'Settings', Icon: SettingsIcon },
   analyse: { id: 'analyse', label: 'Analyse a link', Icon: Link2 },
+  // Reached from the dashboard's week card, never from a bar: a sub-page of
+  // a section, not a place of its own.
+  weekly: { id: 'weekly', label: 'Week against rivals', Icon: Swords },
 } as const satisfies Record<Tab, NavItem>
 
 /**
  * The phone's bottom bar. `analyse` is the raised centre, not a side slot.
  *
- * The fifth slot used to be a "More" door. Actions holds it now: an overflow
- * menu is not a destination, and giving a permanent slot to a button whose only
- * job is to open a list wasted the most reachable position on the screen. The
- * office's own tasks are a daily screen and belong on the bar. The rest moved
- * behind the profile control in the header, which is a better home for them:
- * they are settings and reference, and the header is where a person looks for
- * their own account.
+ * The product owner's current cut: the two daily reads on the left, then
+ * Influencers and Compare on the right — "bring influencer button back to the
+ * dashboard", verbatim, after a release that had moved it under Settings.
+ * Settings itself leaves the bar for OVERFLOW: on the phone it is a row in
+ * the More sheet, and on a laptop the sidebar pins it as the foot card. Its
+ * "Your desk's tools" list is still the one unconditional route to the
+ * UNLISTED screens below, which keeps the promise the completeness check
+ * exists to enforce.
  */
-export const BAR = ['dashboard', 'grievances', 'analyse', 'influencers', 'actions'] as const
+export const BAR = ['dashboard', 'grievances', 'analyse', 'influencers', 'compare'] as const
 
-/** Behind the profile control on a phone; in the sidebar's groups on a laptop. */
-export const OVERFLOW = ['accounts', 'compare', 'history', 'settings'] as const
+/**
+ * What the phone's More sheet carries.
+ *
+ * Settings moved here when Influencers took its bar slot back. MoreSheet
+ * renders `OVERFLOW_GROUPS`, so this one edit is what lights the row up
+ * there; the sheet's other jobs — the person header, the example-desk door,
+ * Lock — never depended on this list.
+ */
+export const OVERFLOW = ['settings'] as const
 
 /**
  * Reachable, but deliberately not in any navigation list.
  *
- * People is here by request: the office considers it covered by Accounts. It
- * is not the same thing — Accounts tracks social handles and their engagement,
- * People tracks what the PAPERS are saying about named individuals — so the
- * screen and its six inbound dashboard links are kept working rather than
- * deleted. This category is what lets it leave the navigation without leaving
- * the completeness check below, which is the whole point of that check: a
- * screen that is hidden ON PURPOSE and a screen that is stranded BY ACCIDENT
- * must not look the same to the compiler.
+ * All four are rows on the Settings screen's "Your desk's tools" list, which
+ * is a real, unconditional route — unlike the dashboard links that stranded
+ * five screens the last time this file was reorganised. This category is what
+ * lets a screen leave the navigation without leaving the completeness check
+ * below, which is the whole point of that check: a screen that is hidden ON
+ * PURPOSE and a screen that is stranded BY ACCIDENT must not look the same to
+ * the compiler.
+ *
+ * People was already here by the office's request; Accounts, History and
+ * Tasks joined it when the owner asked for everything that is not a daily
+ * read to move under Settings. Influencers did too, and then left again when
+ * the owner asked for it back on the bar.
  */
-export const UNLISTED = ['personas'] as const
+export const UNLISTED = ['personas', 'accounts', 'history', 'actions', 'weekly'] as const
 
 /**
  * Every destination is on the bar, in the sheet, or explicitly unlisted —
@@ -106,7 +123,7 @@ export const UNLISTED = ['personas'] as const
  */
 type Placed = (typeof BAR)[number] | (typeof OVERFLOW)[number] | (typeof UNLISTED)[number]
 type Unplaced = Exclude<Tab, Placed>
-type Twice = Extract<(typeof BAR)[number], (typeof OVERFLOW)[number]>
+type Twice = Extract<(typeof BAR)[number], (typeof OVERFLOW)[number] | (typeof UNLISTED)[number]>
 const _placed: [Unplaced] extends [never] ? ([Twice] extends [never] ? true : never) : never = true
 void _placed
 
@@ -114,13 +131,27 @@ const OVERFLOW_SET: ReadonlySet<Tab> = new Set(OVERFLOW)
 export const inOverflow = (t: Tab): boolean => OVERFLOW_SET.has(t)
 export const labelOf = (t: Tab): string => NAV[t].label
 
+/**
+ * True for the screens that are reached through Settings' tools list. The
+ * sidebar's foot card and the More sheet's Settings row light up while one of
+ * these is open, because "where am I" must always have an answer and these
+ * screens have no slot of their own to light. The phone bar lights nothing
+ * for them — Settings is no longer on it.
+ */
+const UNLISTED_SET: ReadonlySet<Tab> = new Set(UNLISTED)
+export const isUnlisted = (t: Tab): boolean => UNLISTED_SET.has(t)
+
 /** The sidebar's taxonomy, which the More sheet reuses so the two agree. */
 export const GROUPS: ReadonlyArray<{ heading: string; items: readonly NavItem[] }> = [
-  { heading: 'Today', items: [NAV.dashboard, NAV.grievances, NAV.influencers, NAV.actions] },
-  { heading: 'Reference', items: [NAV.accounts, NAV.compare, NAV.history, NAV.settings] },
+  { heading: 'Today', items: [NAV.dashboard, NAV.grievances, NAV.influencers, NAV.compare] },
+  { heading: 'Reference', items: [NAV.settings] },
 ]
 
-/** The same grouping, filtered to what More carries. Empty groups drop out. */
+/**
+ * The same grouping, filtered to what More carries — currently the Settings
+ * row alone. A derivation rather than a hand-kept list so that moving a
+ * screen in or out of OVERFLOW is one edit above, not a MoreSheet rebuild.
+ */
 export const OVERFLOW_GROUPS = GROUPS.map((g) => ({
   heading: g.heading,
   items: g.items.filter((i) => inOverflow(i.id)),

@@ -856,6 +856,12 @@ export interface Column {
   value: number
   /** Marks the column the reader should look at first. */
   highlight?: boolean
+  /**
+   * A small badge rendered under the column in place of the text label —
+   * the engagement chart puts the post's platform there, so a bar answers
+   * "where" without a trip to the list beside it.
+   */
+  icon?: ReactNode
 }
 
 /**
@@ -867,12 +873,15 @@ export function ColumnChart({
   height = 190,
   gradient = 'blue',
   formatValue = compact,
+  /** Print each column's value above its bar, not only in the tooltip. */
+  showValues = false,
   className,
 }: {
   columns: Column[]
   height?: number
   gradient?: 'blue' | 'violet' | 'sunset' | 'mint'
   formatValue?: (n: number | null | undefined) => string
+  showValues?: boolean
   className?: string
 }) {
   const reduced = useReducedMotion()
@@ -880,7 +889,9 @@ export function ColumnChart({
   const { ref, show, hide, overlay } = useTip()
   const { ref: mref, width: W } = useMeasuredWidth<HTMLDivElement>(520)
   const H = height
-  const PAD = { l: 34, r: 8, t: 10, b: 24 }
+  const hasIcons = columns.some((c) => c.icon)
+  // Head-room for the printed value, foot-room for the platform badge.
+  const PAD = { l: 34, r: 8, t: showValues ? 24 : 10, b: hasIcons ? 30 : 24 }
   const innerW = W - PAD.l - PAD.r
   const innerH = H - PAD.t - PAD.b
   const maxV = Math.max(...columns.map((col) => col.value), 1)
@@ -904,7 +915,13 @@ export function ColumnChart({
             <stop offset="100%" stopColor={s1} />
           </linearGradient>
         </defs>
-        {[0.5, 1].map((f) => (
+        {/* The clip that grounds the bars: their bottom corners are drawn
+            BELOW the baseline and cut off flat, so a column stands on the
+            axis instead of floating on a second pair of rounded corners. */}
+        <clipPath id={`colclip-${uid}`}>
+          <rect x={0} y={0} width={W} height={PAD.t + innerH} />
+        </clipPath>
+        {[0, 0.5, 1].map((f) => (
           <line key={f} className="chart-grid" x1={PAD.l} x2={W - PAD.r} y1={PAD.t + innerH * (1 - f)} y2={PAD.t + innerH * (1 - f)} />
         ))}
         <text className="chart-axis-label" x={PAD.l - 6} y={PAD.t + 4} textAnchor="end">
@@ -913,16 +930,18 @@ export function ColumnChart({
         {columns.map((col, i) => {
           const h = Math.max((col.value / maxV) * innerH, col.value > 0 ? 3 : 0)
           const cxp = PAD.l + (innerW / columns.length) * (i + 0.5)
+          const rx = Math.min(6, bw / 2)
           return (
             <g key={`${col.label}-${i}`}>
               <m.rect
                 x={cxp - bw / 2}
                 width={bw}
-                rx={Math.min(6, bw / 2)}
+                rx={rx}
+                clipPath={`url(#colclip-${uid})`}
                 fill={`url(#col-${uid})`}
                 opacity={col.highlight === false ? 0.85 : col.highlight ? 1 : 0.85}
                 initial={reduced ? false : { height: 0, y: PAD.t + innerH }}
-                animate={{ height: h, y: PAD.t + innerH - h }}
+                animate={{ height: h + rx, y: PAD.t + innerH - h }}
                 transition={{ ...spring.settle, delay: i * 0.04 }}
                 onMouseMove={(e) => show(e.clientX, e.clientY, <TipRow label={col.label} value={formatValue(col.value)} />)}
                 onMouseLeave={hide}
@@ -931,13 +950,49 @@ export function ColumnChart({
               {col.highlight && (
                 <circle cx={cxp} cy={PAD.t + innerH - h} r="5" fill={s1} stroke="var(--surface)" strokeWidth="2.5" />
               )}
-              <text className="chart-axis-label" x={cxp} y={H - 6} textAnchor="middle">
-                {col.label}
-              </text>
+              {showValues && (
+                <text
+                  className="chart-axis-label"
+                  style={{ fontWeight: 650, fill: 'var(--text-2)' }}
+                  x={cxp}
+                  // Clear of the highlight dot on the lead bar, never off-frame.
+                  y={Math.max(PAD.t + innerH - h - (col.highlight ? 12 : 7), 12)}
+                  textAnchor="middle"
+                >
+                  {formatValue(col.value)}
+                </text>
+              )}
+              {/* The badge overlay carries the slot when an icon exists. */}
+              {!col.icon && (
+                <text className="chart-axis-label" x={cxp} y={H - 6} textAnchor="middle">
+                  {col.label}
+                </text>
+              )}
             </g>
           )
         })}
       </svg>
+      {/* Platform badges under their columns — HTML over the svg, positioned
+          with the same arithmetic the bars use, so they cannot drift. */}
+      {hasIcons && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ height: PAD.b }}>
+          {columns.map(
+            (col, i) =>
+              col.icon && (
+                <span
+                  key={`icon-${col.label}-${i}`}
+                  className="absolute -translate-x-1/2"
+                  style={{
+                    left: `${((PAD.l + (innerW / columns.length) * (i + 0.5)) / W) * 100}%`,
+                    bottom: 4,
+                  }}
+                >
+                  {col.icon}
+                </span>
+              ),
+          )}
+        </div>
+      )}
       </div>
       {overlay}
     </div>
@@ -962,6 +1017,8 @@ export interface HBarRow {
   sublabel?: ReactNode
   /** Marks the subject's own row. */
   emphasis?: boolean
+  /** Makes the whole row a button — the engagement board opens the post's analysis. */
+  onClick?: () => void
 }
 
 /**
@@ -1005,41 +1062,58 @@ export function HBarBoard({
           name, and the role or handle beneath it. A board of anonymous bars
           makes the reader match colours to a legend to learn anything. */}
       <div className={cn('space-y-3.5', benchmarks.length > 0 && 'pt-6')}>
-        {rows.map((r, i) => (
+        {rows.map((r, i) => {
           /* Two-row on a phone (identity above, bar below full-width), one row
              from sm up. A 375px screen cannot fit avatar + name column + bar +
              value on one line without the bar shrinking to a stub — and the
              bar IS the chart. */
-          <div key={`${r.label}-${i}`} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 sm:flex-nowrap" title={`${r.label}: ${formatValue(r.value)}`}>
-            {r.lead && <div className="shrink-0">{r.lead}</div>}
-            <div className="min-w-0 flex-1 basis-0 sm:w-[136px] sm:flex-none">
-              <p className={cn('truncate text-[13px] leading-tight', r.emphasis ? 'font-bold text-ink' : 'font-semibold text-ink-2')}>
-                {r.label}
-              </p>
-              {/* A div, not a p: the sublabel may now be badges rather than
-                  text, and an element inside a paragraph is invalid markup that
-                  React hydrates into a broken tree. `truncate` is dropped for
-                  the same reason — it would clip the badge row. */}
-              {r.sublabel != null && (
-                <div className="min-w-0 text-[11px] leading-tight text-ink-3">{r.sublabel}</div>
+          const Row = (r.onClick ? 'button' : 'div') as 'button'
+          const inner = (
+            <>
+              {r.lead && <div className="shrink-0">{r.lead}</div>}
+              <div className="min-w-0 flex-1 basis-0 sm:w-[136px] sm:flex-none">
+                <p className={cn('truncate text-[13px] leading-tight', r.emphasis ? 'font-bold text-ink' : 'font-semibold text-ink-2')}>
+                  {r.label}
+                </p>
+                {/* A div, not a p: the sublabel may now be badges rather than
+                    text, and an element inside a paragraph is invalid markup that
+                    React hydrates into a broken tree. `truncate` is dropped for
+                    the same reason — it would clip the badge row. */}
+                {r.sublabel != null && (
+                  <div className="min-w-0 text-[11px] leading-tight text-ink-3">{r.sublabel}</div>
+                )}
+              </div>
+              <div className="tnum shrink-0 text-right text-sm sm:order-last sm:w-[74px]">
+                <span className={cn(r.emphasis ? 'font-bold text-ink' : 'font-semibold text-ink-2')}>
+                  {formatValue(r.value)}
+                </span>
+              </div>
+              <div className="relative h-3 w-full min-w-0 basis-full overflow-hidden rounded-full bg-[var(--surface-3)] sm:w-auto sm:flex-1 sm:basis-0">
+                <m.div
+                  className="absolute inset-y-0 left-0 origin-left rounded-full"
+                  style={{ background: 'var(--grad-blue)', width: `${Math.min(100, (r.value / maxV) * 100)}%` }}
+                  initial={reduced ? false : { scaleX: 0 }}
+                  animate={{ scaleX: 1 }}
+                  transition={{ ...spring.settle, delay: 0.06 * i }}
+                />
+              </div>
+            </>
+          )
+          return (
+            <Row
+              key={`${r.label}-${i}`}
+              {...(r.onClick ? { type: 'button' as const, onClick: r.onClick } : {})}
+              className={cn(
+                'flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 text-left sm:flex-nowrap',
+                r.onClick &&
+                  'cursor-pointer rounded-[var(--radius-md)] transition-colors hover:bg-[var(--surface-2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]',
               )}
-            </div>
-            <div className="tnum shrink-0 text-right text-sm sm:order-last sm:w-[74px]">
-              <span className={cn(r.emphasis ? 'font-bold text-ink' : 'font-semibold text-ink-2')}>
-                {formatValue(r.value)}
-              </span>
-            </div>
-            <div className="relative h-3 w-full min-w-0 basis-full overflow-hidden rounded-full bg-[var(--surface-3)] sm:w-auto sm:flex-1 sm:basis-0">
-              <m.div
-                className="absolute inset-y-0 left-0 origin-left rounded-full"
-                style={{ background: 'var(--grad-blue)', width: `${Math.min(100, (r.value / maxV) * 100)}%` }}
-                initial={reduced ? false : { scaleX: 0 }}
-                animate={{ scaleX: 1 }}
-                transition={{ ...spring.settle, delay: 0.06 * i }}
-              />
-            </div>
-          </div>
-        ))}
+              title={`${r.label}: ${formatValue(r.value)}`}
+            >
+              {inner}
+            </Row>
+          )
+        })}
       </div>
 
       {benchmarks.length > 0 && (
@@ -1246,7 +1320,7 @@ export function PostThumbCard({
               e.stopPropagation()
               onAnalyse()
             }}
-            className="absolute inset-x-2 bottom-2 flex min-h-9 translate-y-0 items-center justify-center gap-1.5 rounded-full bg-white/95 text-[12.5px] font-semibold text-[var(--accent)] shadow-[var(--e2)] backdrop-blur transition-all hover:bg-white hover:shadow-[var(--e3)] sm:bottom-2.5 sm:translate-y-1 sm:opacity-90 sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
+            className="absolute inset-x-2 bottom-2 flex min-h-11 translate-y-0 items-center justify-center gap-1.5 rounded-full bg-white/95 text-[12.5px] font-semibold sm:min-h-9 text-[var(--accent)] shadow-[var(--e2)] backdrop-blur transition-all hover:bg-white hover:shadow-[var(--e3)] sm:bottom-2.5 sm:translate-y-1 sm:opacity-90 sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
           >
             <Sparkles size={14} strokeWidth={2.4} aria-hidden />
             Analyse

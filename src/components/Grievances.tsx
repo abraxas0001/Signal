@@ -9,7 +9,6 @@ import {
   ChevronRight,
   CircleAlert,
   Copy,
-  Download,
   ExternalLink,
   Filter,
   Hash,
@@ -28,23 +27,8 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import type {
-  FakeAssessment,
-  FakeSignal,
-  GrievanceRecord,
-  IssueCluster,
-  NamedPerson,
-  Recommendation,
-} from '@shared/grievance'
-import {
-  ASSEMBLY_TELUGU,
-  CONSTITUENCIES,
-  DISTRICT_PAGES_ARE_GEO_GATED,
-  NEWS_SOURCES,
-  bySeverityThenRecency,
-  suggestedTagsFor,
-} from '@shared/grievance'
-import { ALL_STATES, REGIONS, citiesOf, portalsForState } from '@shared/regions'
+import type { FakeSignal, GrievanceRecord, IssueCluster } from '@shared/grievance'
+import { CONSTITUENCIES, bySeverityThenRecency } from '@shared/grievance'
 import { partyAbbreviation } from '@shared/identity'
 import {
   formatDeskDay,
@@ -66,32 +50,42 @@ import type {
   Severity,
   Topic,
 } from '@shared/taxonomy'
-import {
-  ACTION_CATEGORIES,
-  ACTION_PRIORITIES,
-  COMMS_CHANNELS,
-  CONFIDENCE_TIERS,
-  DEBUNK_STATUSES,
-  FAKE_NEWS_TYPES,
-  FAKE_SUSPICION,
-  GRIEVANCE_TYPES,
-  NARRATIVE_CATEGORIES,
-  SENTIMENTS,
-  SENTIMENT_SCORE,
-  SEVERITIES,
-  SEVERITY_RANK,
-  TARGETS,
-  TOPICS,
-} from '@shared/taxonomy'
-import { Bar, Button, Card, Chip, PageHeader, selectClass, type ChipTone } from './ui'
-import { CardHead, DonutBreakdown, IconStat, IndiaMap, type MapMarker } from '@/components/kit'
-import { geocodePlace } from './gazetteer'
-import { INDIA_BBOX, INDIA_DOTS } from './india-dots'
+import { SENTIMENT_SCORE, SEVERITIES, SEVERITY_RANK, TOPICS } from '@shared/taxonomy'
+import { Button, Card, Chip, PageHeader, selectClass, type ChipTone } from './ui'
+import { CardHead } from '@/components/kit'
+/**
+ * The desk's own configuration — papers, words, links — lives in the shared
+ * settings module now, because Settings renders the identical panel inside
+ * its "Grievance desk settings" section. One component, two doors.
+ */
+import { DeskSetup, useDeskProfile } from '@/components/settings/DeskConfig'
 import { LevelPips } from './charts'
-import { makeId, readStore, update, useStore } from '@/lib/store'
+import { update, useStore } from '@/lib/store'
 import { absoluteDate, cn, hostOf, isIndicScript, pluralise } from '@/lib/utils'
 import { fadeUp, haptic, listItem, listStaggerFast, spring } from '@/lib/motion'
-import { fetchWithTimeout } from '@/lib/net'
+/**
+ * The sync is a module-level job, not component state, and that is the point.
+ * See src/lib/scan-job.ts: this screen starts it, watches it and can stop it,
+ * but unmounting this screen no longer touches it.
+ */
+import {
+  cancel as cancelScanJob,
+  dismiss as dismissScanJob,
+  findStories,
+  publisherFor,
+  start as startScanJob,
+  useScanJob,
+  type ScanTargets,
+} from '@/lib/scan-job'
+import { ScanProgress } from '@/components/ScanProgress'
+import {
+  fetchSuggestions,
+  readSuggestions,
+  saveSuggestions,
+  type SuggestionEntry,
+  type SuggestionPerson,
+} from '@/lib/suggest'
+import { useBackToDismiss } from '@/lib/nav-history'
 
 /**
  * The grievance desk.
@@ -109,505 +103,13 @@ import { fetchWithTimeout } from '@/lib/net'
 /* ═══════════════════════════════════════════════════════════════════════════
    The seam with the server
 
-   POST /api/grievance   { urls: string[], stream?: boolean }
-     stream → text/event-stream: one `record` or `failed` event per link, a
-              `clusters` event for the batch, then `done`.
-     plain  → { results: [{ url, ok, record | error }], clusters, incomplete }
-              or the bare contract shape, { records, issues }.
-     non-200 → { error?: string }
-
-   The whole list goes in one request rather than one request per link. Two
-   reasons, and the second is the one that decided it: the events give per-link
-   progress anyway, and issues are clustered across whatever the server saw in
-   that call — a request carrying one link can only ever cluster it with
-   itself, which would make the Issues tab a second copy of the list.
-
-   Anything the server does not settle — links it capped, links its deadline
-   cut off — simply goes round again in the next request. Nothing here needs to
-   know what the server's batch limit is; it only needs to notice what came
-   back unread.
-
-   Everything crossing this seam is checked before it reaches the store. A
-   half-parsed record is worse than one that never arrived: it sorts wrong,
-   filters wrong, and looks authoritative while doing it. Anything that fails
-   the check is reported against its URL, so the office knows which link to
-   paste again rather than wondering why nine went in and eight came out.
+   It was here: the parsers, the streaming batch reader, the merge that writes
+   each record as it lands, and the one that recognises a publisher by host. It
+   is now in src/lib/scan-job.ts, carried over whole rather than rewritten,
+   because the run that uses it no longer belongs to this screen. Leaving it
+   here would have meant a sync that survives unmount only as far as the first
+   function this file owns.
    ═══════════════════════════════════════════════════════════════════════════ */
-
-type Json = Record<string, unknown>
-
-/** The one cast in the file, and it is a checked one — everything else narrows. */
-function asObject(value: unknown): Json | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
-  return value as Json
-}
-
-const text = (value: unknown): string | null =>
-  typeof value === 'string' && value.trim() ? value.trim() : null
-
-const textList = (value: unknown): string[] =>
-  Array.isArray(value)
-    ? value.flatMap((item) => {
-        const t = text(item)
-        return t ? [t] : []
-      })
-    : []
-
-/** `includes` does not narrow the value; `find` returns the member itself. */
-const oneOf = <T extends string>(list: readonly T[], value: unknown): T | null =>
-  typeof value === 'string' ? (list.find((member) => member === value) ?? null) : null
-
-/** Declared from the contract rather than retyped, so the two cannot drift. */
-const SIGNAL_KINDS: readonly FakeSignal['kind'][] = [
-  'provenance',
-  'recirculation',
-  'source',
-  'consistency',
-  'corroboration',
-]
-const SIGNAL_SUPPORTS: readonly FakeSignal['supports'][] = [
-  'authentic',
-  'fabricated',
-  'inconclusive',
-]
-
-function toPerson(raw: unknown): NamedPerson | null {
-  const o = asObject(raw)
-  if (!o) return null
-  const name = text(o.name)
-  return name ? { name, role: text(o.role) } : null
-}
-
-function toSignal(raw: unknown): FakeSignal | null {
-  const o = asObject(raw)
-  if (!o) return null
-  const kind = oneOf(SIGNAL_KINDS, o.kind)
-  const supports = oneOf(SIGNAL_SUPPORTS, o.supports)
-  const confidence = oneOf(CONFIDENCE_TIERS, o.confidence)
-  const finding = text(o.finding)
-  if (!kind || !supports || !confidence || !finding) return null
-  return { kind, finding, confidence, supports }
-}
-
-function toFake(raw: unknown): FakeAssessment | null {
-  const o = asObject(raw)
-  if (!o) return null
-  const suspicion = oneOf(FAKE_SUSPICION, o.suspicion)
-  const debunkStatus = oneOf(DEBUNK_STATUSES, o.debunkStatus)
-  if (!suspicion || !debunkStatus) return null
-  return {
-    suspicion,
-    type: oneOf(FAKE_NEWS_TYPES, o.type),
-    debunkStatus,
-    signals: Array.isArray(o.signals)
-      ? o.signals.flatMap((s) => {
-          const signal = toSignal(s)
-          return signal ? [signal] : []
-        })
-      : [],
-    note: text(o.note),
-  }
-}
-
-function toRecommendation(raw: unknown): Recommendation | null {
-  const o = asObject(raw)
-  if (!o) return null
-  const action = oneOf(ACTION_CATEGORIES, o.action)
-  const priority = oneOf(ACTION_PRIORITIES, o.priority)
-  const channel = oneOf(COMMS_CHANNELS, o.channel)
-  if (!action || !priority || !channel) return null
-  return {
-    action,
-    priority,
-    talkingPoints: textList(o.talkingPoints),
-    channel,
-    rationale: text(o.rationale) ?? '',
-  }
-}
-
-function toRecord(raw: unknown, requestedUrl: string): GrievanceRecord | null {
-  const o = asObject(raw)
-  if (!o) return null
-
-  const headline = text(o.headline)
-  const summary = text(o.summary)
-  const topic = oneOf(TOPICS, o.topic)
-  const severity = oneOf(SEVERITIES, o.severity)
-  const sentiment = oneOf(SENTIMENTS, o.sentiment)
-  const grievanceType = oneOf(GRIEVANCE_TYPES, o.grievanceType)
-  const target = oneOf(TARGETS, o.target)
-  const fake = toFake(o.fake)
-  const recommendation = toRecommendation(o.recommendation)
-
-  // Refused rather than patched up. A record whose severity did not survive the
-  // trip would still take a place in the list, still colour a stripe, still
-  // decide what the MLA is shown first — off a value nobody sent. Better the
-  // link is listed as failed with a reason the office can act on.
-  if (!headline || !summary || !topic || !severity || !sentiment) return null
-  if (!grievanceType || !target || !fake || !recommendation) return null
-
-  return {
-    // Ids and timestamps are bookkeeping, not findings, so the app supplies
-    // them when the server does not. createdAt then means "read on this
-    // device", which is exactly what the list sorts by.
-    id: text(o.id) ?? makeId('grv'),
-    createdAt: text(o.createdAt) ?? new Date().toISOString(),
-    sourceUrl: text(o.sourceUrl) ?? requestedUrl,
-    publisher: text(o.publisher),
-    headline,
-    publishedAt: text(o.publishedAt),
-    language: text(o.language),
-    excerpt: text(o.excerpt) ?? '',
-    topic,
-    subtopic: text(o.subtopic),
-    constituency: text(o.constituency),
-    places: textList(o.places),
-    isGrievance: o.isGrievance === true,
-    grievanceType,
-    severity,
-    target,
-    namedPersons: Array.isArray(o.namedPersons)
-      ? o.namedPersons.flatMap((p) => {
-          const person = toPerson(p)
-          return person ? [person] : []
-        })
-      : [],
-    hashtags: textList(o.hashtags),
-    sentiment,
-    narrativeCategory: oneOf(NARRATIVE_CATEGORIES, o.narrativeCategory),
-    summary,
-    fake,
-    recommendation,
-  }
-}
-
-function toIssue(raw: unknown): IssueCluster | null {
-  const o = asObject(raw)
-  if (!o) return null
-  const title = text(o.title)
-  const category = oneOf(TOPICS, o.category)
-  const severity = oneOf(SEVERITIES, o.severity)
-  const sentiment = oneOf(SENTIMENTS, o.sentiment)
-  if (!title || !category || !severity || !sentiment) return null
-  return {
-    id: text(o.id) ?? makeId('iss'),
-    rank: typeof o.rank === 'number' && Number.isFinite(o.rank) ? o.rank : 0,
-    title,
-    category,
-    summary: text(o.summary) ?? '',
-    sentiment,
-    severity,
-    constituency: text(o.constituency),
-    places: textList(o.places),
-    recordIds: textList(o.recordIds),
-    evidenceUrls: textList(o.evidenceUrls),
-    politicalInvolvement: text(o.politicalInvolvement),
-    counterNarrative: text(o.counterNarrative),
-  }
-}
-
-const toIssues = (raw: unknown): IssueCluster[] =>
-  Array.isArray(raw)
-    ? raw.flatMap((i) => {
-        const issue = toIssue(i)
-        return issue ? [issue] : []
-      })
-    : []
-
-const STOPPED = 'Stopped before this link was read. Read again to finish it.'
-
-const UNREADABLE =
-  "This link came back unreadable. Try it again."
-
-const networkMessage = (err: unknown): string =>
-  err instanceof Error && err.message
-    ? `Could not reach the grievance service (${err.message}). Check the connection and read these links again.`
-    : 'Could not reach the grievance service. Check the connection and read these links again.'
-
-/**
- * A status turned into something the reader can act on.
- *
- * "The server responded with 404" is true and useless on a phone at a public
- * meeting. Each of these says what to do next instead.
- */
-async function explainResponse(res: Response): Promise<string> {
-  let fallback: string
-  switch (res.status) {
-    case 404:
-      fallback =
-        'The grievance service is not answering. If the app was just updated, that part may not be published yet.'
-      break
-    case 401:
-    case 403:
-      fallback =
-        'The grievance service refused the request. Its key is missing or wrong, and whoever set the app up needs to check it.'
-      break
-    case 413:
-      fallback = 'That page was too big to send. Try the print version of the article.'
-      break
-    case 429: {
-      const after = Number(res.headers.get('retry-after'))
-      fallback = Number.isFinite(after)
-        ? `Too many batches too quickly. Wait ${Math.max(1, Math.ceil(after))} seconds, then read the rest.`
-        : 'Too many batches too quickly. Wait a minute, then read the rest.'
-      break
-    }
-    case 504:
-      fallback = 'This link took too long to read. Try it on its own, without the others.'
-      break
-    default:
-      fallback =
-        res.status >= 500
-          ? 'The grievance service hit an error on this link. Reading it again usually works.'
-          : `The grievance service gave an unexpected answer (${res.status}). Try this link again.`
-  }
-
-  try {
-    const body: unknown = await res.json()
-    const o = asObject(body)
-    return (o ? (text(o.error) ?? text(o.message)) : null) ?? fallback
-  } catch {
-    return fallback
-  }
-}
-
-/** One link's fate, reported the moment it is known rather than at the end. */
-type OnOutcome = (url: string, record: GrievanceRecord | null, error: string | null) => void
-
-interface BatchRound {
-  issues: IssueCluster[]
-  /** Links the server actually answered for, either way. */
-  settled: Set<string>
-  /** What the server said about the batch as a whole, if anything. */
-  message: string | null
-  /**
-   * Send nothing further this run. Set when the service rate-limits us — the
-   * endpoint allows a handful of batches a minute, and answering a refusal by
-   * immediately trying the next link is how a limit turns into a lockout.
-   */
-  stop: boolean
-}
-
-const emptyRound = (): BatchRound => ({
-  issues: [],
-  settled: new Set<string>(),
-  message: null,
-  stop: false,
-})
-
-const joinNotes = (a: string | null, b: string | null): string | null =>
-  a && b ? (a === b ? a : `${a} ${b}`) : (a ?? b)
-
-/**
- * Send one batch and take whatever comes back.
- *
- * Never throws. A link that fails, a batch that fails and a connection that
- * dies mid-stream all end the same way: whatever arrived is kept, whatever did
- * not is simply unsettled, and the caller decides whether to go round again.
- */
-async function readBatch(
-  urls: string[],
-  signal: AbortSignal,
-  onOutcome: OnOutcome,
-): Promise<BatchRound> {
-  const round = emptyRound()
-
-  let res: Response
-  try {
-    res = await fetchWithTimeout('/api/grievance', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
-      body: JSON.stringify({ urls, stream: true }),
-      signal,
-    })
-  } catch (err) {
-    round.message = signal.aborted ? STOPPED : networkMessage(err)
-    return round
-  }
-
-  if (!res.ok) {
-    round.message = await explainResponse(res)
-    round.stop = res.status === 429
-    return round
-  }
-
-  const streaming = (res.headers.get('content-type') ?? '').includes('text/event-stream')
-  if (!streaming || !res.body) {
-    // The service answered in one piece — an older build of it, or something
-    // in front of it that will not stream. Same data, just all at the end.
-    try {
-      const payload: unknown = await res.json()
-      return readWholeAnswer(payload, round, onOutcome)
-    } catch {
-      round.message = 'The grievance service sent a reply this app could not read.'
-      return round
-    }
-  }
-
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-
-      // SSE frames are separated by a blank line.
-      const frames = buffer.split('\n\n')
-      buffer = frames.pop() ?? ''
-
-      for (const frame of frames) {
-        const line = frame.split('\n').find((l) => l.startsWith('data:'))
-        if (!line) continue // a heartbeat, not an event
-
-        let payload: unknown
-        try {
-          payload = JSON.parse(line.slice(5).trim())
-        } catch {
-          continue
-        }
-        applyEvent(payload, round, onOutcome)
-      }
-    }
-  } catch (err) {
-    // A stream that stops mid-way is the function hitting its time limit. The
-    // records already delivered are real and stay; the links that never landed
-    // are unsettled, and the caller sends them again.
-    round.message = joinNotes(round.message, signal.aborted ? STOPPED : networkMessage(err))
-  }
-
-  return round
-}
-
-function applyEvent(payload: unknown, round: BatchRound, onOutcome: OnOutcome): void {
-  const o = asObject(payload)
-  if (!o) return
-
-  const type = text(o.type)
-  const url = text(o.url)
-
-  if (type === 'record' && url) {
-    const record = toRecord(o.record, url)
-    round.settled.add(url)
-    onOutcome(url, record, record ? null : UNREADABLE)
-    return
-  }
-
-  if (type === 'failed' && url) {
-    round.settled.add(url)
-    onOutcome(url, null, text(o.error) ?? text(o.message) ?? 'This link could not be read.')
-    return
-  }
-
-  if (type === 'clusters') {
-    round.issues = toIssues(o.clusters ?? o.issues)
-    return
-  }
-
-  if (type === 'start' || type === 'done' || type === 'error') {
-    round.message = joinNotes(
-      round.message,
-      text(o.incomplete) ?? text(o.note) ?? text(o.message) ?? text(o.error),
-    )
-  }
-}
-
-/** The non-streaming answer: the per-URL results array, or the bare contract. */
-function readWholeAnswer(payload: unknown, round: BatchRound, onOutcome: OnOutcome): BatchRound {
-  const o = asObject(payload)
-  if (!o) {
-    round.message = 'The grievance service sent a reply this app could not read.'
-    return round
-  }
-
-  round.issues = toIssues(o.clusters ?? o.issues)
-  round.message = joinNotes(
-    text(o.incomplete) ?? text(o.note),
-    text(o.error) ?? text(o.message),
-  )
-
-  if (Array.isArray(o.results)) {
-    for (const entry of o.results) {
-      const e = asObject(entry)
-      const url = e ? text(e.url) : null
-      if (!e || !url) continue
-      const record = e.record == null ? null : toRecord(e.record, url)
-      round.settled.add(url)
-      onOutcome(url, record, record ? null : (text(e.error) ?? text(e.message) ?? UNREADABLE))
-    }
-    return round
-  }
-
-  // The shape the contract describes: a plain list of records. Each one is
-  // settled against the link it says it came from.
-  const bare = Array.isArray(o.records)
-    ? o.records
-    : Array.isArray(o.grievances)
-      ? o.grievances
-      : []
-  for (const entry of bare) {
-    const record = toRecord(entry, '')
-    if (!record || !record.sourceUrl) continue
-    round.settled.add(record.sourceUrl)
-    onOutcome(record.sourceUrl, record, null)
-  }
-
-  return round
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   Storage
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-function mergeRecords(existing: GrievanceRecord[], incoming: GrievanceRecord[]): GrievanceRecord[] {
-  const next = [...existing]
-  for (const record of incoming) {
-    // Keyed on the link as well as the id: pasting a story the office already
-    // has should correct that record, not file a second one beside it, and the
-    // same story re-read tomorrow arrives with a different id.
-    const at = next.findIndex((r) => r.id === record.id || r.sourceUrl === record.sourceUrl)
-    if (at >= 0) {
-      /**
-       * Everything fresh EXCEPT when it was first seen.
-       *
-       * This replaced the record whole, `createdAt` included, and that is how
-       * yesterday's stories kept turning up under today. A story with no
-       * printed date is filed on the day it was read (see recordDeskDay), so
-       * one read yesterday sat in yesterday correctly. Re-read this morning,
-       * because it is still on the paper's front page, it came back with a
-       * new `createdAt` and walked forward a day. Every sync dragged the
-       * undated part of yesterday into today, and it would have done it again
-       * tomorrow.
-       *
-       * The classification is allowed to improve on a re-read. The date the
-       * office first saw it is a fact about the past and does not change.
-       */
-      next[at] = { ...record, createdAt: next[at]!.createdAt }
-    } else next.push(record)
-  }
-  return next
-}
-
-function mergeIssues(existing: IssueCluster[], incoming: IssueCluster[]): IssueCluster[] {
-  if (!incoming.length) return existing
-  const next = [...existing]
-  for (const issue of incoming) {
-    const at = next.findIndex((i) => i.id === issue.id)
-    if (at >= 0) next[at] = issue
-    else next.push(issue)
-  }
-  return next
-}
-
-function persist(records: GrievanceRecord[], issues: IssueCluster[]): void {
-  update((s) => ({
-    ...s,
-    grievances: mergeRecords(s.grievances, records),
-    issues: mergeIssues(s.issues, issues),
-  }))
-}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Intake parsing
@@ -618,11 +120,6 @@ interface DraftLink {
   host: string
   /** The publisher's name when we recognise the host, null when we do not. */
   publisher: string | null
-}
-
-function publisherFor(host: string): string | null {
-  const h = host.toLowerCase()
-  return NEWS_SOURCES.find((s) => h === s.host || h.endsWith(`.${s.host}`))?.label ?? null
 }
 
 /**
@@ -683,35 +180,6 @@ const SEVERITY_TONE: Record<Severity, ChipTone> = {
   Medium: 'info',
   High: 'warning',
   Critical: 'negative',
-}
-
-/**
- * Severity carried onto the origin map.
- *
- * The map has five marker tones and no grey, so the four-step severity scale
- * folds to a three-tier alarm ramp: the two calm tiers share the accent dot,
- * High warns, Critical alarms. The exact severity word still rides on every
- * marker's tooltip and on the record row, so nothing is lost by the fold.
- */
-const SEVERITY_MARKER_TONE: Record<Severity, MapMarker['tone']> = {
-  Low: 'accent',
-  Medium: 'accent',
-  High: 'warning',
-  Critical: 'negative',
-}
-
-/** The CSS behind each marker tone, so a legend dot matches its pin exactly. */
-const MARKER_TONE_COLOUR: Record<string, string> = {
-  accent: 'var(--accent)',
-  warning: 'var(--warn)',
-  negative: 'var(--neg)',
-}
-
-/** What each tone means once folded, for the map's small legend. */
-const MARKER_TONE_LABEL: Record<string, string> = {
-  accent: 'Low / medium',
-  warning: 'High',
-  negative: 'Critical',
 }
 
 const SUSPICION_TONE: Record<FakeSuspicion, ChipTone> = {
@@ -910,20 +378,9 @@ const haystack = (r: GrievanceRecord): string =>
    Screen
    ═══════════════════════════════════════════════════════════════════════════ */
 
-type LinkStatus = 'queued' | 'reading' | 'done' | 'failed'
-
-interface LinkState extends DraftLink {
-  status: LinkStatus
-  message: string | null
-  headline: string | null
-}
-
-const STATUS_LABEL: Record<LinkStatus, string> = {
-  queued: 'Waiting',
-  reading: 'Reading',
-  done: 'Read',
-  failed: 'Failed',
-}
+/* Per-link progress used to be component state here, alongside a `running`
+   flag and an AbortController in a ref. All three are now the job's, because
+   all three used to die with the screen. See src/lib/scan-job.ts. */
 
 interface Filters {
   constituency: string
@@ -964,10 +421,13 @@ export type DeskMode = 'issues' | 'records'
 export function Grievances({
   onClose,
   mode = 'issues',
+  embedded = false,
   focusIssueId = null,
 }: {
   onClose: () => void
   mode?: DeskMode
+  /** True when rendered inside Settings, which carries its own desk config. */
+  embedded?: boolean
   /**
    * An issue to open on arrival.
    *
@@ -979,6 +439,23 @@ export function Grievances({
 }) {
   const store = useStore()
   const reduced = useReducedMotion()
+
+  // The profile values and writes, from the one module that owns them. Here
+  // for the pencil's configuration card; Settings renders the same values
+  // through the same hook, so there is one set of writes to get wrong.
+  const deskConfig = useDeskProfile()
+
+  /**
+   * Whether the desk's configuration is on screen.
+   *
+   * Papers, watch words and the district are chosen once; rendered
+   * permanently they pushed the day's records below the fold every morning.
+   * They live behind the pencil, on THIS screen, in place — the pencil used
+   * to route to Settings, which took the reader off the desk to configure
+   * the desk. An unconfigured desk shows the setup regardless: with no
+   * papers chosen there is nothing else this screen can do.
+   */
+  const [editing, setEditing] = useState(false)
 
   // Fixed by the mode rather than chosen on screen. `setTab` survives because
   // reading a batch of links still switches the intake view to its results.
@@ -1003,13 +480,23 @@ export function Grievances({
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
 
   const [draft, setDraft] = useState('')
-  const [links, setLinks] = useState<LinkState[]>([])
-  const [running, setRunning] = useState(false)
   // Open on a fresh device, because on a fresh device it is the whole screen.
   const [intakeOpen, setIntakeOpen] = useState(() => store.grievances.length === 0)
-  const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  /**
+   * The sync, watched rather than owned.
+   *
+   * There was an AbortController in a ref here and, beneath it,
+   * `useEffect(() => () => abortRef.current?.abort(), [])`. That line is gone
+   * and must not come back: unmounting this screen is not a decision to stop
+   * reading, and treating it as one is exactly how a reader who tapped Back
+   * mid-sync lost every story still in flight and every story still queued,
+   * silently. The run lives in the module now; this only subscribes to it, and
+   * arriving halfway through shows the stage it is on rather than a dead
+   * button.
+   */
+  const job = useScanJob()
+  const running = job.status === 'scanning' || job.status === 'reading'
 
   const records = useMemo(
     () => [...store.grievances].sort((a, b) => bySeverityThenRecency(SEVERITY_RANK, a, b)),
@@ -1242,95 +729,95 @@ export function Grievances({
   }, [configKey])
 
   /**
-   * Returns the URLs it found, so a caller can go on and read them.
+   * Where this desk reads, in the one shape both callers take.
    *
-   * It used to return nothing and simply fill the paste box. That was right
-   * for the intake panel, where somebody is choosing what to spend model
-   * calls on, and wrong for the Sync button, which promises today's news and
-   * delivered a box the office then had to notice, scroll to and press again.
-   * Pressed from the desk header it looked like it had done nothing at all:
-   * the screen still showed yesterday.
+   * The intake panel's Scan button and the header's Sync button send the same
+   * request to the same endpoint. It used to be written out twice, and two
+   * copies of a request body is how a fix to one half quietly leaves the other
+   * half sending last month's parameters.
    */
-  const runScan = useCallback(async (): Promise<string[]> => {
+  const scanTargets = useMemo<ScanTargets>(() => {
     const profile = store.profile
-    const identity = store.identity
-    const custom = (profile?.customPortalUrls ?? []).filter(Boolean)
+    const party = store.identity?.party ?? null
+    const short = partyAbbreviation(party)
+    return {
+      portals: profile?.portals ?? [],
+      customUrls: (profile?.customPortalUrls ?? []).filter(Boolean),
+      // The DISTRICT, falling back to the seat. Publishers issue editions by
+      // district and never by assembly segment, so sending the seat here finds
+      // no district route and silently drops the scan to the state page — the
+      // failure this reads as is a quiet news week.
+      city: profile?.district ?? profile?.constituency ?? null,
+      tags: profile?.watchTerms ?? [],
+      // The party is watched, but only alongside something narrower. On its own
+      // it returns the national wire: twenty-three stories about the party and
+      // none about this member.
+      broadTags: short ? [short] : party ? [party] : [],
+      state: profile?.state ?? null,
+      /**
+       * Who to judge each story against. Absent identity means no judging,
+       * and every story then shows labelled as unchecked rather than being
+       * silently kept or silently dropped.
+       */
+      subject: store.identity
+        ? {
+            name: store.identity.name,
+            role: store.identity.role ?? null,
+            constituency: profile?.constituency ?? store.identity.constituency ?? null,
+            state: profile?.state ?? store.identity.state ?? null,
+            party,
+            aliases: store.identity.aliases ?? [],
+          }
+        : null,
+    }
+  }, [store.profile, store.identity])
+
+  /**
+   * Scan the mastheads and put what was found in the paste box.
+   *
+   * The intake panel's half of the deliberate two-step flow, and it stays a
+   * two-step: somebody sees what the papers carried before spending two model
+   * calls per story on it. The header's Sync button no longer comes through
+   * here — it runs the job, which does its own scan as its first stage and
+   * reads straight through. So this fills the box and stops, which is what the
+   * panel around it has always promised.
+   */
+  const runScan = useCallback(async (): Promise<void> => {
     setScanning(true)
     setScanNote(null)
-    try {
-      const res = await fetchWithTimeout('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          portals: profile?.portals ?? [],
-          customUrls: custom,
-          // The DISTRICT, falling back to the seat. Publishers issue editions
-          // by district and never by assembly segment, so sending the seat here
-          // finds no district route and silently drops the scan to the state
-          // page — the failure this reads as is a quiet news week.
-          city: profile?.district ?? profile?.constituency ?? null,
-          tags: profile?.watchTerms ?? [],
-          // The party is watched, but only alongside something narrower. On its
-          // own it returns the national wire — twenty-three stories about the
-          // party and none about this member.
-          broadTags: (() => {
-            const party = identity?.party ?? null
-            const short = partyAbbreviation(party)
-            return short ? [short] : party ? [party] : []
-          })(),
-        }),
-      })
-      const data = (await res.json()) as {
-        candidates?: { url: string; title: string; portal: string; matched: string[] }[]
-        sources?: { portal: string; found: number; error: string | null }[]
-        notes?: string[]
-        error?: string
-      }
-      if (!res.ok || data.error) {
-        setScanNote(data.error ?? `The scan failed (HTTP ${res.status}).`)
-        return []
-      }
-      const found = data.candidates ?? []
-      if (found.length === 0) {
-        const dead = (data.sources ?? []).filter((s) => s.error)
-        setScanNote(
-          dead.length > 0
-            ? `Nothing matched. ${dead.map((d) => `${d.portal}: ${d.error}`).join(' ')}`
-            : 'The papers had nothing carrying your words today. Try fewer words, or add a paper.',
-        )
-        return []
-      }
-      // Take the previous scan's results out before putting these in, so the
-      // box holds this scan plus whatever the operator pasted by hand — never
-      // an earlier district's stories stacked on top of the current ones.
-      const previous = new Set(scannedRef.current)
-      const fresh = found.map((c) => c.url)
-      scannedRef.current = fresh
-      setDraft((current) => {
-        const kept = current
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter((l) => l && !previous.has(l))
-        const seen = new Set(kept)
-        return [...kept, ...fresh.filter((u) => !seen.has(u))].join('\n')
-      })
-      const perSource = (data.sources ?? [])
-        .map((s) => `${s.portal} ${s.found}`)
-        .join(' · ')
-      setScanNote(
-        `Found ${found.length} ${pluralise(found.length, 'story', 'stories')}: ${perSource}.` +
-          (data.notes?.length ? ` ${data.notes.join(' ')}` : ''),
-      )
-      return fresh
-    } catch (err) {
-      setScanNote(
-        `Could not reach the scanner: ${err instanceof Error ? err.message : String(err)}`,
-      )
-    } finally {
-      setScanning(false)
+    const found = await findStories(scanTargets)
+    setScanning(false)
+
+    if (found.error) {
+      setScanNote(found.error)
+      return
     }
-    return []
-  }, [store.profile])
+    if (found.urls.length === 0) {
+      setScanNote(found.note)
+      return
+    }
+
+    // Take the previous scan's results out before putting these in, so the box
+    // holds this scan plus whatever the operator pasted by hand — never an
+    // earlier district's stories stacked on top of the current ones.
+    const previous = new Set(scannedRef.current)
+    scannedRef.current = found.urls
+    setDraft((current) => {
+      const kept = current
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !previous.has(l))
+      const seen = new Set(kept)
+      return [...kept, ...found.urls.filter((u) => !seen.has(u))].join('\n')
+    })
+    setScanNote(found.note)
+  }, [scanTargets])
+
+  /**
+   * On a phone the detail replaces the list, so back should return to the list
+   * rather than leaving the grievance desk entirely.
+   */
+  useBackToDismiss(selectedId !== null, useCallback(() => setSelectedId(null), []))
 
   const openRecord = useCallback((id: string) => {
     setSelectedId(id)
@@ -1342,242 +829,96 @@ export function Grievances({
     if (window.innerWidth < 1024) window.scrollTo({ top: 0 })
   }, [])
 
-  const readLinks = useCallback(async (targets: DraftLink[]) => {
-    // A second run started on top of the first would orphan the first one's
-    // controller, leaving requests in flight that nothing can stop.
-    if (!targets.length || abortRef.current) return
-
-    const controller = new AbortController()
-    abortRef.current = controller
-    setRunning(true)
-    setIntakeOpen(true)
-    setLinks(targets.map((t) => ({ ...t, status: 'queued', message: null, headline: null })))
-
-    const mark = (url: string, patch: Partial<LinkState>) =>
-      setLinks((cur) => cur.map((l) => (l.url === url ? { ...l, ...patch } : l)))
-
-    const failed = new Map<string, string>()
-
-    const onOutcome: OnOutcome = (url, record, error) => {
-      if (record) {
-        // Written as each one lands rather than at the end of the batch: a
-        // connection that drops at link seven should cost the office links
-        // eight, nine and ten — not the six already read.
-        persist([record], [])
-        failed.delete(url)
-        mark(url, { status: 'done', headline: record.headline, message: null })
-      } else {
-        const message = error ?? UNREADABLE
-        failed.set(url, message)
-        mark(url, { status: 'failed', message })
-      }
-    }
-
-    let pending = [...targets]
-    let oneAtATime = false
-
-    while (pending.length && !controller.signal.aborted) {
-      const round = oneAtATime ? pending.slice(0, 1) : pending
-      const single = oneAtATime ? round[0] : null
-      if (single) mark(single.url, { status: 'reading', message: null })
-
-      const outcome = await readBatch(
-        round.map((t) => t.url),
-        controller.signal,
-        onOutcome,
-      )
-      if (outcome.issues.length) persist([], outcome.issues)
-
-      const remaining = pending.filter((t) => !outcome.settled.has(t.url))
-
-      if (outcome.stop) {
-        const message = outcome.message ?? 'The grievance service is not taking more links now.'
-        for (const target of remaining) {
-          failed.set(target.url, message)
-          mark(target.url, { status: 'failed', message })
-        }
-        pending = []
-        break
-      }
-
-      if (remaining.length < pending.length) {
-        pending = remaining
-        continue
-      }
-
-      // Nothing in that round moved. When it was a batch, the fault may be the
-      // batch itself — one article that hangs takes the whole request with it —
-      // so drop to one link at a time before writing any of them off.
-      if (!oneAtATime && pending.length > 1) {
-        oneAtATime = true
-        continue
-      }
-
-      const [first, ...rest] = pending
-      if (first) {
-        const message = outcome.message ?? 'The grievance service did not answer for this link.'
-        failed.set(first.url, message)
-        mark(first.url, { status: 'failed', message })
-      }
-      pending = rest
-    }
-
-    if (controller.signal.aborted) {
-      for (const target of pending) failed.set(target.url, STOPPED)
-      setLinks((cur) =>
-        cur.map((l) =>
-          l.status === 'done' || l.status === 'failed'
-            ? l
-            : { ...l, status: 'failed', message: STOPPED },
-        ),
-      )
-    }
-
-    // What worked leaves the box; what failed stays in it, so a mistyped link
-    // can be fixed and read again without hunting for it in the chat.
-    setDraft(
-      targets
-        .filter((t) => failed.has(t.url))
-        .map((t) => t.url)
-        .join('\n'),
-    )
-    setRunning(false)
-    abortRef.current = null
+  /**
+   * Read a list of links, through the job.
+   *
+   * The loop that does the reading — the batch, the fall back to one at a time
+   * when a whole batch stalls, the record written the moment it lands — is
+   * unchanged; it simply lives in scan-job.ts now. What changed here is who
+   * owns the run. Starting it is all this screen does, and `start` is a no-op
+   * while a run is going, so the old "orphaned controller" guard is the job's
+   * business rather than a ref this component has to remember to clear.
+   */
+  const readLinks = useCallback((urls: string[]) => {
+    if (urls.length === 0) return
+    startScanJob({ kind: 'read', urls })
   }, [])
 
   /**
    * Fetch today and read it, in one press.
    *
-   * The two halves already existed and were deliberately kept apart: the scan
-   * is cheap and the reading costs two model calls per story, so the intake
-   * panel shows what was found and lets somebody choose. That is right there
-   * and wrong here. A button on the desk header labelled "Sync today" is a
-   * promise about the desk, and it was filling a box on a panel that is not
-   * even on screen in the issues view. The office pressed it, saw yesterday's
-   * records still sitting there, and concluded it was broken.
+   * The two halves were deliberately kept apart: the scan is cheap and the
+   * reading costs two model calls per story, so the intake panel shows what was
+   * found and lets somebody choose. That is right there and wrong here. A
+   * button on the desk header labelled "Sync today" is a promise about the
+   * desk, and it was filling a box on a panel that is not even on screen in the
+   * issues view.
    *
-   * So this one does the whole job. It is the only caller that chains them;
-   * the intake panel keeps its two-step flow untouched.
+   * Both halves are now stages of one job, which is what makes the wait
+   * legible: scanning, sifting out what the desk already holds, reading, and
+   * grouping are four things the reader can watch happen instead of a button
+   * that says "Looking…" and then "Reading…" for three minutes.
+   *
+   * The intake panel keeps its two-step flow untouched.
    */
-  const syncToday = useCallback(async () => {
-    const found = await runScan()
-    if (found.length === 0) return
+  const syncToday = useCallback(() => {
+    startScanJob({ kind: 'sync', ...scanTargets })
+  }, [scanTargets])
 
-    /**
-     * Skip what the desk already holds.
-     *
-     * A masthead's front page carries several days at once, so most of what
-     * a second sync finds is what the first one already read. Reading a story
-     * again costs two model calls and teaches the office nothing, and until
-     * the merge above was fixed it also dragged undated stories forward a day
-     * each time. Anything genuinely new still goes through.
-     */
-    const held = new Set(readStore().grievances.map((r) => r.sourceUrl))
-    const urls = found.filter((u) => !held.has(u))
-    const skipped = found.length - urls.length
-
-    if (urls.length === 0) {
-      setScanNote(
-        `Nothing new. All ${found.length} ${pluralise(found.length, 'story', 'stories')} on the front pages are already on the desk.`,
-      )
-      return
-    }
-    if (skipped > 0) {
-      setScanNote(
-        `Reading ${urls.length} new ${pluralise(urls.length, 'story', 'stories')}. ${skipped} already on the desk, left alone.`,
-      )
-    }
-
-    await readLinks(
-      urls.map((url) => {
-        let host = ''
-        try {
-          host = new URL(url).host.replace(/^www\./, '')
-        } catch {
-          /* the scanner returns absolute URLs; a malformed one just loses its publisher name */
-        }
-        return { url, host, publisher: publisherFor(host) }
-      }),
-    )
-  }, [runScan, readLinks])
-
-  const failedLinks = useMemo(() => links.filter((l) => l.status === 'failed'), [links])
-
-  /* Presentational tallies for the stat strip, the severity donut and the
-     origin map. Every number here is a re-count of lists the desk already
-     holds — nothing new is fetched, stored or filtered, and no delta is
-     invented. */
-  const urgentToday = dayRecords.filter(
-    (r) => r.severity === 'High' || r.severity === 'Critical',
-  ).length
-  const flaggedToday = dayRecords.filter((r) =>
-    FLAGGED_SUSPICION.includes(r.fake.suspicion),
-  ).length
-  const severityMix = [...SEVERITIES]
-    .reverse()
-    .map((level) => ({
-      label: level,
-      value: dayRecords.filter((r) => r.severity === level).length,
-      color: SEVERITY_COLOUR[level],
-    }))
-    .filter((s) => s.value > 0)
+  const failedLinks = useMemo(
+    () => job.links.filter((l) => l.status === 'failed'),
+    [job.links],
+  )
 
   /**
-   * Where the day's grievances resolve on the map.
+   * What worked leaves the paste box; what failed stays in it, so a mistyped
+   * link can be fixed and read again without hunting for it in the chat.
    *
-   * Every place is one the desk already filed — a record's constituency or a
-   * village, mandal or ward named in the story — that the offline gazetteer can
-   * pin. A name it cannot place is dropped, never guessed onto the map: an
-   * honest scatter beats a full-looking one. Places are counted by how many
-   * records name them and toned by the most serious grievance filed there.
+   * This used to be the last statement of the read loop, which could only work
+   * while the loop and the box were in the same component. Now the run can
+   * finish while this screen is somewhere else entirely, so it is done on the
+   * run's completion instead, once, keyed on which run finished.
+   *
+   * It removes what was read and adds back what failed rather than replacing
+   * the box wholesale. The old version replaced it, which was safe when the box
+   * was the input to the run and is not safe now that a sync can finish while
+   * somebody is part-way through pasting the next list.
    */
-  const originPlaces = useMemo(() => {
-    const worseOf = (a: Severity, b: Severity): Severity =>
-      SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b
-    const byPlace = new Map<
-      string,
-      { lon: number; lat: number; name: string; state: string; count: number; worst: Severity }
-    >()
-    for (const r of dayRecords) {
-      const named = [r.constituency, ...r.places].filter((t): t is string => Boolean(t))
-      // A record naming a place twice — its constituency and a ward inside it
-      // both resolving to the same dot — counts once for that record.
-      const here = new Set<string>()
-      for (const t of named) {
-        const place = geocodePlace(t)
-        if (!place) continue
-        const key = `${place.lon},${place.lat}`
-        if (here.has(key)) continue
-        here.add(key)
-        const at = byPlace.get(key)
-        if (at) {
-          at.count += 1
-          at.worst = worseOf(at.worst, r.severity)
-        } else {
-          byPlace.set(key, {
-            lon: place.lon,
-            lat: place.lat,
-            name: place.name,
-            state: place.state,
-            count: 1,
-            worst: r.severity,
-          })
-        }
-      }
-    }
-    return [...byPlace.values()].sort((a, b) => b.count - a.count)
-  }, [dayRecords])
+  const reconciledRun = useRef<string | null>(null)
+  useEffect(() => {
+    if (running || !job.startedAt || job.links.length === 0) return
+    if (reconciledRun.current === job.startedAt) return
+    reconciledRun.current = job.startedAt
 
-  const originMax = Math.max(...originPlaces.map((p) => p.count), 1)
-  const originMarkers: MapMarker[] = originPlaces.map((p) => ({
-    lon: p.lon,
-    lat: p.lat,
-    label: p.name,
-    detail: `${p.count} ${pluralise(p.count, 'record')} · worst: ${p.worst}`,
-    tone: SEVERITY_MARKER_TONE[p.worst],
-    weight: p.count / originMax,
-  }))
-  const originTones = new Set(originMarkers.map((mk) => mk.tone))
+    const read = new Set(job.links.filter((l) => l.status === 'done').map((l) => l.url))
+    const failed = job.links.filter((l) => l.status === 'failed').map((l) => l.url)
+
+    setDraft((current) => {
+      const kept = current
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !read.has(l))
+      const seen = new Set(kept)
+      return [...kept, ...failed.filter((u) => !seen.has(u))].join('\n')
+    })
+  }, [running, job.startedAt, job.links])
+
+  /**
+   * Who the drafted posts speak as.
+   *
+   * Read from the identity rather than asked per press: the posts are written
+   * in the officeholder's first person, and the office should not have to say
+   * who they are on every issue card.
+   */
+  const person = useMemo<SuggestionPerson>(
+    () => ({
+      name: store.identity?.name ?? store.profile?.subject ?? 'This office',
+      role: store.identity?.role ?? null,
+      party: store.identity?.party ?? null,
+      constituency: store.identity?.constituency ?? store.profile?.constituency ?? null,
+    }),
+    [store.identity, store.profile],
+  )
 
   return (
     <m.div
@@ -1599,60 +940,116 @@ export function Grievances({
           subtitle={
             dayRecords.length
               ? `${dayRecords.length} ${pluralise(dayRecords.length, 'record')} · ${issues.length} ${pluralise(issues.length, 'issue')}`
-              : 'Paste the morning’s news links, get back what people are complaining about.'
+              : 'Paste the morning’s news links.'
           }
           actions={
-            <Button variant="ghost" onClick={onClose}>
-              Back
-            </Button>
+            <>
+              {/* Shows and hides the desk's own configuration, right here.
+                  Absent when Settings embeds this screen — a pencil there
+                  would be a door into the room the reader is standing in. */}
+              {!embedded && (
+                <Button
+                  variant="ghost"
+                  onClick={() => setEditing((v) => !v)}
+                  aria-label={editing ? 'Close the desk settings' : 'Edit the desk'}
+                  title={editing ? 'Close the desk settings' : 'Edit the desk'}
+                  aria-pressed={editing}
+                  // Square. The default md padding is px-6, which framed a
+                  // 16px icon in a 64px-wide box and left it adrift beside
+                  // the button next to it.
+                  className={cn('size-12 px-0', editing && 'bg-[var(--accent-soft)] text-[var(--accent)]')}
+                >
+                  <Pencil size={16} aria-hidden />
+                </Button>
+              )}
+              <Button variant="ghost" onClick={onClose}>
+                Back
+              </Button>
+            </>
           }
         />
       </m.div>
 
+      {/* The desk's configuration, behind the pencil — papers, watch words,
+          the district. A desk with no papers chosen AND nothing ever filed is
+          brand new, and there the setup shows by itself: an icon a new office
+          has no reason to press must never be the only way to start. */}
+      {!embedded &&
+        (editing ||
+          (deskConfig.portals.length + deskConfig.customUrls.length === 0 &&
+            store.grievances.length === 0)) && (
+          <m.div variants={fadeUp} className="mt-4">
+            <Card level="lift">
+              <CardHead
+                icon={<Pencil size={16} aria-hidden />}
+                tint="blue"
+                title="Grievance desk settings"
+                sub={`${deskConfig.portals.length + deskConfig.customUrls.length} ${pluralise(deskConfig.portals.length + deskConfig.customUrls.length, 'paper')} · ${deskConfig.tags.length} ${pluralise(deskConfig.tags.length, 'word')}`}
+              />
+              <DeskSetup
+                {...deskConfig}
+                framed={false}
+                onScan={() => void runScan()}
+                scanning={scanning}
+                scanNote={scanNote}
+              />
+            </Card>
+          </m.div>
+        )}
+
       {/* The day being read.
           A grievance desk is a daily instrument — the office works today's news
           and yesterday's should not be in the way. Everything filed is kept and
-          reachable by stepping back a day; only the day on screen changes. */}
+          reachable by stepping back a day; only the day on screen changes.
+
+          A flat .panel, not the floating shadowed pill it was: this row is a
+          toolbar, and dressed as a lifted card it competed with the record
+          cards below for first read. The stepper is grouped so it wraps as one
+          unit at 390px, with the action cluster taking its own right-aligned
+          row underneath instead of shuffling control by control. */}
       <m.div
         variants={fadeUp}
-        className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-[var(--e1)]"
+        className="panel mt-4 flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2"
       >
-        <button
-          onClick={() => setDay(shiftDay(day, -1))}
-          aria-label="Previous day"
-          className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)]"
-        >
-          <ChevronLeft size={16} />
-        </button>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <button
+            onClick={() => setDay(shiftDay(day, -1))}
+            aria-label="Previous day"
+            className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)]"
+          >
+            <ChevronLeft size={16} />
+          </button>
 
-        <span className="text-sm font-semibold">
-          {isToday(day) ? 'Today' : formatDeskDay(day)}
-        </span>
-        {isToday(day) && (
-          <span className="kicker">
-            {formatDeskDay(day)}
+          <span className="text-sm font-semibold">
+            {isToday(day) ? 'Today' : formatDeskDay(day)}
           </span>
-        )}
+          {isToday(day) && (
+            <span className="kicker">
+              {formatDeskDay(day)}
+            </span>
+          )}
 
-        <button
-          onClick={() => setDay(shiftDay(day, 1))}
-          disabled={isToday(day)}
-          aria-label="Next day"
-          className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)] disabled:opacity-35"
-        >
-          <ChevronRight size={16} />
-        </button>
+          <button
+            onClick={() => setDay(shiftDay(day, 1))}
+            disabled={isToday(day)}
+            aria-label="Next day"
+            className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)] disabled:opacity-35"
+          >
+            <ChevronRight size={16} />
+          </button>
 
-        {!isToday(day) && (
-          <Button size="sm" variant="ghost" onClick={() => setDay(todayDeskDay())}>
-            Back to today
-          </Button>
-        )}
+          {!isToday(day) && (
+            <Button size="sm" variant="ghost" onClick={() => setDay(todayDeskDay())}>
+              Back to today
+            </Button>
+          )}
+        </div>
 
-        {/* Wraps as a unit on phones: at 375px Sync + Clear + Export do not fit
-            beside the day stepper, and a non-wrapping cluster pushed Export off
-            the right edge of the screen. */}
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        {/* Drops to its own full-width row on phones. Right-aligned wrapping
+            stranded Export alone on a second line under Sync and Clear, which
+            read as a mistake; across the full width the three actions sit in
+            one even row instead. */}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2 max-sm:ml-0 max-sm:w-full max-sm:flex-nowrap max-sm:justify-between max-sm:[&_button]:px-3">
           {/*
             Fetch today now, rather than waiting for the morning.
 
@@ -1662,28 +1059,24 @@ export function Grievances({
             opposite of what a monitoring desk is for.
 
             It runs the same scan the morning job runs, so nothing here is a
-            second code path that can drift from it: the found links land in
-            the intake box exactly as they do at 07:30, ready to be read. The
-            07:30 run is unaffected and still happens.
+            second code path that can drift from it. The 07:30 run is
+            unaffected and still happens.
 
             Only on today. Pressing it while looking at last Tuesday would
             file this morning's news under a day the office is not looking at,
             which reads as the button having done nothing.
+
+            The button no longer carries the report of what happened. It said
+            "Looking\u2026" and then "Reading\u2026" for three minutes and nothing else,
+            which is the complaint that produced ScanProgress: the panel below
+            says which stage is running, how many stories are read against how
+            many were found, and what each failure was.
           */}
-          {/* What the sync did, said where the sync button is.
-              The links it finds go into the intake box, and that box is not on
-              screen in every view, so a press could look like nothing had
-              happened at all. */}
-          {isToday(day) && scanNote && !scanning && (
-            <span className="hidden max-w-[22rem] truncate text-xs text-ink-3 lg:inline" title={scanNote}>
-              {scanNote}
-            </span>
-          )}
           {isToday(day) && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => void syncToday()}
+              onClick={syncToday}
               disabled={scanning || running || !scanReady}
               title={
                 scanReady
@@ -1695,7 +1088,13 @@ export function Grievances({
                 size={14}
                 className={scanning || running ? 'animate-spin motion-reduce:animate-none' : undefined}
               />
-              {scanning ? 'Looking\u2026' : running ? 'Reading\u2026' : 'Sync today'}
+              {job.status === 'scanning'
+                ? 'Reading the papers\u2026'
+                : job.status === 'reading'
+                  ? 'Reading the stories\u2026'
+                  : scanning
+                    ? 'Looking\u2026'
+                    : 'Sync today'}
             </Button>
           )}
           {otherDays > 0 && (
@@ -1750,165 +1149,28 @@ export function Grievances({
         </div>
       </m.div>
 
-      {/* The desk at a glance: the reference dashboards open every screen with
-          a stat row, so the four numbers the office asks for first sit here —
-          all re-counts of what is already on screen, never a new query. */}
-      {(dayRecords.length > 0 || issues.length > 0) && (
-        <m.div variants={fadeUp} className="mt-4">
-          <CardHead
-            icon={<Inbox size={16} />}
-            title="The desk at a glance"
-            sub="Re-counted from what the desk already holds"
-            hint="Every number here is a re-count of records already on the desk. Nothing new is fetched, and no delta is invented."
-            tint="blue"
-            action={<Chip tone="neutral">{isToday(day) ? 'Today' : formatDeskDay(day)}</Chip>}
-          />
-          <div
-            className={cn(
-              'grid items-start gap-3 sm:gap-4',
-              severityMix.length > 0 && 'lg:grid-cols-[minmax(0,1fr)_320px]',
-            )}
-          >
-            <div
-              className={cn(
-                'grid grid-cols-2 gap-3 sm:gap-4',
-                severityMix.length === 0 && 'lg:grid-cols-4',
-              )}
-            >
-              <IconStat
-                icon={<Inbox size={18} />}
-                label={isToday(day) ? 'Records today' : 'Records this day'}
-                value={dayRecords.length}
-                tint="blue"
-                hero
-              />
-              <IconStat
-                icon={<Layers size={18} />}
-                label="Issues on the desk"
-                value={issues.length}
-                tint="violet"
-              />
-              <IconStat
-                icon={<CircleAlert size={18} />}
-                label="High or critical"
-                value={urgentToday}
-                tint="orange"
-              />
-              <IconStat
-                icon={<ShieldAlert size={18} />}
-                label="Worth checking"
-                value={flaggedToday}
-                tint="pink"
-              />
-            </div>
+      {/* What the sync is doing, directly under the button that starts it.
 
-            {severityMix.length > 0 && (
-              <Card className="lg:h-full">
-                <CardHead
-                  icon={<CircleAlert size={16} />}
-                  title="Severity mix"
-                  sub={
-                    isToday(day) ? 'Today’s records, by severity' : 'This day’s records, by severity'
-                  }
-                  tint="orange"
-                />
-                {/* Wraps rather than squeezes: on a 320px screen the donut and
-                    its legend stack instead of crushing the labels. */}
-                <div className="flex flex-wrap items-center gap-4 sm:gap-5">
-                  <DonutBreakdown
-                    segments={severityMix}
-                    size={132}
-                    thickness={16}
-                    centerLabel={String(dayRecords.length)}
-                    centerSub={pluralise(dayRecords.length, 'record')}
-                    className="mx-auto sm:mx-0"
-                  />
-                  <ul className="min-w-[9rem] flex-1 space-y-1.5">
-                    {severityMix.map((s) => (
-                      <li key={s.label} className="flex items-center gap-2 text-sm">
-                        <i className="size-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
-                        <span className="min-w-0 flex-1 truncate font-medium text-ink-2">
-                          {s.label}
-                        </span>
-                        <span className="tnum font-semibold text-ink">{s.value}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </Card>
-            )}
-          </div>
+          Above the tab panels rather than inside one, because the Sync button
+          is on this toolbar in BOTH views and the intake panel it used to
+          report through is only rendered in the records view. An office that
+          pressed Sync while reading issues got a spinning button and nothing
+          else, which is half of what they reported.
+
+          It stays on screen after the run to say what happened, and a reader
+          who comes back to this screen mid-run lands straight on the live
+          stage rather than on a button that looks stuck. */}
+      {job.status !== 'idle' && (
+        <m.div variants={fadeUp} className="mt-4">
+          <ScanProgress state={job} onStop={cancelScanJob} onHide={dismissScanJob} />
         </m.div>
       )}
 
-      {/* Where the day's grievances are coming from.
-          A dotted map of the places the desk's records name, pinned only where
-          the offline gazetteer can place them — a name it cannot resolve is
-          left off rather than dropped somewhere plausible. Marker size counts
-          the records; its colour marks the most serious grievance filed there. */}
-      {originPlaces.length > 0 && (
-        <m.div variants={fadeUp} className="mt-4">
-          <Card>
-            <CardHead
-              icon={<MapPin size={16} />}
-              title="Where grievances are coming from"
-              sub="Pinned only where the desk’s gazetteer is sure"
-              hint="Only places this desk’s gazetteer can pin are shown; one it cannot resolve is left off the map, never guessed onto it."
-              tint="blue"
-            />
-
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_248px] lg:items-center">
-              <div className="mx-auto w-full max-w-sm">
-                <IndiaMap dots={INDIA_DOTS} bbox={INDIA_BBOX} markers={originMarkers} />
-              </div>
-
-              <div className="min-w-0">
-                <p className="eyebrow">Most-named places</p>
-                <ul className="mt-2.5 space-y-1.5">
-                  {originPlaces.slice(0, 6).map((p) => {
-                    const tone = SEVERITY_MARKER_TONE[p.worst] ?? 'accent'
-                    return (
-                      <li key={`${p.lon},${p.lat}`} className="flex items-center gap-2 text-sm">
-                        <i
-                          className="size-2.5 shrink-0 rounded-full"
-                          style={{ background: MARKER_TONE_COLOUR[tone] }}
-                        />
-                        <span className="min-w-0 flex-1 truncate font-medium text-ink-2">
-                          {p.name}
-                          <span className="ml-1 font-normal text-ink-3">{p.state}</span>
-                        </span>
-                        <span className="tnum shrink-0 font-semibold text-ink">{p.count}</span>
-                      </li>
-                    )
-                  })}
-                </ul>
-
-                {/* The tone key, drawn only for the tiers actually on the map. */}
-                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
-                  {(['accent', 'warning', 'negative'] as const)
-                    .filter((t) => originTones.has(t))
-                    .map((t) => (
-                      <span key={t} className="flex items-center gap-1.5 text-2xs text-ink-3">
-                        <i
-                          className="size-2 rounded-full"
-                          style={{ background: MARKER_TONE_COLOUR[t] }}
-                        />
-                        {MARKER_TONE_LABEL[t]}
-                      </span>
-                    ))}
-                </div>
-
-                <p className="mt-2.5 text-2xs leading-relaxed text-ink-3">
-                  Marker size counts the records placed there; its colour marks the most serious
-                  among them. A place the gazetteer cannot resolve is left off the map, never
-                  guessed onto it.
-                </p>
-              </div>
-            </div>
-          </Card>
-        </m.div>
-      )}
-
+      {/* No summary furniture between the toolbar and the work. A stat strip,
+          a severity donut and an origin map lived here; every number on them
+          was a re-count of the list directly below, and the office called the
+          screenful it cost a waste of space. The records and issues start
+          right under the controls instead. */}
       {tab === 'records' ? (
         <div
           role="tabpanel"
@@ -1930,148 +1192,25 @@ export function Grievances({
             {/* The scan's outcome is printed beside the Scan button, in both the
                 collapsed strip and the expanded steps. It was also a card of its
                 own up here, which meant a successful scan reported itself twice
-                on one screen. */}
+                on one screen.
+
+                The desk-config values and writes the panel used to be handed
+                one prop at a time all live in useDeskProfile now, which the
+                panel calls itself — Settings renders the same configuration
+                through the same hook, so there is exactly one set of profile
+                writes to get wrong. */}
             {intakeOpen ? (
               <IntakePanel
                 draft={draft}
                 onDraft={setDraft}
                 links={parsed.links}
                 unusable={parsed.unusable}
-                progress={links}
                 running={running}
                 canHide={dayRecords.length > 0}
                 onHide={() => setIntakeOpen(false)}
-                onRead={() => void readLinks(parsed.links)}
-                onStop={() => abortRef.current?.abort()}
-                onRetryFailed={() =>
-                  void readLinks(
-                    failedLinks.map(({ url, host, publisher }) => ({ url, host, publisher })),
-                  )
-                }
+                onRead={() => readLinks(parsed.links.map((l) => l.url))}
+                onRetryFailed={() => readLinks(failedLinks.map((l) => l.url))}
                 failedCount={failedLinks.length}
-                assembly={store.profile?.constituency ?? ''}
-                tags={store.profile?.watchTerms ?? []}
-                deskState={store.profile?.state ?? ''}
-                portals={store.profile?.portals ?? []}
-                customUrls={store.profile?.customPortalUrls ?? []}
-                scanning={scanning}
-                scanNote={scanNote}
-                onScan={() => void runScan()}
-                onDeskState={(next) =>
-                  update((s) => ({
-                    ...s,
-                    profile: {
-                      subject: s.profile?.subject ?? 'This office',
-                      constituency: '',
-                      // A different state means different papers and different
-                      // place words; carrying either over would scan the wrong
-                      // patch and look like it had worked. The district goes
-                      // with them, and is cleared by name rather than by being
-                      // left off the list — so this reads as a decision rather
-                      // than as the omission it looks identical to.
-                      district: undefined,
-                      watchTerms: [],
-                      state: next,
-                      portals: [],
-                      customPortalUrls: s.profile?.customPortalUrls ?? [],
-                    },
-                  }))
-                }
-                onTogglePortal={(label) =>
-                  update((s) => {
-                    const current = s.profile?.portals ?? []
-                    return {
-                      ...s,
-                      profile: {
-                        // Spread first, as the custom-URL handler below already
-                        // does. Without it, toggling one masthead dropped
-                        // `district` and quietly widened the news scan from the
-                        // district edition to the whole state.
-                        ...(s.profile ?? {}),
-                        subject: s.profile?.subject ?? 'This office',
-                        constituency: s.profile?.constituency ?? '',
-                        watchTerms: s.profile?.watchTerms ?? [],
-                        state: s.profile?.state ?? '',
-                        portals: current.includes(label)
-                          ? current.filter((p) => p !== label)
-                          : [...current, label],
-                        customPortalUrls: s.profile?.customPortalUrls ?? [],
-                      },
-                    }
-                  })
-                }
-                onAddCustom={(url) =>
-                  update((s) => ({
-                    ...s,
-                    profile: {
-                      ...(s.profile ?? { subject: 'This office' }),
-                      subject: s.profile?.subject ?? 'This office',
-                      constituency: s.profile?.constituency ?? '',
-                      watchTerms: s.profile?.watchTerms ?? [],
-                      state: s.profile?.state ?? '',
-                      portals: s.profile?.portals ?? [],
-                      customPortalUrls: [...(s.profile?.customPortalUrls ?? []), url],
-                    },
-                  }))
-                }
-                onRemoveCustom={(url) =>
-                  update((s) => ({
-                    ...s,
-                    profile: {
-                      ...(s.profile ?? { subject: 'This office' }),
-                      subject: s.profile?.subject ?? 'This office',
-                      constituency: s.profile?.constituency ?? '',
-                      watchTerms: s.profile?.watchTerms ?? [],
-                      state: s.profile?.state ?? '',
-                      portals: s.profile?.portals ?? [],
-                      customPortalUrls: (s.profile?.customPortalUrls ?? []).filter(
-                        (u) => u !== url,
-                      ),
-                    },
-                  }))
-                }
-                onAssembly={(next) =>
-                  update((s) => ({
-                    ...s,
-                    profile: {
-                      ...(s.profile ?? { subject: 'This office' }),
-                      subject: s.profile?.subject ?? 'This office',
-                      constituency: next,
-                      // Place words from the old segment would quietly keep
-                      // filtering for somewhere the desk no longer covers.
-                      watchTerms: (s.profile?.watchTerms ?? []).filter(
-                        (t) => !Object.entries(ASSEMBLY_TELUGU).some(
-                          ([en, te]) =>
-                            t.toLowerCase() === en.toLowerCase() || t === te,
-                        ),
-                      ),
-                      // Spread first, then restate: choosing a state calls this
-                      // immediately afterwards to clear the city, and rebuilding
-                      // the profile from scratch here wiped the state that had
-                      // just been set — the select snapped back to empty.
-                      state: s.profile?.state ?? '',
-                      portals: s.profile?.portals ?? [],
-                      customPortalUrls: s.profile?.customPortalUrls ?? [],
-                    },
-                  }))
-                }
-                onToggleTag={(tag) =>
-                  update((s) => {
-                    const current = s.profile?.watchTerms ?? []
-                    const has = current.some((t) => t.toLowerCase() === tag.toLowerCase())
-                    return {
-                      ...s,
-                      profile: {
-                        ...(s.profile ?? { subject: 'This office' }),
-                        subject: s.profile?.subject ?? 'This office',
-                        constituency: s.profile?.constituency ?? '',
-                        watchTerms: has
-                          ? current.filter((t) => t.toLowerCase() !== tag.toLowerCase())
-                          : [...current, tag],
-                      },
-                    }
-                  })
-                }
               />
             ) : (
               <Button variant="outline" className="w-full" onClick={() => setIntakeOpen(true)}>
@@ -2165,11 +1304,6 @@ export function Grievances({
                 sub="Issues appear once enough links have been read"
                 tint="violet"
               />
-              <p className="text-sm leading-relaxed text-ink-3">
-                An issue is several records about the same thing: nine complaints about one
-                water line, not nine separate stories. They appear once enough links have been
-                read for the desk to group them.
-              </p>
             </Card>
           ) : visibleIssues.length === 0 ? (
             /* A filter combination that matches nothing is a completely
@@ -2223,6 +1357,7 @@ export function Grievances({
                       return record ? [record] : []
                     })}
                     onOpenRecord={openRecord}
+                    person={person}
                   />
                 </m.li>
               ))}
@@ -2236,679 +1371,48 @@ export function Grievances({
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Intake
+
+   The setup steps that used to be defined here — DeskSetup, RegionPicker,
+   PortalInput, TagInput — moved whole to components/settings/DeskConfig.tsx,
+   because Settings now renders the identical configuration in its "Grievance
+   desk settings" section. On the desk the same setup lives behind the
+   header's pencil; this panel is only the paste box and the read button.
    ═══════════════════════════════════════════════════════════════════════════ */
-
-/**
- * Choose the segment, then the papers that cover it, then the words that make
- * a story ours.
- *
- * The desk previously opened on an empty box and the instruction "paste
- * links", which assumes the operator already knows which links. This asks the
- * three questions in the order an office actually answers them, and each
- * answer narrows the next: the segment decides which district pages to open,
- * and the tags decide which of the day's stories are worth filing at all.
- *
- * The segment and the tags are kept on the office profile rather than held for
- * this one paste, because they are the same every morning.
- */
-function DeskSetup({
-  state,
-  city,
-  tags,
-  portals,
-  customUrls,
-  onState,
-  onCity,
-  onTogglePortal,
-  onAddCustom,
-  onRemoveCustom,
-  onToggleTag,
-  onScan,
-  scanning,
-  scanNote,
-}: {
-  state: string
-  city: string
-  tags: string[]
-  portals: string[]
-  customUrls: string[]
-  onState: (next: string) => void
-  onCity: (next: string) => void
-  onTogglePortal: (label: string) => void
-  onAddCustom: (url: string) => void
-  onRemoveCustom: (url: string) => void
-  onToggleTag: (tag: string) => void
-  onScan: () => void
-  scanning: boolean
-  scanNote: string | null
-}) {
-  const available = state ? portalsForState(state) : []
-  const suggested = city ? suggestedTagsFor(city) : null
-  const extraCount = customUrls.length
-  const ready = (portals.length > 0 || extraCount > 0) && !scanning
-
-  /**
-   * Configured desks collapse to one line.
-   *
-   * This is settings, not work. An office picks its state, its district, its
-   * papers and its words once and then opens this screen every morning to read
-   * the day's news — so leaving four expanded steps at the top of the desk puts
-   * the thing they never touch above the thing they always do, and on a phone it
-   * pushed the day's stories below the fold entirely.
-   *
-   * "Configured" means a district and at least one paper. Anything less and the
-   * scan cannot run, so the steps stay open because there is still a decision to
-   * make.
-   */
-  const configured = Boolean(city) && (portals.length > 0 || extraCount > 0)
-  const [editing, setEditing] = useState(false)
-
-  if (configured && !editing) {
-    /**
-     * What the scan is about to do, named rather than counted.
-     *
-     * This said "3 papers · 12 words", which tells an operator nothing they can
-     * check. The one question this strip has to answer before somebody presses
-     * Scan is "is it about to read the right thing" — and "Eenadu, Sakshi,
-     * indianexpress.com" answers it where "3 papers" does not.
-     */
-    const paperNames = [...portals, ...customUrls.map(hostLabel)]
-    return (
-      <div className="mb-4 rounded-2xl bg-[var(--surface-2)] p-4">
-        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-          <dl className="min-w-0 flex-1 space-y-1.5">
-            <div className="flex gap-2">
-              <dt className="eyebrow w-16 shrink-0 pt-1">
-                Desk
-              </dt>
-              <dd className="min-w-0 text-sm font-semibold">
-                {city}
-                <span className="ml-1.5 font-normal text-ink-3">{state}</span>
-              </dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="eyebrow w-16 shrink-0 pt-1">
-                Papers
-              </dt>
-              <dd className="min-w-0 text-sm text-ink-2">
-                {paperNames.length ? paperNames.join(', ') : 'None chosen'}
-              </dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="eyebrow w-16 shrink-0 pt-1">
-                Words
-              </dt>
-              <dd className="min-w-0 text-sm text-ink-2">
-                {tags.length ? (
-                  tags.join(', ')
-                ) : (
-                  <span className="text-ink-3">
-                    None set, so the scan will bring back everything the papers carry
-                  </span>
-                )}
-              </dd>
-            </div>
-          </dl>
-
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              onClick={() => setEditing(true)}
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-xs font-semibold text-ink-2 shadow-[var(--e1)] hover:border-[var(--border-interactive)] hover:text-[var(--accent)]"
-            >
-              <Pencil size={11} />
-              Edit
-            </button>
-            <Button size="sm" onClick={onScan} disabled={!ready}>
-              {scanning ? (
-                <>
-                  <RefreshCw size={14} className="animate-spin" />
-                  Scanning
-                </>
-              ) : (
-                <>
-                  <Search size={14} />
-                  Scan today
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-
-        {scanNote && (
-          <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-ink-2">
-            <Search size={12} className="mt-0.5 shrink-0 text-ink-3" />
-            <span>{scanNote}</span>
-          </p>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div className="mb-4 border-b border-[var(--rule)] pb-4">
-      {configured && (
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <span className="kicker">Desk settings</span>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-            Done
-          </Button>
-        </div>
-      )}
-      {/* 1 — where the desk works */}
-      <RegionPicker state={state} city={city} onState={onState} onCity={onCity} />
-
-      {/* 2 — which mastheads to read */}
-      {state && (
-        <div className="mt-4">
-          <span className="kicker">Step 2 · Papers to scan</span>
-          <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
-            Signal reads these for you. Tick as many as you want. Nothing opens in
-            another tab.
-            {DISTRICT_PAGES_ARE_GEO_GATED && (
-              <>
-                {' '}
-                Some Telugu papers serve their district edition on the reader&rsquo;s
-                location rather than the address, so from our servers they return the state
-                feed. Your words in step 3 are what pull the local stories out of it.
-              </>
-            )}
-          </p>
-
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {available.map((p) => {
-              const on = portals.includes(p.label)
-              return (
-                <button
-                  key={p.label}
-                  onClick={() => onTogglePortal(p.label)}
-                  aria-pressed={on}
-                  className={cn(
-                    'inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3',
-                    'text-xs font-semibold',
-                    on
-                      ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
-                      : 'border-[var(--border-strong)] bg-[var(--surface)] text-ink-2 hover:border-[var(--border-interactive)]',
-                  )}
-                >
-                  {on ? <Check size={11} /> : <Newspaper size={11} />}
-                  {p.label}
-                  <span className="opacity-60">{p.language.slice(0, 2)}</span>
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Added papers join the collection rather than sitting in a box of
-              their own. They were a textarea, which made them look like a note
-              to self instead of a source that gets read — and an address typed
-              without https:// silently counted for nothing. */}
-          <PortalInput onAdd={onAddCustom} existing={customUrls} />
-
-          {customUrls.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {customUrls.map((u) => (
-                <button
-                  key={u}
-                  onClick={() => onRemoveCustom(u)}
-                  aria-label={`Remove ${u}`}
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-xs font-semibold text-[var(--accent)]"
-                >
-                  <Check size={11} />
-                  {hostLabel(u)}
-                  <X size={10} />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 3 — what counts as ours */}
-      {suggested && (
-        <div className="mt-4">
-          <span className="kicker">Step 3 · Words that make a story yours</span>
-          <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
-            Tapped words are kept and used to flag which filed stories are about this
-            segment. Add your own mandal names, because no list shipped from outside knows them.
-          </p>
-          <div className="mt-2 space-y-2">
-            {(
-              [
-                ['Place', suggested.place],
-                ['Subject', suggested.subject],
-              ] as const
-            ).map(([group, list]) => (
-              <div key={group} className="flex flex-wrap items-center gap-1.5">
-                <span className="eyebrow w-14 shrink-0">
-                  {group}
-                </span>
-                {list.map((t) => {
-                  const on = tags.some((x) => x.toLowerCase() === t.toLowerCase())
-                  return (
-                    <button
-                      key={t}
-                      onClick={() => onToggleTag(t)}
-                      aria-pressed={on}
-                      className={cn(
-                        'inline-flex min-h-11 items-center gap-1 rounded-full border px-3',
-                        'text-xs font-semibold',
-                        on
-                          ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
-                          : 'border-[var(--border-strong)] bg-[var(--surface)] text-ink-2 hover:border-[var(--border-interactive)]',
-                      )}
-                    >
-                      {on && <Check size={10} />}
-                      {t}
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
-          </div>
-          {/* Typed words, not just the suggested ones.
-              The suggestions are places and civic subjects a stranger can guess.
-              What actually finds a story is a mandal name, a scheme, or the
-              officer everyone is complaining about — none of which any list
-              shipped from outside this district could contain. */}
-          <TagInput
-            onAdd={(t) => onToggleTag(t)}
-            existing={tags}
-          />
-
-          {tags.length > 0 && (
-            <div className="mt-3">
-              <p className="eyebrow">
-                Watching for {tags.length} {pluralise(tags.length, 'word')}
-              </p>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {tags.map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => onToggleTag(t)}
-                    aria-label={`Stop watching for ${t}`}
-                    className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-transparent bg-[var(--accent-soft)] px-2.5 text-xs font-semibold text-[var(--accent)]"
-                  >
-                    {t}
-                    <X size={10} />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 4 — go */}
-      {state && (
-        <div className="mt-4 border-t border-[var(--rule)] pt-4">
-          <Button onClick={onScan} disabled={!ready} className="w-full sm:w-auto">
-            {scanning ? (
-              <>
-                <RefreshCw size={15} className="animate-spin" />
-                Scanning…
-              </>
-            ) : (
-              <>
-                <Search size={15} />
-                Scan {portals.length + extraCount || 'the'}{' '}
-                {pluralise(portals.length + extraCount || 2, 'paper')}
-              </>
-            )}
-          </Button>
-
-          {/* The result belongs here, beside the button that caused it.
-              It used to render only at the top of the column, so an operator
-              scrolled down to step 2 pressed Scan, the scan ran, and nothing
-              visibly happened — the outcome was above the fold. */}
-          {scanNote ? (
-            <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-ink-2">
-              <Search size={12} className="mt-0.5 shrink-0 text-ink-3" />
-              <span>{scanNote}</span>
-            </p>
-          ) : (
-            <p className="mt-1.5 text-xs text-ink-3">
-              {tags.length === 0
-                ? 'With no words chosen this returns everything the papers are carrying, not just your patch.'
-                : `Returns only stories carrying one of your ${tags.length} ${pluralise(tags.length, 'word')}. Nothing is read by the model until you choose from the results.`}
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** The masthead's name, for a chip. Falls back to the raw string if unparseable. */
-function hostLabel(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '')
-  } catch {
-    return url.slice(0, 28)
-  }
-}
-
-/**
- * Add a paper by address.
- *
- * Accepts what people actually type. "www.indianexpress.com" has no scheme, and
- * the previous box required one — so the address sat there looking added while
- * counting for nothing and the scan quietly ignored it.
- */
-function PortalInput({ onAdd, existing }: { onAdd: (url: string) => void; existing: string[] }) {
-  const [value, setValue] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
-  const commit = () => {
-    const raw = value.trim()
-    if (!raw) return
-    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
-    let url: string
-    try {
-      const parsed = new URL(withScheme)
-      if (!parsed.hostname.includes('.')) throw new Error('no host')
-      url = parsed.toString()
-    } catch {
-      setError(`“${raw}” is not a web address. It should look like indianexpress.com.`)
-      return
-    }
-    if (existing.some((u) => u === url)) {
-      setError('That paper is already in the collection.')
-      return
-    }
-    onAdd(url)
-    setValue('')
-    setError(null)
-  }
-
-  return (
-    <div className="mt-3">
-      <label className="eyebrow">
-        Add a paper: its address, or the section you read
-      </label>
-      <div className="mt-1.5 flex gap-2">
-        <input
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value)
-            setError(null)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              commit()
-            }
-          }}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          placeholder="indianexpress.com"
-          aria-label="Add a news paper by address"
-          className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)]"
-        />
-        <Button size="sm" variant="outline" onClick={commit} disabled={!value.trim()}>
-          <Plus size={14} />
-          Add
-        </Button>
-      </div>
-      {error && <p className="mt-1 text-xs text-[var(--warn)]">{error}</p>}
-    </div>
-  )
-}
-
-/**
- * Type a word the desk should watch for.
- *
- * Kept separate from the suggested chips because the two do different jobs: the
- * chips cover what an outsider can guess about a district, and this covers what
- * only the office knows — the mandal, the scheme, the officer's name. Enter
- * commits, so a run of words can be typed without reaching for the mouse.
- */
-function TagInput({ onAdd, existing }: { onAdd: (tag: string) => void; existing: string[] }) {
-  const [value, setValue] = useState('')
-  const trimmed = value.trim()
-  const duplicate = existing.some((t) => t.toLowerCase() === trimmed.toLowerCase())
-
-  const commit = () => {
-    if (!trimmed || duplicate) return
-    onAdd(trimmed)
-    setValue('')
-  }
-
-  return (
-    <div className="mt-3">
-      <label className="eyebrow">
-        Add your own: a mandal, a scheme, an officer
-      </label>
-      <div className="mt-1.5 flex gap-2">
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              commit()
-            }
-          }}
-          placeholder="Denduluru, Amma Vodi, 22A land…"
-          aria-label="Add a word to watch for"
-          className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)]"
-        />
-        <Button size="sm" variant="outline" onClick={commit} disabled={!trimmed || duplicate}>
-          <Plus size={14} />
-          Add
-        </Button>
-      </div>
-      {duplicate && (
-        <p className="mt-1 text-xs text-ink-3">“{trimmed}” is already on the list.</p>
-      )}
-    </div>
-  )
-}
-
-/**
- * State first, then the city.
- *
- * The picker before this held one state's assembly segments, so an operator
- * searching for Hyderabad found nothing at all — it is in Telangana, and the
- * list did not know Telangana existed. Asking for the state first is also just
- * how people say where they work.
- */
-function RegionPicker({
-  state,
-  city,
-  onState,
-  onCity,
-}: {
-  state: string
-  city: string
-  onState: (next: string) => void
-  onCity: (next: string) => void
-}) {
-  const [query, setQuery] = useState('')
-  const cities = state ? citiesOf(state) : []
-  const region = REGIONS.find((r) => r.state === state)
-
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return q ? cities.filter((c) => c.toLowerCase().includes(q)) : cities
-  }, [cities, query])
-
-  const typed = query.trim()
-  const exact = cities.some((c) => c.toLowerCase() === typed.toLowerCase())
-
-  return (
-    <div>
-      <label className="block">
-        <span className="kicker">Step 1 · State</span>
-        <select
-          value={state}
-          onChange={(e) => {
-            onState(e.target.value)
-            onCity('')
-            setQuery('')
-          }}
-          className={cn(selectClass, 'mt-2 w-full')}
-        >
-          <option value="">Choose a state…</option>
-          {ALL_STATES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {state && (
-        <div className="mt-3">
-          <span className="kicker">
-            {region?.complete ? 'District' : 'City'}
-            {city ? '' : ' (choose one)'}
-          </span>
-
-          {city ? (
-            <div className="mt-2 flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">
-                {city}
-                {ASSEMBLY_TELUGU[city] && (
-                  <span className="te ml-1.5 font-normal text-ink-2">{ASSEMBLY_TELUGU[city]}</span>
-                )}
-                <span className="ml-2 text-xs font-normal text-ink-3">{state}</span>
-              </span>
-              <Button size="sm" variant="outline" onClick={() => onCity('')}>
-                Change
-              </Button>
-            </div>
-          ) : (
-            <>
-              <div className="relative mt-2">
-                <Search
-                  size={15}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3"
-                />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={`Type to find one of ${cities.length}`}
-                  aria-label="Search districts and cities"
-                  className="min-h-11 w-full rounded-full border border-[var(--border-strong)] bg-[var(--surface)] pl-9 pr-4 text-sm shadow-[var(--e1)] outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)]"
-                />
-              </div>
-
-              <div className="mt-2 max-h-48 overflow-y-auto rounded-2xl border border-[var(--border)]">
-                {shown.length === 0 ? (
-                  <p className="px-3 py-3 text-xs leading-relaxed text-ink-2">
-                    Nothing matches “{typed}”. This list is a starting point, not the
-                    register, so use what you typed.
-                  </p>
-                ) : (
-                  shown.map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => {
-                        onCity(c)
-                        setQuery('')
-                      }}
-                      className="flex min-h-11 w-full items-baseline gap-2 px-3 text-left text-sm hover:bg-[var(--surface-2)]"
-                    >
-                      <span>{c}</span>
-                      {ASSEMBLY_TELUGU[c] && (
-                        <span className="te text-xs text-ink-3">{ASSEMBLY_TELUGU[c]}</span>
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-
-              {!region?.complete && (
-                <p className="mt-1.5 text-xs text-ink-3">
-                  Major cities only for {state}. The two Telugu states carry every district;
-                  everywhere else is a starting list, so type your own if it is missing.
-                </p>
-              )}
-
-              {typed && !exact && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-2"
-                  onClick={() => {
-                    onCity(typed)
-                    setQuery('')
-                  }}
-                >
-                  <Plus size={14} />
-                  Use “{typed}”
-                </Button>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function IntakePanel({
   draft,
   onDraft,
   links,
   unusable,
-  progress,
   running,
   canHide,
   onHide,
   onRead,
-  onStop,
   onRetryFailed,
   failedCount,
-  assembly,
-  tags,
-  onAssembly,
-  onToggleTag,
-  deskState,
-  portals,
-  customUrls,
-  onDeskState,
-  onTogglePortal,
-  onAddCustom,
-  onRemoveCustom,
-  onScan,
-  scanning,
-  scanNote,
 }: {
   draft: string
   onDraft: (value: string) => void
   links: DraftLink[]
   unusable: string[]
-  progress: LinkState[]
+  /**
+   * A run is going, wherever it was started from. The panel no longer carries
+   * the progress list or the Stop button: both moved to ScanProgress, which
+   * sits above this and reports the same run in both views of the desk. Two
+   * live progress lists on one screen was the alternative, and one of them
+   * would always have been the stale-looking one.
+   */
   running: boolean
   canHide: boolean
   onHide: () => void
   onRead: () => void
-  onStop: () => void
   onRetryFailed: () => void
   failedCount: number
-  assembly: string
-  tags: string[]
-  onAssembly: (next: string) => void
-  onToggleTag: (tag: string) => void
-  deskState: string
-  portals: string[]
-  customUrls: string[]
-  onDeskState: (next: string) => void
-  onTogglePortal: (label: string) => void
-  onAddCustom: (url: string) => void
-  onRemoveCustom: (url: string) => void
-  onScan: () => void
-  scanning: boolean
-  scanNote: string | null
 }) {
   const known = links.filter((l) => l.publisher !== null)
   const publishers = [...new Set(known.map((l) => l.publisher))].filter(
     (p): p is string => p !== null,
   )
-  const settled = progress.filter((l) => l.status === 'done' || l.status === 'failed').length
-
   return (
     <m.div variants={fadeUp}>
       <Card>
@@ -2930,30 +1434,13 @@ function IntakePanel({
           }
         />
         <p className="text-xs leading-relaxed text-ink-3">
-          One per line. Each link is reported on its own, so a dead one costs you that link and
-          nothing else.
+          One per line.
         </p>
 
-        <div className="mt-4">
-          <DeskSetup
-            state={deskState}
-            city={assembly}
-            tags={tags}
-            portals={portals}
-            customUrls={customUrls}
-            onState={onDeskState}
-            onCity={onAssembly}
-            onTogglePortal={onTogglePortal}
-            onAddCustom={onAddCustom}
-            onRemoveCustom={onRemoveCustom}
-            onToggleTag={onToggleTag}
-            onScan={onScan}
-            scanning={scanning}
-            scanNote={scanNote}
-          />
-        </div>
-
-        <span className="kicker">Or paste links yourself</span>
+        {/* The DeskSetup block that sat here moved behind the header's
+            pencil, where configuration now lives. This panel is the day's
+            work only: paste, read. */}
+        <span className="kicker">Paste links</span>
         <textarea
           value={draft}
           onChange={(e) => onDraft(e.target.value)}
@@ -2991,71 +1478,25 @@ function IntakePanel({
           </p>
         )}
 
+        {/* The per-link list that used to sit under these buttons is now in
+            ScanProgress, above. It is the same list; it moved so that a sync
+            started from the desk toolbar reports itself in the issues view too,
+            where this panel is not on screen at all. */}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button onClick={onRead} disabled={running || links.length === 0}>
             <RefreshCw size={15} className={running ? 'animate-spin' : ''} />
             {running
-              ? `Reading: ${settled} of ${progress.length} done`
+              ? 'Reading, see above'
               : links.length === 0
                 ? 'Read links'
                 : `Read ${links.length} ${pluralise(links.length, 'link')}`}
           </Button>
-          {running && (
-            <Button variant="outline" onClick={onStop}>
-              Stop
-            </Button>
-          )}
           {!running && failedCount > 0 && (
             <Button variant="outline" onClick={onRetryFailed}>
               Try the {failedCount} that failed again
             </Button>
           )}
         </div>
-
-        {progress.length > 0 && (
-          <div className="mt-4">
-            <Bar value={progress.length ? settled / progress.length : 0} />
-            <ul className="mt-3 space-y-2">
-              {progress.map((link) => (
-                <li key={link.url} className="flex items-start gap-2.5">
-                  {/* The icon is the whole status for a sighted reader, so it
-                      has to carry the word for everyone else. */}
-                  <span className="mt-0.5 shrink-0" role="img" aria-label={STATUS_LABEL[link.status]}>
-                    {link.status === 'done' && <Check size={15} className="text-[var(--pos)]" />}
-                    {link.status === 'failed' && (
-                      <CircleAlert size={15} className="text-[var(--neg)]" />
-                    )}
-                    {link.status === 'reading' && (
-                      <LoaderCircle size={15} className="animate-spin text-[var(--accent)]" />
-                    )}
-                    {link.status === 'queued' && (
-                      <span className="block size-2 translate-y-1.5 rounded-full bg-[var(--surface-3)]" />
-                    )}
-                  </span>
-
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs text-ink-3">
-                      {metaLine(link.publisher, link.host)}
-                    </span>
-                    {link.headline && (
-                      <span
-                        className={cn(
-                          'mt-0.5 block truncate text-sm',
-                          isIndicScript(link.headline) && 'te',
-                        )}
-                      >
-                        {link.headline}
-                      </span>
-                    )}
-                    {link.message && (
-                      <span className="mt-0.5 block text-xs text-[var(--neg)]">{link.message}</span>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </Card>
     </m.div>
   )
@@ -3071,16 +1512,6 @@ function EmptyDesk() {
           sub="Paste the morning’s links to fill the desk"
           tint="blue"
         />
-        <p className="text-sm leading-relaxed text-ink-2">
-          This page turns a day of news links into records you can search: what the complaint
-          is, which constituency it came from, how serious it is, who is named, whether it looks
-          fabricated, and what the office can say back.
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-ink-2">
-          Paste the links from the office group into the box above, the whole list at once. You
-          can then pull out only the ones you need, such as everything about water in Nuzvid, or
-          every story naming one officer.
-        </p>
       </Card>
     </m.div>
   )
@@ -3181,8 +1612,8 @@ function IssueFilterBar({
             type="search"
             value={filters.text}
             onChange={(e) => set({ text: e.target.value })}
-            placeholder="Search issues, places"
-            aria-label="Search the issues"
+            placeholder="Search issues"
+            aria-label="Search the issues and places"
             className={cn(selectClass, 'w-48 pl-9')}
           />
         </div>
@@ -3405,14 +1836,32 @@ function RecordRow({
   active: boolean
   onOpen: () => void
 }) {
+  /**
+   * Whether the record has a page anyone can actually open. The demo's
+   * illustrative records carry placeholder ids in `sourceUrl`, and a link
+   * that goes nowhere teaches the office not to trust the links that go
+   * somewhere.
+   */
+  const linksOut = record.sourceUrl.startsWith('http')
+
+  /**
+   * Who printed it. The publisher's name when the record has one, the host
+   * when it does not but the address is real, and nothing when neither is —
+   * the meta line then says plainly that this is an example record rather
+   * than dressing it up with a publisher nobody can check.
+   */
+  const paper = record.publisher ?? (linksOut ? hostOf(record.sourceUrl) : null)
+
   return (
-    <button
-      onClick={onOpen}
-      aria-current={active ? 'true' : undefined}
+    // A div holding a button and a link, not a button holding a link: an
+    // interactive element inside another is invalid HTML, and browsers break
+    // the nesting unpredictably. The row body opens the record; the icon at
+    // the far edge opens the paper.
+    <div
       className={cn(
         // Hand-rolled card face rather than the .card class, so the active
         // accent wash is not fought by the shared card background.
-        'card-hover flex w-full items-stretch gap-3 overflow-hidden rounded-[var(--radius-lg)] border text-left shadow-[var(--e1)]',
+        'card-hover flex w-full items-stretch overflow-hidden rounded-[var(--radius-lg)] border shadow-[var(--e1)]',
         active
           ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
           : 'border-[var(--border)] bg-[var(--surface)]',
@@ -3427,7 +1876,11 @@ function RecordRow({
         style={{ background: SEVERITY_COLOUR[record.severity] }}
       />
 
-      <span className="min-w-0 flex-1 py-3 pr-3">
+      <button
+        onClick={onOpen}
+        aria-current={active ? 'true' : undefined}
+        className="min-w-0 flex-1 py-3 pl-3 pr-3 text-left"
+      >
         <span className="flex flex-wrap items-center gap-1.5">
           <Chip tone={SEVERITY_TONE[record.severity]}>{record.severity}</Chip>
           {record.fake.suspicion !== 'No' && (
@@ -3446,15 +1899,43 @@ function RecordRow({
           {record.headline}
         </span>
 
+        {/* What the paper itself printed, not the model's summary of it. The
+            row is where the office decides whether to open a record at all,
+            and the paper's own words are the honest basis for that call. */}
+        {record.excerpt && (
+          <span
+            className={cn(
+              'mt-1 line-clamp-3 block text-xs leading-relaxed text-ink-2',
+              isIndicScript(record.excerpt) && 'te',
+            )}
+          >
+            {record.excerpt}
+          </span>
+        )}
+
         <span className="mt-1 block truncate text-xs text-ink-3">
           {metaLine(
+            paper ?? 'Example record',
             record.constituency ?? 'Constituency not named',
             record.topic,
             dateLabel(record),
           )}
         </span>
-      </span>
-    </button>
+      </button>
+
+      {linksOut && (
+        <a
+          href={record.sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Open the article in a new tab"
+          onClick={(e) => e.stopPropagation()}
+          className="grid w-11 shrink-0 place-items-center border-l border-[var(--border)] text-ink-3 hover:bg-[var(--surface-2)] hover:text-[var(--accent)]"
+        >
+          <ExternalLink size={15} />
+        </a>
+      )}
+    </div>
   )
 }
 
@@ -3539,8 +2020,7 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
         <CardHead
           icon={<Users size={16} />}
           title="Who and where"
-          sub="From the story itself, not looked up elsewhere"
-          hint="Taken from the story itself, not looked up elsewhere."
+          sub="From the story itself"
           tint="blue"
         />
 
@@ -3596,13 +2076,7 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
       </Card>
 
       <Card>
-        <CardHead
-          icon={<ShieldAlert size={16} />}
-          title="Is it real?"
-          sub="Signals, not a verdict. The office decides."
-          hint="Signals, not a verdict. Somebody in the office decides."
-          tint="orange"
-        />
+        <CardHead icon={<ShieldAlert size={16} />} title="Is it real?" tint="orange" />
 
         <div className="flex flex-wrap gap-1.5">
           <Chip tone={SUSPICION_TONE[fake.suspicion]} icon={<ShieldAlert size={11} />}>
@@ -3620,7 +2094,7 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
 
         {fake.signals.length === 0 ? (
           <p className="mt-3 text-sm text-ink-3">
-            No signals were found either way, so this rests on the suspicion above alone.
+            No signals were found either way.
           </p>
         ) : (
           <ul className="mt-3 space-y-2">
@@ -3737,12 +2211,15 @@ function IssueCard({
   position,
   records,
   onOpenRecord,
+  person,
 }: {
   issue: IssueCluster
   /** Where this card sits in the list on screen, from 1. */
   position: number
   records: GrievanceRecord[]
   onOpenRecord: (id: string) => void
+  /** Who the drafted posts speak as. */
+  person: SuggestionPerson
 }) {
   // The count comes from the cluster, not from what this device happens to
   // hold: a record can be backing an issue and no longer be in the store.
@@ -3820,16 +2297,18 @@ function IssueCard({
       <p className="eyebrow mt-4">
         Who is driving it
       </p>
-      <p className="mt-1.5 rounded-xl bg-[var(--surface-2)] px-3.5 py-2.5 text-sm leading-relaxed text-ink-2">
+      <p className="mt-1 border-l-2 border-[var(--rule)] pl-3 text-sm leading-relaxed text-ink-2">
         {issue.politicalInvolvement ?? 'Not established from these records.'}
       </p>
 
       <p className="eyebrow mt-3">
         What to say back
       </p>
-      <p className="mt-1.5 rounded-xl bg-[var(--surface-2)] px-3.5 py-2.5 text-sm leading-relaxed text-ink-2">
+      <p className="mt-1 border-l-2 border-[var(--rule)] pl-3 text-sm leading-relaxed text-ink-2">
         {issue.counterNarrative ?? 'No counter-narrative drafted yet.'}
       </p>
+
+      <IssueSuggestions issue={issue} records={records} person={person} />
 
       {records.length > 0 && (
         <ul className="mt-4 space-y-1.5">
@@ -3882,5 +2361,144 @@ function IssueCard({
         </div>
       )}
     </Card>
+  )
+}
+
+/**
+ * "What to say about it": three or four posts the office could publish.
+ *
+ * Drafted on request, never automatically. Each draft is a model call, and an
+ * office scrolling past twelve issues should not spend twelve calls to do it.
+ * What was drafted is cached per issue and shown from the cache on every
+ * revisit; pressing the button again overwrites this issue's drafts and no
+ * other's.
+ *
+ * On failure the server's own sentence is shown and nothing else. A card that
+ * filled itself with stand-in posts would be this product publishing under
+ * the member's name the one thing it promised never to do: words grounded in
+ * nothing.
+ */
+function IssueSuggestions({
+  issue,
+  records,
+  person,
+}: {
+  issue: IssueCluster
+  records: GrievanceRecord[]
+  person: SuggestionPerson
+}) {
+  // Read once on mount. The cards are keyed by issue id, so a different issue
+  // is a fresh mount and the initializer runs again.
+  const [entry, setEntry] = useState<SuggestionEntry | null>(() => readSuggestions(issue.id))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState<number | null>(null)
+
+  const draft = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const posts = await fetchSuggestions(
+        {
+          title: issue.title,
+          summary: issue.summary,
+          category: issue.category,
+          severity: issue.severity,
+        },
+        records
+          .slice(0, 5)
+          .map((r) => ({ headline: r.headline, excerpt: r.excerpt, publisher: r.publisher })),
+        person,
+      )
+      saveSuggestions(issue.id, posts)
+      // Re-read rather than constructed, so the timestamp on screen is the one
+      // actually stored. In private mode the write fails silently and the
+      // fallback keeps the drafts on screen for this session.
+      setEntry(readSuggestions(issue.id) ?? { generatedAt: new Date().toISOString(), posts })
+      haptic.success()
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'The posts could not be drafted. Try again.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const copy = async (line: string, i: number) => {
+    try {
+      await navigator.clipboard.writeText(line)
+      setCopied(i)
+      haptic.success()
+      setTimeout(() => setCopied((c) => (c === i ? null : c)), 1800)
+    } catch {
+      /* the clipboard can be blocked; the text is selectable either way */
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="eyebrow">What to say about it</p>
+        <Button size="sm" variant="outline" onClick={() => void draft()} disabled={busy}>
+          {busy ? (
+            <>
+              <LoaderCircle size={14} className="animate-spin" />
+              Drafting…
+            </>
+          ) : (
+            <>
+              <Pencil size={14} />
+              {entry ? 'Draft again' : 'Draft posts'}
+            </>
+          )}
+        </Button>
+      </div>
+
+      {error && <p className="mt-2 text-xs leading-relaxed text-[var(--neg)]">{error}</p>}
+
+      {entry && entry.posts.length > 0 ? (
+        <>
+          <ul className="mt-2 space-y-2">
+            {entry.posts.map((post, i) => (
+              <li key={i} className="rounded-2xl bg-[var(--surface-2)] p-3.5">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="eyebrow">{post.angle}</span>
+                  <m.button
+                    onClick={() => void copy(post.text, i)}
+                    whileTap={{ scale: 0.9 }}
+                    transition={spring.snap}
+                    aria-label={copied === i ? 'Copied' : 'Copy this post'}
+                    className="-m-2 grid size-11 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-3)] hover:text-ink"
+                  >
+                    {copied === i ? (
+                      <Check size={15} className="text-[var(--pos)]" />
+                    ) : (
+                      <Copy size={15} />
+                    )}
+                  </m.button>
+                </div>
+                <p className="text-sm leading-relaxed">{post.text}</p>
+                <div className="mt-2">
+                  <Chip tone="neutral">{post.platform}</Chip>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-2xs text-ink-3">
+            Drafted {absoluteDate(entry.generatedAt)} · check every post before it goes out
+          </p>
+        </>
+      ) : (
+        !busy &&
+        !error && (
+          <p className="mt-1.5 text-sm leading-relaxed text-ink-3">
+            No posts have been drafted for this issue yet.
+          </p>
+        )
+      )}
+    </div>
   )
 }

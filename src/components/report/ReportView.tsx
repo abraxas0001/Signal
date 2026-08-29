@@ -41,10 +41,20 @@ export function ReportView({
   report,
   onReset,
   onEditMetric,
+  celebrate = true,
 }: {
   report: Report
   onReset: () => void
   onEditMetric?: () => void
+  /**
+   * Whether finishing this report is a moment worth marking.
+   *
+   * True on the analyse screen, where the reader waited for it. False when the
+   * same component is embedded somewhere reports are merely listed — the
+   * dashboard's post highlights expand one inline, and confetti over a row
+   * filed under "What drew criticism" celebrates a post that landed badly.
+   */
+  celebrate?: boolean
 }) {
   const { snapshot, analysis } = report
   const heroRef = useRef<HTMLDivElement>(null)
@@ -53,7 +63,7 @@ export function ReportView({
   // One celebration per session, on the landmark moment. Scarcity is the whole
   // point: if every action confettis, none of them mean anything.
   useEffect(() => {
-    if (reduced) return
+    if (reduced || !celebrate) return
     const el = heroRef.current
     if (!el) return
 
@@ -193,7 +203,6 @@ export function ReportView({
           <CardHead
             icon={<TrendingUp size={15} />}
             title="How it landed"
-            sub="Every figure names its source"
             tint="blue"
           />
           <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
@@ -231,10 +240,6 @@ export function ReportView({
             />
           </div>
 
-          <p className="mt-3 text-xs leading-relaxed text-ink-3">
-            Measured figures are shown plainly. Anything we did not measure says so.
-          </p>
-
           {eng.engagementRate != null && (
             <p className="mt-1.5 text-xs text-ink-3">
               <span className="tnum font-semibold text-ink-2">
@@ -248,9 +253,7 @@ export function ReportView({
 
       {/* ── Sentiment ───────────────────────────────────────────────────── */}
       <m.section variants={fadeUp}>
-        <SectionTitle hint="How the post reads, and how the audience appears to be taking it.">
-          Sentiment
-        </SectionTitle>
+        <SectionTitle>Sentiment</SectionTitle>
         <Card>
           <SentimentMeter sentiment={analysis.sentiment} />
 
@@ -266,7 +269,7 @@ export function ReportView({
       {/* ── Emotions ────────────────────────────────────────────────────── */}
       {analysis.emotions.length > 0 && (
         <m.section variants={fadeUp} className="defer-paint">
-          <SectionTitle hint="The emotional register the post is written in.">Emotion</SectionTitle>
+          <SectionTitle>Emotion</SectionTitle>
           <Card>
             <EmotionBars emotions={analysis.emotions} />
           </Card>
@@ -278,7 +281,7 @@ export function ReportView({
         analysis.topics.secondary.length > 0 ||
         analysis.topics.tags.length > 0) && (
         <m.section variants={fadeUp} className="defer-paint">
-          <SectionTitle hint="The threads running through this post.">Themes</SectionTitle>
+          <SectionTitle>Themes</SectionTitle>
           <Card>
             <div className="flex flex-wrap gap-1.5">
               <Chip tone="accent" icon={<Sparkles size={12} />}>
@@ -320,7 +323,7 @@ export function ReportView({
       {/* ── Quotes ──────────────────────────────────────────────────────── */}
       {analysis.notableQuotes.length > 0 && (
         <m.section variants={fadeUp} className="defer-paint">
-          <SectionTitle hint="Reproduced exactly as written, so they can be quoted safely.">
+          <SectionTitle>
             Worth quoting
           </SectionTitle>
           <div className="space-y-3">
@@ -342,7 +345,7 @@ export function ReportView({
       {/* ── People and places ───────────────────────────────────────────── */}
       {analysis.entities.length > 0 && (
         <m.section variants={fadeUp} className="defer-paint">
-          <SectionTitle hint="Who and what this post names.">People and places</SectionTitle>
+          <SectionTitle>People and places</SectionTitle>
           {/* A list, not a row of pills.
               A role is a phrase — "Beneficiaries of the annual pilgrimage" —
               and a chip is a single-line element, so squeezing one into the
@@ -395,9 +398,7 @@ export function ReportView({
 
       {/* ── Reach ───────────────────────────────────────────────────────── */}
       <m.section variants={fadeUp} className="defer-paint">
-        <SectionTitle hint="How far this is likely to travel, and who is pushing it.">
-          Reach
-        </SectionTitle>
+        <SectionTitle>Reach</SectionTitle>
         <Card>
           <div className="flex flex-wrap items-center gap-2">
             <Chip tone="info" icon={<TrendingUp size={12} />}>
@@ -417,8 +418,7 @@ export function ReportView({
               <span className="tnum font-semibold text-ink">
                 {compact(analysis.reach.estimatedImpressions)}
               </span>{' '}
-              people plausibly saw this.{' '}
-              <span className="text-ink-3">This is a judgement, not a measurement.</span>
+              people plausibly saw this.
             </p>
           )}
 
@@ -430,7 +430,7 @@ export function ReportView({
               <CardHead
                 icon={<MapPin size={14} />}
                 title="Where this landed"
-                sub={`${placeMarkers.length} ${placeMarkers.length === 1 ? 'place' : 'places'} the gazetteer could pin`}
+                sub={`${placeMarkers.length} ${placeMarkers.length === 1 ? 'place' : 'places'}`}
                 tint="teal"
                 className="mb-2"
               />
@@ -467,9 +467,7 @@ export function ReportView({
 
       {/* ── Credibility ─────────────────────────────────────────────────── */}
       <m.section variants={fadeUp} className="defer-paint">
-        <SectionTitle hint="An angry post is not a false post. This only flags real signals.">
-          Credibility
-        </SectionTitle>
+        <SectionTitle>Credibility</SectionTitle>
         <Card>
           {/* The reference card opening: badge, question, and the verdict chip
               riding the action slot — same words, same chip, same logic. */}
@@ -576,14 +574,6 @@ export function ReportView({
           </Card>
         </m.section>
       )}
-
-      {/* ── Meta ────────────────────────────────────────────────────────── */}
-      <m.div variants={fadeUp} className="pt-2 text-center">
-        <p className="text-2xs text-ink-3">
-          Analysed in {(report.meta.durationMs / 1000).toFixed(1)}s
-          {report.meta.outputTokens ? ` · ${report.meta.outputTokens} tokens` : ''}
-        </p>
-      </m.div>
 
       {/* Bottom-anchored primary action, inside the thumb zone. */}
       <div className="docked z-20 border-t border-[var(--border)] bg-[var(--bg)]/90 py-3 backdrop-blur-md no-print">

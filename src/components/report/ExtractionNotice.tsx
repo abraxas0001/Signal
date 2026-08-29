@@ -74,9 +74,11 @@ export function ExtractionNotice({
           <p className="text-sm font-medium">
             {headline(missing, userEntered, textIsUsers)}
           </p>
-          <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
-            {explanation(snapshot, missing, userEntered)}
-          </p>
+          {explanation(snapshot, missing, userEntered) && (
+            <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
+              {explanation(snapshot, missing, userEntered)}
+            </p>
+          )}
 
           {extraction.userAssisted && (
             <Chip tone="accent" icon={<PencilLine size={11} />} className="mt-2">
@@ -128,7 +130,7 @@ function explanation(snapshot: PostSnapshot, missing: string[], userEntered: str
   }
 
   if (missing.length === 0) {
-    return 'Every number here came straight from the platform.'
+    return ''
   }
 
   switch (p) {

@@ -16,7 +16,7 @@ import { RescueSheet } from '@/components/RescueSheet'
 import { HistoryPanel } from '@/components/HistoryPanel'
 import { Dashboard } from '@/components/Dashboard'
 import { loadDemoRoster, type DemoRoster } from '@/lib/demo-roster'
-import { enterDemoMode, exitDemoMode, isDemoMode } from '@/lib/demo-mode'
+import { enterDemoMode, exitDemoMode, isDemoMode, reseedDemoIfStale } from '@/lib/demo-mode'
 import { Briefing } from '@/components/Briefing'
 import { DemoBar, DemoNote, DemoPairing } from '@/components/DemoBar'
 import { type DemoDoorProps } from '@/components/DemoDoor'
@@ -25,13 +25,16 @@ import { Influencers } from '@/components/Influencers'
 import { Persona } from '@/components/Persona'
 import { Actions } from '@/components/Actions'
 import { Settings } from '@/components/Settings'
+import { WeekCompare } from '@/components/WeekCompare'
 import { Onboarding } from '@/components/Onboarding'
 import { TabBar, type Tab } from '@/components/TabBar'
 import { MoreSheet } from '@/components/MoreSheet'
 import { SideNav } from '@/components/SideNav'
-import { emptyStore, isDemoScope, subscribe, useStore, update, writeStore } from '@/lib/store'
+import { emptyStore, isDemoScope, isDeskScope, subscribe, useStore, update, writeStore } from '@/lib/store'
+import { currentNavState, restoredTab, useNavHistory } from '@/lib/nav-history'
 import { LockButton, LockScreen, useVaultState } from '@/components/Lock'
 import { activeAccount, signOut } from '@/lib/vault'
+import { deskSignOut, onDeskRefresh, readDeskSession } from '@/lib/desk-session'
 import { Avatar, Button, Card, Shell, SignalGlyph } from '@/components/ui'
 import { applyDeviceClass, ease, haptic, pageIn } from '@/lib/motion'
 
@@ -55,7 +58,9 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false)
   /** The phone's overflow sheet. Never opened above lg, where the sidebar shows. */
   const [moreOpen, setMoreOpen] = useState(false)
-  const [tab, setTab] = useState<Tab>('dashboard')
+  // Seeded from the history entry, which survives a reload: F5 on Compare
+  // must come back to Compare, not walk the reader home.
+  const [tab, setTab] = useState<Tab>(() => restoredTab() ?? 'dashboard')
   const [lastRequest, setLastRequest] = useState<AnalyseRequest | null>(null)
   /** An issue the dashboard asked to have opened, cleared once it is left. */
   const [focusIssue, setFocusIssue] = useState<string | null>(null)
@@ -96,10 +101,9 @@ export default function App() {
   /**
    * Tasks still owed to somebody.
    *
-   * Actions took the bottom bar's fifth slot from the More button, so it needs
-   * its own count for the same reason every other slot has one: a tab that
-   * never says how much is behind it gets opened once and then ignored.
-   * Declined counts as closed — it was decided, not left.
+   * Tasks left the bottom bar for Settings' tools list, and the count went
+   * with it: a row that never says how much is behind it gets opened once and
+   * then ignored. Declined counts as closed — it was decided, not left.
    */
   const openActions = store.actions.filter(
     (a) => a.status !== 'Completed' && a.status !== 'Declined',
@@ -140,6 +144,19 @@ export default function App() {
    * any of them having to know it exists.
    */
   const demoOpen = useSyncExternalStore(subscribe, isDemoScope, () => false)
+  /** A handed-over desk, opened with an office sign-in. Same shape of bypass. */
+  const deskOpen = useSyncExternalStore(subscribe, isDeskScope, () => false)
+
+  /**
+   * Remount the desk when its records change under it.
+   *
+   * The office feeds a handed-over desk from its own machine, and the sync
+   * pulls those records into localStorage while the member's tab is open. The
+   * dashboard reads its handles and standings once per mount on purpose, so
+   * without this the disk updated and the screen did not — the member kept
+   * reading yesterday's desk until she signed out and back in.
+   */
+  useEffect(() => onDeskRefresh(() => setDeskKey((k) => k + 1)), [])
 
   /**
    * Load the roster so the entry screens can offer it, and restore an open demo.
@@ -157,8 +174,13 @@ export default function App() {
       setDemoRoster(roster)
 
       // Already inside the demo — main.tsx pointed the store at it before the
-      // first render, so there is nothing to switch, only the banner to show.
-      if (isDemoMode()) return
+      // first render. If a newer build has moved the dataset on since this
+      // namespace was seeded, rebuild it now and remount, or the returning
+      // tab stays one version behind the door forever.
+      if (isDemoMode()) {
+        if (await reseedDemoIfStale()) setDeskKey((k) => k + 1)
+        return
+      }
 
       /**
        * The demo opens when it is ASKED for, never on its own.
@@ -292,6 +314,22 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
    * scope knows whether the tap costs a sign-out, and whose name is on it.
    */
   const navDemo = useMemo<DemoDoorProps | undefined>(() => {
+    // On a handed-over desk the same slot is the way OUT of the desk, and
+    // nothing else: offering the example desk to the member it was cut down
+    // from would be a door into a hall of mirrors.
+    if (deskOpen) {
+      return {
+        mode: 'leave' as const,
+        // Her own desk, her own word for the door. "Leave the demo" over a
+        // member's signed-in desk told her she was in somebody's example.
+        label: 'Logout',
+        note: readDeskSession()?.name ?? 'Signed-in desk',
+        onClick: () => {
+          deskSignOut()
+          window.location.reload()
+        },
+      }
+    }
     if (demoRoster === null) return undefined
     if (demoOpen) {
       return {
@@ -309,7 +347,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
       note: account ? 'Signs you out first' : 'Real data, no setup',
       onClick: () => void openDemo(),
     }
-  }, [demoRoster, demoOpen, vault.exists, vault.account, leaveDemo, openDemo])
+  }, [deskOpen, demoRoster, demoOpen, vault.exists, vault.account, leaveDemo, openDemo])
 
   // Gate the expensive visual layers once, at boot.
   useEffect(() => {
@@ -362,7 +400,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
           writeStore({ ...emptyStore(), ...data })
           // Drop the parameter so a refresh does not reinstate the sample over
           // anything filed since.
-          window.history.replaceState({}, '', window.location.pathname)
+          window.history.replaceState(currentNavState(), '', window.location.pathname)
         } catch (err) {
           console.warn(
             'Signal: no sample dataset at /sample-data.json, so nothing was loaded.',
@@ -485,7 +523,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
     setRescueOpen(false)
     setHistoryOpen(false)
     if (window.location.search) {
-      window.history.replaceState({}, '', window.location.pathname)
+      window.history.replaceState(currentNavState(), '', window.location.pathname)
     }
     haptic.tap()
     window.scrollTo({ top: 0 })
@@ -535,6 +573,29 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
     [tab, state.status, cancel, reset],
   )
 
+  /**
+   * Give the browser's back button something to go back to.
+   *
+   * Screen changes were React state alone, so the history stack never grew and
+   * back left the app instead of stepping through it. The hook mirrors the
+   * screen and any full-screen overlay into real history entries; this callback
+   * is the other half, applying a point the reader navigated to WITHOUT going
+   * back through `goTo` (which would push again and fight the browser).
+   *
+   * `goTo`'s side effects are deliberately not repeated here. Stamping
+   * `lastSeenAt` or tearing down an analysis belongs to a person choosing to
+   * leave a screen, not to the history stack restoring one they already saw.
+   */
+  useNavHistory(
+    { tab, overlay: historyOpen ? 'history' : moreOpen ? 'more' : null },
+    useCallback((point) => {
+      setTab(point.tab)
+      setHistoryOpen(point.overlay === 'history')
+      setMoreOpen(point.overlay === 'more')
+      window.scrollTo({ top: 0 })
+    }, []),
+  )
+
   const toggleTheme = () => {
     setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
     haptic.tap()
@@ -570,7 +631,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
    * and the real accounts stay locked exactly as they were — leaving the demo
    * puts this screen straight back.
    */
-  if (sealed && !demoOpen) {
+  if (sealed && !demoOpen && !deskOpen) {
     return (
       <LazyMotion features={domAnimation} strict>
         {/* Offered unconditionally, not gated on the roster having loaded.
@@ -578,7 +639,14 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
             dataset is still being fetched, so the button appeared a beat late
             or, on a slow read, not at all. The dataset ships with the app, and
             `openDemo` already no-ops if it is somehow absent. */}
-        <LockScreen onUnlocked={() => window.scrollTo({ top: 0 })} onDemo={() => void openDemo()} />
+        <LockScreen
+          onUnlocked={() => window.scrollTo({ top: 0 })}
+          onDemo={() => void openDemo()}
+          onDeskOpened={() => {
+            setDeskKey((k) => k + 1)
+            window.scrollTo({ top: 0 })
+          }}
+        />
       </LazyMotion>
     )
   }
@@ -650,7 +718,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
               report={demo}
               onReset={() => {
                 setDemo(null)
-                window.history.replaceState({}, '', window.location.pathname)
+                window.history.replaceState(currentNavState(), '', window.location.pathname)
               }}
             />
           </m.div>
@@ -753,6 +821,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
             key="influencers"
             onClose={go('dashboard')}
             onRead={(mention) => readPost(mention.postUrl, 'influencers')}
+            focusId={focusIssue}
           />
         )
       case 'actions':
@@ -784,11 +853,30 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
             />
           </>
         )
+      // The dashboard week card's Explore page: the same week the card
+      // scores, read closely, with the lessons filing onto the task list.
+      case 'weekly':
+        return <WeekCompare key={`weekly-${deskKey}`} onClose={go('dashboard')} />
       case 'settings':
         return (
           <Settings
             key="settings"
             onClose={go('dashboard')}
+            // History is a panel over whatever is open, not a tab — the same
+            // special case every nav surface's onSelect already carries.
+            onOpenTool={(t) => {
+              if (t === 'history') {
+                setHistoryOpen(true)
+                return
+              }
+              goTo(t)
+            }}
+            // No influencers count: that row left the tools list when the
+            // screen went back onto the main navigation, badge and all.
+            toolCounts={{
+              actions: openActions,
+              history: history.entries.length,
+            }}
             onChangePerson={() => {
               update((prev) => ({ ...prev, onboardedAt: null }))
               window.scrollTo({ top: 0 })
@@ -929,17 +1017,15 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
               </button>
 
               {/*
-                The office's own account, and the door to everything that is not
-                a daily screen.
+                The office's own account.
 
                 This slot held a padlock. A padlock is an action, not a place,
                 and it was the only thing in the header that looked like a
-                destination — so the one control a person reaches for when they
-                want "my stuff" was missing, while the one they touch twice a
-                day sat in the most prominent corner of the app. The member's
-                own face is a better door: it says whose desk this is, it opens
-                the settings and reference screens, and Lock is inside it where
-                a sign-out belongs.
+                destination. The member's own face is the better control: it
+                says whose desk this is, and Lock is inside the sheet it opens,
+                where a sign-out belongs. The sheet is the desk's own door —
+                identity, the Settings row that left the bottom bar, the
+                example desk, Lock.
               */}
               <button
                 onClick={() => setMoreOpen(true)}
@@ -982,9 +1068,13 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
         <SideNav
           active={tab}
           demo={navDemo}
-          counts={{ influencers: unacknowledged, history: history.entries.length }}
+          // Influencers is back in the navigation and its waiting count came
+          // back with it: mentions nobody has cleared yet, the same number
+          // the screen's own subtitle promises. The other rows — dashboard,
+          // grievances, compare — still have no waiting number to show.
           // No onLock: the padlock in the header is the one Lock control now,
           // present at every width. The sidebar's foot carries Settings.
+          counts={{ influencers: unacknowledged }}
           onSelect={(next) => {
             if (next === 'history') {
               setHistoryOpen(true)
@@ -995,9 +1085,12 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
           }}
         />
 
+        {/* The influencers slot carries its waiting count again — the same
+            number the sidebar row shows, computed once above. Tasks' count
+            stays on Settings' tools list, where that screen still lives. */}
         <TabBar
           active={tab}
-          counts={{ influencers: unacknowledged, actions: openActions }}
+          counts={{ influencers: unacknowledged }}
           onSelect={(next) => {
             if (next === 'history') {
               setHistoryOpen(true)
@@ -1023,10 +1116,12 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
           }}
         />
 
+        {/* The sheet carries the Settings row again — OVERFLOW in lib/nav.ts
+            feeds it — plus the person header, the example-desk door and Lock.
+            No counts: Settings has no waiting number of its own. */}
         <MoreSheet
           open={moreOpen}
           active={tab}
-          counts={{ influencers: unacknowledged, history: history.entries.length }}
           onClose={() => setMoreOpen(false)}
           demo={navDemo}
           onLock={vault.exists ? () => void signOut() : undefined}
