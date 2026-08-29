@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Building2, ChevronRight, Eye, EyeOff } from 'lucide-react'
+import { Building2, ChevronRight, Eye, EyeOff, X } from 'lucide-react'
 import { Button } from './ui'
 import { deskSignIn } from '@/lib/desk-session'
 import { cn } from '@/lib/utils'
@@ -14,8 +14,21 @@ import { cn } from '@/lib/utils'
  * every first screen the app has: whichever one the member lands on, the door
  * is on it.
  */
-export function DeskDoor({ onOpened, className }: { onOpened: () => void; className?: string }) {
-  const [open, setOpen] = useState(false)
+export function DeskDoor({
+  onOpened,
+  onOpenChange,
+  className,
+}: {
+  onOpened: () => void
+  /** Fires as the form opens and closes, so the host can clear the stage. */
+  onOpenChange?: (open: boolean) => void
+  className?: string
+}) {
+  const [open, setOpenState] = useState(false)
+  const setOpen = (v: boolean): void => {
+    setOpenState(v)
+    onOpenChange?.(v)
+  }
   const [deskId, setDeskId] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [shown, setShown] = useState(false)
@@ -81,10 +94,20 @@ export function DeskDoor({ onOpened, className }: { onOpened: () => void; classN
         className,
       )}
     >
-      <p className="flex items-center gap-2 text-sm font-semibold">
-        <Building2 size={15} aria-hidden />
-        Office sign-in
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Building2 size={15} aria-hidden />
+          Login
+        </p>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="Back to sign in"
+          className="-my-1 grid size-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-[var(--surface-3)]"
+        >
+          <X size={15} aria-hidden />
+        </button>
+      </div>
 
       <div className="mt-3 space-y-2.5">
         <input

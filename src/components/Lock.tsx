@@ -421,6 +421,8 @@ export function LockScreen({
     return 'pick'
   })
   const [chosen, setChosen] = useState<AccountSummary | null>(null)
+  /** The desk login form is open, and the card clears the stage for it. */
+  const [deskFormOpen, setDeskFormOpen] = useState(false)
 
   const [name, setName] = useState('')
   const [passphrase, setPassphrase] = useState('')
@@ -632,7 +634,7 @@ export function LockScreen({
                   </div>
                 </div>
 
-                <ul className="mt-5 space-y-2">
+                <ul className={cn('mt-5 space-y-2', deskFormOpen && 'hidden')}>
                   {accounts.map((a) => (
                     <li key={a.id}>
                       <button
@@ -656,19 +658,21 @@ export function LockScreen({
                   ))}
                 </ul>
 
-                {onDemo !== undefined && <DemoOption onDemo={onDemo} />}
+                {onDemo !== undefined && !deskFormOpen && <DemoOption onDemo={onDemo} />}
 
                 {/* The handed-over desk's own door, at the demo door's weight
                     and directly under it: the two are the ways IN for someone
                     with no vault account on this device. Opening one moves the
                     store's scope, which the shell watches; nothing here needs
                     to know what happens next. */}
-                {onDeskOpened !== undefined && <DeskDoor onOpened={onDeskOpened} className="mt-3" />}
+                {onDeskOpened !== undefined && (
+                  <DeskDoor onOpened={onDeskOpened} onOpenChange={setDeskFormOpen} className="mt-3" />
+                )}
 
                 <button
                   type="button"
                   onClick={() => goto('create')}
-                  className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2"
+                  className={cn('mt-4 flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2', deskFormOpen && 'hidden')}
                 >
                   <UserPlus size={15} />
                   Add another person
@@ -676,7 +680,7 @@ export function LockScreen({
                 <button
                   type="button"
                   onClick={() => goto('restore')}
-                  className="flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2"
+                  className={cn('flex min-h-11 w-full items-center justify-center gap-2 text-sm font-medium text-ink-2', deskFormOpen && 'hidden')}
                 >
                   <Upload size={15} />
                   Restore from a backup file
@@ -698,35 +702,39 @@ export function LockScreen({
                   </div>
                 </div>
 
-                <div className="mt-5">
-                  <PassphraseField
-                    id="vault-passphrase"
-                    label="Passphrase"
-                    value={passphrase}
-                    onChange={(v) => {
-                      setPassphrase(v)
-                      if (error) setError(null)
-                    }}
-                    onEnter={() => void doSignIn()}
-                    autoComplete="current-password"
-                    invalid={error !== null}
-                    autoFocus
-                  />
-                </div>
+                {!deskFormOpen && (
+                  <>
+                    <div className="mt-5">
+                      <PassphraseField
+                        id="vault-passphrase"
+                        label="Passphrase"
+                        value={passphrase}
+                        onChange={(v) => {
+                          setPassphrase(v)
+                          if (error) setError(null)
+                        }}
+                        onEnter={() => void doSignIn()}
+                        autoComplete="current-password"
+                        invalid={error !== null}
+                        autoFocus
+                      />
+                    </div>
 
-                {error && (
-                  <div className="mt-3">
-                    <Notice tone="neg">{error}</Notice>
-                  </div>
+                    {error && (
+                      <div className="mt-3">
+                        <Notice tone="neg">{error}</Notice>
+                      </div>
+                    )}
+
+                    <Button
+                      className="mt-5 w-full"
+                      onClick={() => void doSignIn()}
+                      disabled={busy || passphrase.length === 0}
+                    >
+                      <Busy label={busy ? 'Opening' : 'Sign in'} busy={busy} />
+                    </Button>
+                  </>
                 )}
-
-                <Button
-                  className="mt-5 w-full"
-                  onClick={() => void doSignIn()}
-                  disabled={busy || passphrase.length === 0}
-                >
-                  <Busy label={busy ? 'Opening' : 'Sign in'} busy={busy} />
-                </Button>
 
                 {/**
                  * The demo belongs on this screen most of all.
@@ -739,20 +747,24 @@ export function LockScreen({
                  * screen. Anyone who wanted to show a colleague what Signal
                  * does had to sign in first, or add a second account.
                  */}
-                {onDemo !== undefined && <DemoOption onDemo={onDemo} />}
+                {onDemo !== undefined && !deskFormOpen && <DemoOption onDemo={onDemo} />}
 
                 {/* The handed-over desk's door, HERE as well as on the picker.
                     A device with exactly one vault account skips the picker
                     entirely — this passphrase card is its whole entrance — and
                     the member issued desk credentials had no way in on
-                    precisely the screen she was most likely to meet. */}
-                {onDeskOpened !== undefined && <DeskDoor onOpened={onDeskOpened} className="mt-3" />}
+                    precisely the screen she was most likely to meet. While
+                    the form is open everything else on the card steps aside:
+                    two sign-in forms stacked read as one broken one. */}
+                {onDeskOpened !== undefined && (
+                  <DeskDoor onOpened={onDeskOpened} onOpenChange={setDeskFormOpen} className="mt-3" />
+                )}
 
                 {/* The quiet links, spaced as one group rather than each
                     carrying its own margin — the first of them varies with the
                     account count, so a margin on any single one leaves the
                     others touching whatever sits above. */}
-                <div className="mt-4">
+                <div className={cn('mt-4', deskFormOpen && 'hidden')}>
                   {accounts.length > 1 && (
                     <button
                       type="button"
