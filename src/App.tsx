@@ -367,9 +367,8 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
       void import('@/lib/demo').then((m) => setDemo(m.DEMO_REPORT))
     }
 
-    // The OAuth callback (oauth-callback.mts) redirects here with this flag —
-    // Settings.tsx itself consumes the rest of the query string (connected=/
-    // connect_error=) once it is actually mounted.
+    // A link can open straight onto Settings with this flag; Settings.tsx
+    // strips it from the URL once it is actually mounted.
     if (params.has('settings')) setTab('settings')
 
     /**
