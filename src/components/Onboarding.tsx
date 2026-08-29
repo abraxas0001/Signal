@@ -32,6 +32,7 @@ import { Avatar, Button, Card, Chip, Shell, SignalGlyph } from './ui'
 import { CardHead } from '@/components/kit'
 import { IdentityRows } from './IdentityEditor'
 import { DeskDoor } from './DeskDoor'
+import { consumeRelock } from '@/lib/desk-session'
 import { applyDeskPlan, describePlan, planDesk } from '@/lib/autoconfig'
 import { cn } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
@@ -94,6 +95,11 @@ export function Onboarding({
   const reduce = useReducedMotion() === true
 
   const [step, setStep] = useState<Step>('choose')
+  /** One-shot: the padlock just locked a desk on a device with no vault
+      account, so this welcome screen is what greets her next. Open the desk
+      login for her instead of making her find the pill again. Lazy state,
+      not a bare call, so re-renders cannot consume it twice. */
+  const [deskRelock] = useState(consumeRelock)
   const [mode, setMode] = useState<'link' | 'manual'>('link')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -360,7 +366,7 @@ export function Onboarding({
                       so the way into their own desk sits beside the demo, at
                       the same weight. The quiet skip drops below the pair. */}
                   <div className="w-full max-w-sm sm:w-auto">
-                    <DeskDoor onOpened={() => window.location.reload()} />
+                    <DeskDoor onOpened={() => window.location.reload()} initialOpen={deskRelock} />
                   </div>
                 </div>
 
