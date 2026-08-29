@@ -817,20 +817,36 @@ function ScanPanel({
     )
   }
 
-  /* it ran and there was genuinely nothing */
+  /* It ran and there was genuinely nothing — or it has not run at all yet.
+     Two different truths, and they used to share one headline: "Nothing in
+     this morning's papers names you" over "The papers have not been read yet"
+     asserted a result the line below admitted was never computed. The desk
+     may only claim an absence it actually checked. */
   const dead = scan.sources.filter((s) => s.error !== null)
+
+  if (!scan.lastAt) {
+    return (
+      <Empty
+        icon={<ScanEye size={18} aria-hidden />}
+        title="The papers have not been read yet"
+        body="Nothing is known about this morning until they are."
+        action={
+          <Button size="sm" variant="outline" onClick={() => scan.run(true)}>
+            <RefreshCw size={15} />
+            Read them now
+          </Button>
+        }
+      />
+    )
+  }
 
   return (
     <Empty
       icon={<ScanEye size={18} aria-hidden />}
       title="Nothing in this morning&rsquo;s papers names you"
-      body={
-        scan.lastAt
-          ? `${scan.sources.length} mastheads were read ${relativeTime(scan.lastAt)}${
-              dead.length > 0 ? `, and ${dead.length} did not answer.` : '.'
-            }`
-          : 'The papers have not been read yet this morning.'
-      }
+      body={`${scan.sources.length} mastheads were read ${relativeTime(scan.lastAt)}${
+        dead.length > 0 ? `, and ${dead.length} did not answer.` : '.'
+      }`}
       action={
         <Button size="sm" variant="outline" onClick={() => scan.run(true)}>
           <RefreshCw size={15} />

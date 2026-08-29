@@ -246,7 +246,9 @@ export function FindByName({
           // Escape closes the list without clearing what was typed — the same
           // thing every other combobox on the web does.
           onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
-          placeholder="Type a person's name, such as “d k aruna mahabubnagar”"
+          /* A shape, not a person: the old example named one real MP, which
+             read very oddly from every other politician's configured desk. */
+          placeholder="Type a person's name, with their seat if it is common"
           role="combobox"
           aria-expanded={open}
           aria-controls="name-results"

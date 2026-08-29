@@ -123,6 +123,32 @@ export function GrowthCard({ growth }: { growth: GrowthSummary }) {
   const delta = growth.totalDelta ?? 0
 
   /**
+   * Zero everywhere is a real measurement, so it gets a sentence, not a
+   * scoreboard. Two readings taken close together often hold identical
+   * counts, and rendering that as "0 followers 0%" over four rows of
+   * "0 · 0%" reads as a dead card rather than as the quiet truth.
+   */
+  if (delta === 0 && growth.measured.every((g) => (g.delta ?? 0) === 0)) {
+    const since = growth.measured
+      .map((g) => g.baseline?.takenAt)
+      .filter((t): t is string => Boolean(t))
+      .sort()
+      .pop()
+    return (
+      <Card className="p-4 sm:p-6">
+        <CardHead
+          icon={<TrendingUp size={16} aria-hidden />}
+          tint="blue"
+          title="Follower growth"
+        />
+        <p className="text-sm leading-relaxed text-ink-2">
+          No movement on any account{since ? ` since the ${dayOf(since)} reading` : ' between the last two readings'}.
+        </p>
+      </Card>
+    )
+  }
+
+  /**
    * The card says what it actually compares. With week-old baselines it is
    * growth against last week; with yesterday's readings it says "since
    * yesterday" — a one-day delta wearing a weekly headline is a lie of scale

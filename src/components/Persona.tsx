@@ -815,19 +815,21 @@ export function Persona({ onClose }: { onClose: () => void }) {
         </m.div>
       )}
 
-      {/* ── What this actually does ───────────────────────────────────────── */}
+      {/* ── What this actually does ─────────────────────────────────────────
+          Once a card about the app's own architecture ("nothing runs while
+          this screen is shut, no server watches on your behalf") — the same
+          self-referential genre as "everything stays on this device", which
+          the owner had stripped from every other screen. What the reader
+          needs is the one operational fact: it updates when they ask. */}
       <m.div variants={fadeUp} className="mt-4">
         <Card>
           <CardHead
             icon={<BellOff size={16} aria-hidden />}
             tint="blue"
-            title="Nothing runs while this screen is shut"
-            sub="No server watches on your behalf"
+            title="Checked when you ask"
+            sub="Tap Check now for a fresh reading"
           />
           <div className="text-sm leading-relaxed text-ink-2">
-            <p>
-              Updates only when you tap Check now.
-            </p>
             {!canSearch && (
               <p className="mt-2.5 rounded-[var(--radius-md)] bg-[var(--warn-soft)] px-3 py-2 font-medium text-[var(--warn)]">
                 No papers are set yet. Pick the state and tick the mastheads on the intake
@@ -883,7 +885,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
                 id="persona-aliases"
                 value={aliases}
                 onChange={(e) => setAliases(e.target.value)}
-                placeholder="Telugu spelling, initials, short form"
+                placeholder="Native-script spelling, initials, short form"
                 className="mt-1.5 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2 text-sm text-ink outline-none transition-colors focus:border-[var(--accent)] focus:bg-[var(--surface)]"
               />
             </div>
@@ -949,7 +951,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
               hint={
                 current.lastCheckedAt
                   ? `Last checked ${relativeTime(current.lastCheckedAt)} · newest first`
-                  : 'Not checked yet on this device.'
+                  : 'Not checked yet.'
               }
             >
               {current.name}
@@ -960,7 +962,7 @@ export function Persona({ onClose }: { onClose: () => void }) {
               <Card level="quiet">
                 <p className="text-sm leading-relaxed text-ink-2">
                   {current.lastCheckedAt
-                    ? 'The last check found nothing carrying this name. Add the Telugu spelling and check again.'
+                    ? 'The last check found nothing carrying this name. Add the native-script spelling and check again.'
                     : `Nothing read for ${current.name} yet. Tap Check now.`}
                 </p>
               </Card>

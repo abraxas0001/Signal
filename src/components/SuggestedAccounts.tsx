@@ -72,13 +72,19 @@ export function suggestionsFromIdentity(
     const ref = parseHandleUrl(handle.url)
     if (!ref) continue
 
-    const id = handleId(ref.platform, ref.handle)
+    // Bare, always. Some sources hand back "@name" and the card prefixes its
+    // own @, so the reader met "@@narendramodi" — and worse, the @-carrying id
+    // never matched the tracked list's bare one, so an account the desk
+    // already followed was offered again as a fresh discovery.
+    const bare = ref.handle.replace(/^@+/, '')
+
+    const id = handleId(ref.platform, bare)
     if (seen.has(id)) continue
     seen.add(id)
 
     out.push({
       platform: ref.platform,
-      handle: ref.handle,
+      handle: bare,
       url: handle.url,
       displayName: identity.name,
       avatarUrl: null,
@@ -195,8 +201,10 @@ export function SuggestedAccounts({
           </span>
           <div className="min-w-0">
             <h3 className="text-[15px] font-bold">
+              {/* The full name. Taking the first word made initialled Indian
+                  names into "accounts we believe D. owns". */}
               {pending.length} {pending.length === 1 ? 'account' : 'accounts'} we believe{' '}
-              {identity.name.split(/\s+/)[0]} owns
+              {identity.name} owns
             </h3>
             <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
               Check each one before adding it.

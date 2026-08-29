@@ -120,12 +120,20 @@ export function localNewsOf(
   }
 }
 
-/** The word the about-chip actually renders, from the identity on this desk. */
+/**
+ * The words the about-chip actually renders, from the identity on this desk.
+ *
+ * Always led by "About": a bare party name sitting beside the outlet's own
+ * name and follower count read as a claim about the OUTLET — "Alt News ·
+ * 4,17,000 followers · Bharatiya Janata Party" says the channel is
+ * affiliated, which is the one thing a press-monitoring desk must never
+ * accidentally assert. The chip's job is to say what the story is about.
+ */
 function aboutWord(about: LocalNewsRow['about'], identity: Identity | null): string | null {
   if (!about) return null
-  if (about === 'person') return identity?.name ?? 'You'
-  if (about === 'party') return identity?.party ?? 'Your party'
-  return identity?.constituency ?? 'Your seat'
+  if (about === 'person') return `About ${identity?.name ?? 'you'}`
+  if (about === 'party') return `About ${identity?.party ?? 'your party'}`
+  return `About ${identity?.constituency ?? 'your seat'}`
 }
 
 function MentionRow({

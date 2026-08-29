@@ -546,14 +546,20 @@ export function Grievances({
    * issue whose backing has all been cleared is shown rather than hidden, so
    * clearing a day cannot silently delete an issue from every view at once.
    */
-  const visibleIssues = useMemo(() => {
-    const onDay = issues.filter((issue) => {
-      const held = issue.recordIds.map((id) => byId.get(id)).filter(Boolean) as GrievanceRecord[]
-      if (held.length === 0) return true
-      return held.some((r) => recordDeskDay(r) === day)
-    })
-    return onDay.filter((issue) => issueMatches(issue, issueFilters, byId))
-  }, [issues, issueFilters, byId, day])
+  const dayIssues = useMemo(
+    () =>
+      issues.filter((issue) => {
+        const held = issue.recordIds.map((id) => byId.get(id)).filter(Boolean) as GrievanceRecord[]
+        if (held.length === 0) return true
+        return held.some((r) => recordDeskDay(r) === day)
+      }),
+    [issues, byId, day],
+  )
+
+  const visibleIssues = useMemo(
+    () => dayIssues.filter((issue) => issueMatches(issue, issueFilters, byId)),
+    [dayIssues, issueFilters, byId],
+  )
 
   /**
    * Only the categories actually present.
@@ -938,8 +944,12 @@ export function Grievances({
           }
           title="Grievance desk"
           subtitle={
+            /* Both numbers are scoped to the day on screen. The old pairing
+               put the day's records beside the archive's issue total, so the
+               header said "3 records · 8 issues" over a list of three and the
+               other five were nowhere a reader could find. */
             dayRecords.length
-              ? `${dayRecords.length} ${pluralise(dayRecords.length, 'record')} · ${issues.length} ${pluralise(issues.length, 'issue')}`
+              ? `${dayRecords.length} ${pluralise(dayRecords.length, 'record')} · ${dayIssues.length} ${pluralise(dayIssues.length, 'issue')} on this day`
               : 'Paste the morning’s news links.'
           }
           actions={
@@ -1291,8 +1301,10 @@ export function Grievances({
               onChange={setIssueFilters}
               categories={issueCategories}
               showFlagged={anyFlagged}
+              /* Day-scoped, like the list it sits over. Against the archive
+                 total the label read "8 issues" above three cards. */
               shown={visibleIssues.length}
-              total={issues.length}
+              total={dayIssues.length}
             />
           )}
 
@@ -1302,6 +1314,18 @@ export function Grievances({
                 icon={<Layers size={16} />}
                 title="No issues yet"
                 sub="Issues appear once enough links have been read"
+                tint="violet"
+              />
+            </Card>
+          ) : dayIssues.length === 0 ? (
+            /* The desk has issues, just none live on this day. Distinct from
+               both cards below: "no issues yet" would deny the archive, and
+               the filter card would blame controls the reader never touched. */
+            <Card>
+              <CardHead
+                icon={<Layers size={16} />}
+                title="Nothing live on this day"
+                sub={`${issues.length} ${pluralise(issues.length, 'issue')} on the days either side`}
                 tint="violet"
               />
             </Card>
@@ -1317,7 +1341,7 @@ export function Grievances({
               <CardHead
                 icon={<Filter size={16} />}
                 title="Nothing matches these filters"
-                sub={`All ${issues.length} ${pluralise(issues.length, 'issue')} are hidden by them`}
+                sub={`All ${dayIssues.length} ${pluralise(dayIssues.length, 'issue')} on this day are hidden by them`}
                 tint="blue"
               />
               <p className="text-sm text-ink-3">Loosen one, or clear them and start again.</p>

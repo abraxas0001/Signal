@@ -20,6 +20,7 @@ import {
   readWeekAnalysisCache,
   rowFor,
   weekOf,
+  type PersonWeek,
   type WeekAnalysis,
 } from '@/lib/week'
 import { fileFreeAction } from '@/lib/actions'
@@ -91,6 +92,35 @@ export function WeekCompare({ onClose }: { onClose: () => void }) {
 
   const leader = week.rows[0]!
   const you = week.rows.find((r) => r.own)!
+
+  /**
+   * Each analysed card, matched to the desk's own row for that person.
+   *
+   * The loose name match alone was not enough: the model occasionally heads a
+   * card with something that is not a name at all — one run titled the
+   * winner's card "Wit" — and that card then rendered under a stranger's
+   * letter-avatar with no figures while the person it described had no card
+   * anywhere. The request names the people in a fixed order, so any card
+   * whose title matches nobody is adopted by the first requested person no
+   * other card has claimed. Nobody analysed goes missing over a bad heading.
+   */
+  const cards = ((): { p: WeekAnalysis['people'][number]; row: PersonWeek | null }[] => {
+    if (!analysis) return []
+    const claimed = new Set<PersonWeek>()
+    const matched = analysis.people.map((p) => {
+      const row = rowFor(week, p.name)
+      if (row && !claimed.has(row)) {
+        claimed.add(row)
+        return { p, row: row as PersonWeek | null }
+      }
+      return { p, row: null }
+    })
+    const unclaimed = week.rows.slice(0, 5).filter((r) => !claimed.has(r))
+    for (const card of matched) {
+      if (!card.row) card.row = unclaimed.shift() ?? null
+    }
+    return matched
+  })()
   const verdict = leader.own
     ? `You lead this week.`
     : `${leader.name} leads this week.`
@@ -201,8 +231,7 @@ export function WeekCompare({ onClose }: { onClose: () => void }) {
                 </h2>
               </div>
               <div className="grid items-start gap-4 lg:grid-cols-2">
-                {analysis.people.map((p) => {
-                  const row = rowFor(week, p.name)
+                {cards.map(({ p, row }) => {
                   const isLeader = row === leader
                   return (
                     <Card key={p.name} className={row?.own ? 'ring-1 ring-[var(--accent)]' : undefined}>

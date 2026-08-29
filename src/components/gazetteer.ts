@@ -30,6 +30,11 @@ const TELANGANA: Place[] = [
   { name: 'Nagarkurnool', lon: 78.32, lat: 16.48, state: 'Telangana', kind: 'district' },
   { name: 'Jogulamba Gadwal', lon: 77.8, lat: 16.23, state: 'Telangana', kind: 'district' },
   { name: 'Alampur', lon: 78.13, lat: 15.88, state: 'Telangana', kind: 'constituency' },
+  // The example desks' own seats. Kodangal and Sircilla are where two of the
+  // five demo principals actually stand, and a desk that knows its seat but
+  // cannot point at it says "Seat not mapped yet" over a blank map.
+  { name: 'Kodangal', lon: 77.77, lat: 17.09, state: 'Telangana', kind: 'constituency' },
+  { name: 'Sircilla', lon: 78.81, lat: 18.39, state: 'Telangana', kind: 'constituency' },
   { name: 'Warangal', lon: 79.59, lat: 17.97, state: 'Telangana', kind: 'city' },
   { name: 'Nizamabad', lon: 78.09, lat: 18.67, state: 'Telangana', kind: 'city' },
   { name: 'Karimnagar', lon: 79.13, lat: 18.44, state: 'Telangana', kind: 'city' },
@@ -85,6 +90,7 @@ const NATIONAL: Place[] = [
   { name: 'Kochi', lon: 76.27, lat: 9.93, state: 'Kerala', kind: 'city' },
   { name: 'Surat', lon: 72.83, lat: 21.17, state: 'Gujarat', kind: 'city' },
   { name: 'Varanasi', lon: 82.97, lat: 25.32, state: 'Uttar Pradesh', kind: 'city' },
+  { name: 'Rae Bareli', lon: 81.23, lat: 26.23, state: 'Uttar Pradesh', kind: 'constituency' },
   { name: 'Amritsar', lon: 74.87, lat: 31.63, state: 'Punjab', kind: 'city' },
   { name: 'Srinagar', lon: 74.8, lat: 34.08, state: 'Jammu & Kashmir', kind: 'city' },
 ]

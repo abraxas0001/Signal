@@ -594,7 +594,11 @@ function ActionCard({
         <StatusPills current={item.status} onSelect={setStatus} />
       </div>
 
-      <div className="mt-2 flex items-center gap-2">
+      {/* flex-wrap plus a floor on the select: inside a kanban column the
+          old flex-1 squeezed it until the browser clipped "Not escalated" to
+          "Not esc…" on every card. Below the floor the select simply takes
+          the next line whole. */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <label
           className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-ink-3"
           htmlFor={`${item.id}-escalation`}
@@ -609,7 +613,7 @@ function ActionCard({
             const next = asEscalation(e.target.value)
             if (next) onPatch({ escalation: next })
           }}
-          className="min-h-11 min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 text-xs font-medium text-ink-2 outline-none transition-colors focus:border-[var(--accent)]"
+          className="min-h-11 min-w-[10rem] flex-1 rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 text-xs font-medium text-ink-2 outline-none transition-colors focus:border-[var(--accent)]"
         >
           {ESCALATION_LEVELS.map((level) => (
             <option key={level} value={level}>

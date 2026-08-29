@@ -875,16 +875,24 @@ export function Dashboard({
    * desk's own rows emphasised. Counted from the latest reading each account
    * holds; accounts with no follower reading are left off rather than drawn at
    * a zero nobody measured.
+   *
+   * The desk's own accounts are ALWAYS on it. A plain top-8 cut once produced
+   * a board with zero of them — an MP whose largest account ranks ninth among
+   * the rivals she watches saw a card about "your accounts" made entirely of
+   * other people — so her rows are seated first and the largest watched
+   * accounts fill whatever is left, with the whole board then sorted by size.
    */
-  const followerBoard = useMemo(
-    () =>
-      shown
-        .map((h) => ({ h, followers: statsFor(h.snapshots.at(-1)).followers }))
-        .filter((x): x is { h: TrackedHandle; followers: number } => x.followers != null)
-        .sort((a, b) => b.followers - a.followers)
-        .slice(0, 8),
-    [shown],
-  )
+  const followerBoard = useMemo(() => {
+    const readable = shown
+      .map((h) => ({ h, followers: statsFor(h.snapshots.at(-1)).followers }))
+      .filter((x): x is { h: TrackedHandle; followers: number } => x.followers != null)
+      .sort((a, b) => b.followers - a.followers)
+    const own = readable.filter((x) => x.h.own)
+    const watched = readable.filter((x) => !x.h.own)
+    return [...own, ...watched.slice(0, Math.max(0, 8 - own.length))].sort(
+      (a, b) => b.followers - a.followers,
+    )
+  }, [shown])
 
   /**
    * The headline figures, added up from readings already on this device.
@@ -1173,8 +1181,8 @@ export function Dashboard({
             <CardHead
               icon={<BarChart3 size={16} />}
               tint="teal"
-              title="Followers across your accounts"
-              sub="The latest reading each holds, largest first."
+              title="Followers, yours against theirs"
+              sub="The latest reading each account holds, largest first. Your rows are highlighted."
             />
             <div className="mt-1">
               <HBarBoard

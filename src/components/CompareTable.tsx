@@ -233,7 +233,13 @@ function recurringTerms(texts: string[], max = 5): string[] | null {
     const tokens = text
       .toLowerCase()
       .replace(/https?:\/\/\S+/g, ' ')
-      .split(/[^\p{L}\p{N}]+/u)
+      // \p{M} is load-bearing: Devanagari and Telugu build words out of
+      // combining marks — the virama in आरक्षण is one — and a split that
+      // treats marks as separators shreds every conjunct into fragments a
+      // reader sees as gibberish ("आरक षण"). Apostrophes stay inside words
+      // for the same reason: "hon'ble" is one token, not "hon ble".
+      .split(/[^\p{L}\p{M}\p{N}'’]+/u)
+      .map((t) => t.replace(/^['’]+|['’]+$/g, ''))
       .filter((t) => {
         if (!t || /^\d+$/.test(t) || STOPWORDS.has(t)) return false
         // Latin needs three letters to mean anything; Indic scripts can pack
@@ -1105,13 +1111,17 @@ export function CompareTable({
     if (!st) return <Note>No reading yet.</Note>
     const side = (tone: 'pos' | 'neg', quotes: string[]): ReactNode => {
       if (!quotes.length) return <Note className="mt-1">None recorded in this reading.</Note>
-      // A handful of short quotes can repeat no word at all; the reading's own
-      // label is then the only keyword there is evidence for.
+      // A handful of short quotes can repeat no word at all. That gets said
+      // plainly: the earlier fallback printed the reading's own verdict label
+      // here, and a chip saying "Warm" under COMPLAINED ABOUT claimed people
+      // complain about the person for being warm.
       const terms = recurringTerms(quotes, 4)
-      const shown = terms?.length ? terms : [st.label]
+      if (!terms?.length) {
+        return <Note className="mt-1">No word recurs across the quotes held.</Note>
+      }
       return (
         <div className="mt-1 flex flex-wrap gap-1.5">
-          {shown.map((t) => (
+          {terms.map((t) => (
             <ThemeTag key={t} tone={tone}>
               {t}
             </ThemeTag>

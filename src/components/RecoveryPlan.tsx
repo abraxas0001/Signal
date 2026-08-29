@@ -186,8 +186,13 @@ export function RecoveryPlan({
         <CardHead
           icon={<LifeBuoy size={16} aria-hidden />}
           tint="blue"
-          title="The reading is negative"
-          sub="Work out what is actually driving it"
+          /* Named source, not "the reading". This card is driven by the press
+             coverage survey alone, and on a desk whose COMMENTS are warm the
+             bare phrase sat two cards under "People are warm about you"
+             flatly contradicting it. Coverage and comments genuinely can
+             disagree; the card has to say which one it is reading. */
+          title="The press coverage reads negative"
+          sub="Work out what is driving the stories"
         />
         <Button className="mt-4" onClick={() => void run()} disabled={busy}>
           {busy ? (

@@ -129,12 +129,8 @@ function saveCache(label: string, a: WeekAnalysis): void {
   }
 }
 
-/** Fetch the close reading, from the cache unless forced. Throws with a sentence. */
-export async function loadWeekAnalysis(week: WeekModel, force = false): Promise<WeekAnalysis> {
-  if (!force) {
-    const cached = readWeekAnalysisCache(week.label)
-    if (cached) return cached
-  }
+/** One request to the reader. Throws with a plain sentence when it fails. */
+async function requestWeekAnalysis(week: WeekModel): Promise<WeekAnalysis> {
   const res = await fetchWithTimeout(
     '/api/week-compare',
     {
@@ -147,16 +143,37 @@ export async function loadWeekAnalysis(week: WeekModel, force = false): Promise<
     },
     60_000,
   )
+  // No status codes in these sentences. "HTTP 500" told the office nothing it
+  // could act on and made the product look broken in a different way than it
+  // was; the sentence's whole job is "wait, then press the button again".
   let body: Partial<WeekAnalysis> & { error?: string }
   try {
     body = (await res.json()) as Partial<WeekAnalysis> & { error?: string }
   } catch {
-    throw new Error(`The reading took too long (HTTP ${res.status}). Try again.`)
+    throw new Error('The reading took too long. Try again in a minute.')
   }
   if (!res.ok || body.error || !Array.isArray(body.people)) {
-    throw new Error(body.error ?? `The reading failed (HTTP ${res.status}). Try again.`)
+    throw new Error(body.error ?? 'The reading did not come back. Try again in a minute.')
   }
-  const analysis = body as WeekAnalysis
+  return body as WeekAnalysis
+}
+
+/** Fetch the close reading, from the cache unless forced. Throws with a sentence. */
+export async function loadWeekAnalysis(week: WeekModel, force = false): Promise<WeekAnalysis> {
+  if (!force) {
+    const cached = readWeekAnalysisCache(week.label)
+    if (cached) return cached
+  }
+  let analysis: WeekAnalysis
+  try {
+    analysis = await requestWeekAnalysis(week)
+  } catch {
+    // Once more before giving up. The reading leans on a model that is slow
+    // roughly one run in three and fine the next; measured on the example
+    // desks, the retry turns most first-click failures into a longer wait
+    // instead of an error card.
+    analysis = await requestWeekAnalysis(week)
+  }
   saveCache(week.label, analysis)
   return analysis
 }
