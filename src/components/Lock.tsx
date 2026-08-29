@@ -741,6 +741,13 @@ export function LockScreen({
                  */}
                 {onDemo !== undefined && <DemoOption onDemo={onDemo} />}
 
+                {/* The handed-over desk's door, HERE as well as on the picker.
+                    A device with exactly one vault account skips the picker
+                    entirely — this passphrase card is its whole entrance — and
+                    the member issued desk credentials had no way in on
+                    precisely the screen she was most likely to meet. */}
+                {onDeskOpened !== undefined && <DeskDoor onOpened={onDeskOpened} className="mt-3" />}
+
                 {/* The quiet links, spaced as one group rather than each
                     carrying its own margin — the first of them varies with the
                     account count, so a margin on any single one leaves the
