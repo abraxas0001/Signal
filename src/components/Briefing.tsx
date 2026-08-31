@@ -50,8 +50,6 @@ import { fadeUp, listItem, listStagger } from '@/lib/motion'
 import { DeskOverview, MostEngagingStrip, deskPosts } from './briefing/DeskOverview'
 import { GrowthCard, PlatformReachRow } from './briefing/Glance'
 import { SentimentGlance } from './briefing/SentimentGlance'
-import { TopMentions } from './briefing/TopMentions'
-import { CompareBoard } from './briefing/CompareBoard'
 import { WeekAgainstRivals } from './briefing/WeekAgainstRivals'
 import { PostHighlights } from './briefing/PostHighlights'
 import { NextPosts } from './briefing/NextPosts'
@@ -255,7 +253,7 @@ export function Briefing({
               action={<LinkOut label="Against a rival" onClick={go('compare')} />}
             />
             <div className="stack-tight">
-              <PlatformReachRow reach={reach} own={ownHandles.length > 0} growth={growth} />
+              <PlatformReachRow reach={reach} own={ownHandles.length > 0} />
 
               <DeskOverview
                 handles={handles}
@@ -269,13 +267,7 @@ export function Briefing({
                   below and the "What to post next" cards further down. */}
               <WeekAgainstRivals handles={handles} lands={lands} onExplore={go('weekly')} />
 
-              {/* The collapsible comparison the owner asked onto the main
-                  dashboard: folded to one strip until the office wants the
-                  full board. Distinct from the week card above — that scores
-                  ONE week's reactions, this compares the whole standing. */}
-              <CompareBoard handles={handles} onOpenAccounts={go('accounts')} />
-
-              {handles.length > 0 && <GrowthCard growth={growth} handles={postHandles} />}
+              {handles.length > 0 && <GrowthCard growth={growth} />}
             </div>
           </m.section>
         )}
@@ -326,17 +318,12 @@ export function Briefing({
               title="What people are saying about you"
               action={<LinkOut label="Per account" onClick={go('accounts')} />}
             />
-            {/* The verdict card and the mention board side by side on a
-                laptop — the owner's reference pairs them — stacked on a
-                phone. The board renders nothing until comments exist, and
-                the grid collapses to one column around it. */}
-            <div className="grid gap-3 lg:grid-cols-2 lg:items-start">
+            <div className="stack-tight">
               <SentimentGlance
                 handles={ownHandles}
                 opinion={store.opinion}
                 onOpenAccounts={go('accounts')}
               />
-              <TopMentions handles={handles} identity={b.identity} />
             </div>
             <div className="mt-3">
             <PlatformVoices
