@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { MessageSquare, UserRound } from 'lucide-react'
 import { Button, Card, Chip, Empty } from '../ui'
+import { DonutBreakdown } from '@/components/kit'
+import { recurringTerms } from '@/lib/terms'
 import { readStandingCache, type Standing, type TrackedHandle } from '@/lib/handles'
 import type { OpinionSurvey } from '@/lib/opinion'
 
@@ -126,6 +128,21 @@ export function SentimentGlance({
 }) {
   const agg = useMemo(() => aggregateOf(handles), [handles])
 
+  /* The "why" chips the owner's reference dashboard carries under the donut:
+     the words that actually recur across the praising and the critical
+     comments, counted by the same tokenizer the compare screen uses. A side
+     where nothing recurs shows nothing — the quotes themselves live in the
+     platform cards below. Computed here, above the empty-state return, so the
+     hook order never depends on the data. */
+  const praiseTerms = useMemo(
+    () => recurringTerms(agg.comments.flatMap((m) => m.standing.praise), 5) ?? [],
+    [agg],
+  )
+  const criticismTerms = useMemo(
+    () => recurringTerms(agg.comments.flatMap((m) => m.standing.criticism), 5) ?? [],
+    [agg],
+  )
+
   // A survey with no verdict has read nothing worth repeating; treating it as
   // a coverage reading would render an empty block under an honest heading.
   const coverage = opinion && opinion.verdict ? opinion : null
@@ -184,35 +201,75 @@ export function SentimentGlance({
             </p>
           </div>
 
-          <div
-            className="mt-4 flex h-3 w-full gap-[3px]"
-            role="img"
-            aria-label={`${agg.positive}% positive, ${agg.neutral}% neutral, ${agg.negative}% negative`}
-          >
-            {segments.map((seg) =>
-              seg.n === 0 ? null : (
-                <span
-                  key={seg.label}
-                  className="h-full rounded-full"
-                  style={{ flexGrow: seg.n, background: seg.colour }}
-                />
-              ),
-            )}
-          </div>
+          {/* Donut and bar carry the same three numbers on purpose: the donut
+              is the glance, the bar with its labelled percentages is the
+              reading, and neither asks the eye to decode colour alone. */}
+          <div className="mt-4 flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-6">
+            <DonutBreakdown
+              size={132}
+              thickness={18}
+              segments={segments.map((seg) => ({ label: seg.label, value: seg.n, color: seg.colour }))}
+              centerLabel={`${agg.positive}%`}
+              centerSub="positive"
+              className="shrink-0"
+            />
+            <div className="w-full min-w-0 flex-1">
+              <div
+                className="flex h-3 w-full gap-[3px]"
+                role="img"
+                aria-label={`${agg.positive}% positive, ${agg.neutral}% neutral, ${agg.negative}% negative`}
+              >
+                {segments.map((seg) =>
+                  seg.n === 0 ? null : (
+                    <span
+                      key={seg.label}
+                      className="h-full rounded-full"
+                      style={{ flexGrow: seg.n, background: seg.colour }}
+                    />
+                  ),
+                )}
+              </div>
 
-          <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
-            {segments.map((seg) => (
-              <li key={seg.label} className="flex items-center gap-2 text-sm">
-                <span
-                  aria-hidden
-                  className="size-2 shrink-0 rounded-full"
-                  style={{ background: seg.colour }}
-                />
-                <span className="text-ink-2">{seg.label}</span>
-                <span className="tnum font-semibold">{seg.n}%</span>
-              </li>
-            ))}
-          </ul>
+              <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
+                {segments.map((seg) => (
+                  <li key={seg.label} className="flex items-center gap-2 text-sm">
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ background: seg.colour }}
+                    />
+                    <span className="text-ink-2">{seg.label}</span>
+                    <span className="tnum font-semibold">{seg.n}%</span>
+                  </li>
+                ))}
+              </ul>
+
+              {(praiseTerms.length > 0 || criticismTerms.length > 0) && (
+                <div className="mt-3.5 space-y-2 border-t border-[var(--rule)] pt-3">
+                  {praiseTerms.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--pos)]">
+                        Praised for
+                      </span>
+                      {praiseTerms.map((t) => (
+                        <Chip key={t} tone="positive">{t}</Chip>
+                      ))}
+                    </div>
+                  )}
+                  {criticismTerms.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--neg)]">
+                        Criticised over
+                      </span>
+                      {criticismTerms.map((t) => (
+                        <Chip key={t} tone="negative">{t}</Chip>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Named sources — a reading from the wrong account is otherwise
               indistinguishable from a reading from the right one. */}
