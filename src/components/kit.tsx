@@ -138,7 +138,7 @@ export function DeltaChip({
   if (value == null) {
     return (
       <span className={cn('inline-flex items-center gap-0.5 rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-[11px] font-semibold text-ink-3', className)} title={title}>
-        <Minus size={11} aria-hidden /> —
+        <Minus size={11} aria-hidden /> NA
       </span>
     )
   }
@@ -197,7 +197,7 @@ export function IconStat({
 }: {
   icon: ReactNode
   label: string
-  /** Null reads as "—" with the reason on the title attribute. */
+  /** Null reads as "NA" with the reason on the title attribute. */
   value: number | null
   /** Pre-formatted override (e.g. "1.26k", "2%"). */
   display?: string
@@ -234,7 +234,7 @@ export function IconStat({
       <div>
         <p className={cn('text-[13px] font-medium', hero ? 'text-white/80' : 'text-ink-3')}>{label}</p>
         <p className={cn('tnum mt-0.5 text-[26px] font-bold leading-none tracking-[-0.02em]', hero ? 'text-white' : 'text-ink')}>
-          {display ?? (value == null ? '—' : value < 100_000 ? <NumberFlow value={value} /> : compact(value))}
+          {display ?? (value == null ? 'NA' : value < 100_000 ? <NumberFlow value={value} /> : compact(value))}
         </p>
         {deltaLabel && <p className={cn('mt-1.5 text-[11px]', hero ? 'text-white/70' : 'text-ink-3')}>{deltaLabel}</p>}
       </div>
@@ -413,6 +413,7 @@ export function LineChart({
   height = 240,
   area = true,
   formatValue = compact,
+  legend = true,
   className,
 }: {
   labels: string[]
@@ -420,6 +421,8 @@ export function LineChart({
   height?: number
   area?: boolean
   formatValue?: (n: number | null | undefined) => string
+  /** Off when the host draws its own legend — e.g. a clickable one. */
+  legend?: boolean
   className?: string
 }) {
   const reduced = useReducedMotion()
@@ -429,8 +432,12 @@ export function LineChart({
   const [hoverI, setHoverI] = useState<number | null>(null)
 
   const H = height
-  const PAD = { l: 44, r: 16, t: 12, b: 26 }
-  const innerW = W - PAD.l - PAD.r
+  // r fits half of the last x label (anchored middle); 16px clipped "28 Aug"
+  // against the card edge on every chart.
+  const PAD = { l: 44, r: 26, t: 12, b: 26 }
+  // Clamped: mid-layout the container can measure ~50px, and a negative
+  // width reaches the hover rect as an invalid SVG attribute.
+  const innerW = Math.max(0, W - PAD.l - PAD.r)
   const innerH = H - PAD.t - PAD.b
 
   /**
@@ -570,7 +577,9 @@ export function LineChart({
       </svg>
       </div>
       {overlay}
-      <Legend items={series.map((s) => ({ label: s.name, color: s.color }))} className="mt-3" />
+      {legend && (
+        <Legend items={series.map((s) => ({ label: s.name, color: s.color }))} className="mt-3" />
+      )}
     </div>
   )
 }
@@ -1385,6 +1394,75 @@ export function youtubeThumb(url: string): string | null {
   }
 }
 
+/* ── A post's own picture, or an honest stand-in ─────────────────────────── */
+
+/** Brand colour at low alpha, so a picture-less post still says where it lives. */
+const POST_TINT: Record<string, string> = {
+  Instagram: 'rgba(221,42,123,0.14)',
+  Facebook: 'rgba(24,119,242,0.12)',
+  'Twitter/X': 'rgba(15,20,25,0.10)',
+  YouTube: 'rgba(255,0,51,0.10)',
+  LinkedIn: 'rgba(10,102,194,0.12)',
+}
+
+/**
+ * The picture stored for a post, with two things it is never allowed to be.
+ *
+ * Never the account's profile photo: eight rows of the same face each implies
+ * it was the picture on that post. And never a broken image — a src that does
+ * not decode (a video attachment handed to an img tag is the usual one) leaves
+ * a grey rectangle behind, so a failed load falls through to the same tinted
+ * tile a post with no picture gets. YouTube's public still is tried first,
+ * because that one always exists and is always the right frame.
+ */
+export function PostPicture({
+  url,
+  platform,
+  postUrl,
+  className,
+  iconSize = 13,
+}: {
+  url: string | null | undefined
+  platform: string
+  /** The post's own address, for YouTube's public still. */
+  postUrl?: string
+  className?: string
+  iconSize?: number
+}) {
+  const [failed, setFailed] = useState(false)
+  const fallback = platform === 'YouTube' && postUrl ? youtubeThumb(postUrl) : null
+  const src = failed ? fallback : (url ?? fallback)
+
+  if (src && !(failed && !fallback)) {
+    return (
+      <img
+        key={src}
+        src={src}
+        alt=""
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className={cn('object-cover', className)}
+      />
+    )
+  }
+  return (
+    <span
+      className={cn('grid place-items-center', className)}
+      style={{ background: POST_TINT[platform] ?? 'var(--surface-3)' }}
+      title="No picture is stored for this post."
+    >
+      <Quote
+        size={iconSize}
+        className="text-ink-3 opacity-70"
+        fill="currentColor"
+        strokeWidth={0}
+        aria-hidden
+      />
+    </span>
+  )
+}
+
 /* ── Ranked list row ─────────────────────────────────────────────────────── */
 
 /** "#1 · #urbanjungle · 223,053 views" — the numbered soft-badge list. */
@@ -1915,7 +1993,7 @@ export function StatSpark({
       <div>
         <p className="text-[12px] font-medium text-ink-3">{label}</p>
         <p className="tnum text-[22px] font-bold leading-none tracking-[-0.02em]">
-          {display ?? (value == null ? '—' : value < 100_000 ? <NumberFlow value={value} /> : compact(value))}
+          {display ?? (value == null ? 'NA' : value < 100_000 ? <NumberFlow value={value} /> : compact(value))}
         </p>
       </div>
       {trend && trend.filter((v) => v != null).length >= 2 && <Sparkline values={trend} color={trendColor} height={32} />}

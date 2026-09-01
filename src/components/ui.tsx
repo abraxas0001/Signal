@@ -137,6 +137,7 @@ export function Card({
    */
   level = 'base',
   id,
+  title,
 }: {
   children: ReactNode
   className?: string
@@ -145,10 +146,19 @@ export function Card({
   padded?: boolean
   tone?: 'accent'
   level?: 'base' | 'lift' | 'quiet'
+  /**
+   * What the card rests on, on hover.
+   *
+   * A figure has to carry its basis or it stops being a measurement, but the
+   * basis does not have to be a paragraph printed under every number. This is
+   * where a screen puts the caveat when the page itself should stay quiet.
+   */
+  title?: string
 }) {
   return (
     <div
       id={id}
+      title={title}
       className={cn(
         'card relative overflow-hidden',
         level === 'lift' && 'card-lift',
@@ -216,7 +226,7 @@ const PROVENANCE: Record<string, { label: string | null; tone: ChipTone; title: 
   'user-supplied': { label: 'you added this', tone: 'accent', title: 'You entered this figure' },
   vision: { label: 'from screenshot', tone: 'accent', title: 'Read from your screenshot' },
   inferred: { label: 'estimate', tone: 'warning', title: 'Estimated, not measured' },
-  unavailable: { label: null, tone: 'neutral', title: 'This platform does not publish it' },
+  unavailable: { label: null, tone: 'neutral', title: 'Not published' },
 }
 
 export function provenanceTitle(source: string): string {

@@ -1,4 +1,5 @@
 import { scopedKey } from '@/lib/store'
+import { deskKey } from '@/lib/personas'
 import { fetchWithTimeout } from '@/lib/net'
 
 /**
@@ -57,7 +58,7 @@ export interface SuggestionPerson {
  * other cache here: the active account changes at runtime, and a module-level
  * constant would freeze whichever account was signed in at first import.
  */
-const KEY = (): string => scopedKey('signal.suggestions.v1')
+const KEY = (): string => deskKey('signal.suggestions.v1')
 
 export function readSuggestions(issueId: string): SuggestionEntry | null {
   try {

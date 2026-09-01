@@ -155,14 +155,43 @@ interface InnerTubeNext {
  * How many comments to read, and how long to spend reading them.
  *
  * A hundred is what makes the public-narrative reading a measurement rather
- * than an impression, and it is five sequential requests at roughly 3.1s. That
- * is real money against a request the platform closes at about sixteen
- * seconds, so the budget is the binding constraint, not the target: whatever
- * arrived when it expires is what gets analysed. The first twenty are free —
- * that request was already being made for the count alone.
+ * than an impression, and it is five sequential requests at several hundred
+ * milliseconds each. That is real money against a request the platform closes
+ * at about sixteen seconds, so the budget is the binding constraint, not the
+ * target: whatever arrived when it expires is what gets analysed. The first
+ * twenty are free — that request was already being made for the count alone.
+ *
+ * The budget starts at the first *response*, not at the first request, because
+ * the opening hop is not buying comments. It is the hop the exact count comes
+ * from, and it is made whether or not a single further page follows it, so
+ * charging its latency to a budget meant for the pages after it is what let a
+ * slow first hop end the loop before any second page was even attempted.
+ *
+ * That first hop is reliably the most expensive one, but not because the
+ * connection is warm afterwards — it is not. fetcher.ts builds a fresh undici
+ * Agent per request and closes it in a finally, and the SSRF check resolves the
+ * name again on every hop, so each request pays its own DNS, TCP and TLS. What
+ * the opening hop additionally pays is process-level: Node's first outbound
+ * TLS, and the first parse of a quarter-megabyte response. Measured from a cold
+ * process here that was about 750ms against about 450ms for the hop after it,
+ * and it is worse on a cold function instance, which is the ordinary case for a
+ * function that has just been started rather than the rare one.
  */
 const COMMENT_TARGET = 100
 const COMMENT_BUDGET_MS = 3_000
+
+/**
+ * Ceiling on any single comments request.
+ *
+ * Each hop is additionally clamped to whatever is left of the budget, which is
+ * what keeps the budget close to a bound rather than a suggestion: unclamped, a
+ * hop entered with a millisecond to spare could still run the full six seconds
+ * after it, and the whole retrieval would overrun by a request. It is only
+ * close to a bound because the clamp governs the HTTP phase alone — the SSRF
+ * check resolves DNS before the abort timer is armed — so a hop entered with
+ * almost nothing left still costs one name resolution before it gives up.
+ */
+const COMMENT_REQUEST_TIMEOUT_MS = 6_000
 
 async function fetchExactComments(
   videoId: string,
@@ -173,20 +202,26 @@ async function fetchExactComments(
   let token: string | null = commentsContinuation(videoId)
   if (!token) return empty
 
-  const started = Date.now()
   const out: ReadComment[] = []
   const seen = new Set<string>()
   let count: number | null = null
+  // Null until the first response lands, because the budget measures the extra
+  // pages only. Null rather than 0 so "the clock has not started" cannot be
+  // read as "the clock started at the epoch".
+  let budgetFrom: number | null = null
 
   // Twenty per request is a hard ceiling — there is no page-size parameter, and
   // the mobile client that returns more returns no bodies at all. So a hundred
   // comments is five hops, and the loop stops on whichever of target, budget or
   // end-of-thread arrives first rather than on hop count alone.
-  while (token && out.length < target && Date.now() - started < budgetMs) {
+  while (token && out.length < target) {
+    const left = budgetFrom == null ? COMMENT_REQUEST_TIMEOUT_MS : budgetMs - (Date.now() - budgetFrom)
+    if (left <= 0) break
+
     const res = await fetchJson<InnerTubeNext>(
       'https://www.youtube.com/youtubei/v1/next?prettyPrint=false',
       {
-        timeout: 6000,
+        timeout: Math.min(COMMENT_REQUEST_TIMEOUT_MS, left),
         // clientVersion is load-bearing: without it InnerTube answers 400
         // "failedPrecondition". No API key and no User-Agent are required.
         json: {
@@ -197,6 +232,9 @@ async function fetchExactComments(
         },
       },
     )
+    // Started here rather than before the request so the handshake the opening
+    // hop pays for is not charged against the pages that follow it.
+    budgetFrom ??= Date.now()
     if (!res.data) break
 
     if (count == null) {

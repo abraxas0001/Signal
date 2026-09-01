@@ -1,5 +1,6 @@
 import type { TrackedHandle } from '@/lib/handles'
 import { scopedKey } from '@/lib/store'
+import { deskKey } from '@/lib/personas'
 import { fetchWithTimeout } from '@/lib/net'
 
 /**
@@ -106,7 +107,7 @@ export function weekOf(handles: TrackedHandle[]): WeekModel | null {
 
 /* ── the AI reading, cached per window ───────────────────────────────────── */
 
-const CACHE_KEY = (): string => scopedKey('signal.weekCompare.v1')
+const CACHE_KEY = (): string => deskKey('signal.weekCompare.v1')
 
 export function readWeekAnalysisCache(label: string): WeekAnalysis | null {
   try {

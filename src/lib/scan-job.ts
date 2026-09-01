@@ -25,8 +25,9 @@ import {
 } from '@shared/taxonomy'
 import { fetchWithTimeout } from '@/lib/net'
 import { activeStorageKey, makeId, readStore, scopedKey, update } from '@/lib/store'
+import { deskKey } from '@/lib/personas'
 import { pluralise } from '@/lib/utils'
-import { asVerdict, saveVerdicts } from '@/lib/news-relevance'
+import { asVerdict, readVerdicts, saveVerdicts, verdictFor, worthShowing } from '@/lib/news-relevance'
 
 /**
  * The sync that outlives the screen.
@@ -621,6 +622,8 @@ export interface ScanTargets {
     state: string | null
     party: string | null
     aliases: string[]
+    /** Towns, mandals and district spellings this seat is known by. */
+    places?: string[]
   } | null
   /** The desk's state, which ScanInput always accepted and this never sent. */
   state: string | null
@@ -662,7 +665,13 @@ export async function findStories(
         matched: string[]
         // Present only when a subject was sent. Null means the judge never
         // read this one, which is a different claim from ruling it out.
-        verdict?: 'about-person' | 'about-seat' | 'about-party' | 'unrelated' | null
+        verdict?:
+          | 'about-person'
+          | 'about-seat'
+          | 'seat-routine'
+          | 'about-party'
+          | 'unrelated'
+          | null
         confidence?: 'high' | 'medium' | 'low' | null
         why?: string | null
       }[]
@@ -698,6 +707,11 @@ export async function findStories(
             verdict: c.verdict ?? 'unjudged',
             confidence: c.confidence ?? null,
             why: c.why ?? null,
+            // How it got here, which is what decides whether an unjudged story
+            // is worth showing. `matched` means it carried a word this office
+            // watches; empty means the wide harvest swept up the whole front
+            // page and this one matched nothing.
+            via: (c.matched?.length ?? 0) > 0 ? 'matched' : 'harvested',
           }),
         )
         .filter((v): v is NonNullable<typeof v> => v !== null)
@@ -715,11 +729,34 @@ export async function findStories(
       }
     }
 
+    /*
+     * The verdict decides what gets READ, not merely what gets shown.
+     *
+     * This used to return every candidate. The judge's ruling was written to
+     * the cache one block above and then ignored here, so a story the model
+     * had just ruled "not about you" was fetched, sent to /api/grievance,
+     * classified by a second model call and filed as a permanent record on the
+     * office's desk. The desk then opened on a district paper's whole front
+     * page, which is the complaint this whole feature exists to answer, and
+     * every ruled-out story cost two model calls on the way in.
+     *
+     * `worthShowing` is the same predicate the screens use, so a story can
+     * never be filed under one rule and hidden under another. What was set
+     * aside is COUNTED and named in the note: a filter that shrinks the day's
+     * work silently is a filter nobody can correct.
+     */
+    const cache = readVerdicts(targets.subject?.name ?? null)
+    const keep = found.filter((c) => worthShowing(verdictFor(c.url, cache)))
+    const setAside = found.length - keep.length
+
     const perSource = (data.sources ?? []).map((s) => `${s.portal} ${s.found}`).join(' · ')
     return {
-      urls: found.map((c) => c.url),
+      urls: keep.map((c) => c.url),
       note:
         `Found ${found.length} ${pluralise(found.length, 'story', 'stories')}: ${perSource}.` +
+        (setAside > 0
+          ? ` ${setAside} set aside as not your desk's business; ${keep.length} kept.`
+          : '') +
         (data.notes?.length ? ` ${data.notes.join(' ')}` : ''),
       error: null,
     }
@@ -796,6 +833,11 @@ const STAGE_PLAN: readonly { key: StageKey; label: string }[] = [
 
 export type ScanJobInput = ({ kind: 'sync' } & ScanTargets) | { kind: 'read'; urls: string[] }
 
+/**
+ * Per DESK, not per account: this is the news scan for one politician's watch
+ * terms. A scan running for Rahul Gandhi must not be handed back as the state
+ * of a scan on Narendra Modi's desk.
+ */
 const JOB_KEY = 'signal.scanjob.v1'
 
 const idle = (): ScanJobState => ({
@@ -831,7 +873,7 @@ function emit(): void {
 
 function save(): void {
   try {
-    localStorage.setItem(scopedKey(JOB_KEY), JSON.stringify(state))
+    localStorage.setItem(deskKey(JOB_KEY), JSON.stringify(state))
   } catch {
     /* private mode, or the quota is full. The run still works in memory; only
        the honest report after a reload is lost, which is the safe direction. */
@@ -897,7 +939,7 @@ function closeInterrupted(restored: ScanJobState): ScanJobState {
 function readSaved(): ScanJobState | null {
   let raw: string | null = null
   try {
-    raw = localStorage.getItem(scopedKey(JOB_KEY))
+    raw = localStorage.getItem(deskKey(JOB_KEY))
   } catch {
     return null
   }
@@ -1047,7 +1089,7 @@ export function dismiss(): void {
   if (isRunning(state.status)) return
   state = idle()
   try {
-    localStorage.removeItem(scopedKey(JOB_KEY))
+    localStorage.removeItem(deskKey(JOB_KEY))
   } catch {
     /* nothing to remove */
   }

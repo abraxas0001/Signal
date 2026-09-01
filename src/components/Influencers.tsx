@@ -489,7 +489,7 @@ function InfluencerCard({
           <MiniStat
             icon={<Users size={15} />}
             label="Followers"
-            value={influencer.followers != null ? compact(influencer.followers) : '—'}
+            value={influencer.followers != null ? compact(influencer.followers) : 'NA'}
             title={
               influencer.followers != null
                 ? `${full(influencer.followers)} followers, read from the platform`

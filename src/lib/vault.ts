@@ -167,7 +167,7 @@ export class VaultError extends Error {
  * person who actually owns the records.
  */
 const CANNOT_OPEN =
-  'That did not open. Either the passphrase is wrong or these records are damaged. Capitals and spaces count, so check and try again. Nothing has been deleted.'
+  'That did not open. Either the password is wrong or these records are damaged. Capitals and spaces count, so check and try again. Nothing has been deleted.'
 
 /* ── Bytes ───────────────────────────────────────────────────────────────── */
 
@@ -813,7 +813,7 @@ const SEALED_CODEC = {
   encode: (): string => {
     throw new VaultError(
       'locked',
-      'Nobody is signed in. Sign in with a passphrase before making changes.',
+      'Nobody is signed in. Log in with a password before making changes.',
     )
   },
   decode: (): unknown => ({ version: STORE_VERSION }),
@@ -1177,6 +1177,33 @@ function adoptableCleartext(): string | null {
 }
 
 /**
+ * This device holds records that no account is protecting.
+ *
+ * True only where Signal was used before accounts existed, or walked in
+ * signed-out while that was still possible. It matters on the create card:
+ * the first account made here ADOPTS those records rather than starting empty
+ * (`createAccount` below), and somebody who is suddenly being asked for a
+ * password by a screen that never asked before has to be told that BEFORE
+ * they decide, not discover it afterwards.
+ *
+ * `onboardedAt` is the test rather than "the key exists", because a stray boot
+ * can leave an empty default store behind and an empty store is not records.
+ * Both finishing and skipping setup stamp it, so it is exactly the mark of a
+ * device that got past the welcome screen.
+ */
+export function hasUnprotectedRecords(): boolean {
+  if (hasAccounts() || accountsUnreadable()) return false
+  const raw = adoptableCleartext()
+  if (raw === null) return false
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return isRecord(parsed) && typeof parsed['onboardedAt'] === 'string'
+  } catch {
+    return false
+  }
+}
+
+/**
  * Add a person to this device.
  *
  * Signs whoever was signed in out first, flushing their last edit — creating an
@@ -1310,7 +1337,7 @@ export async function changePassphrase(
   requireCrypto()
   const blob = activeBlob
   if (key === null || blob === null) {
-    throw new VaultError('locked', 'Sign in before changing a passphrase.')
+    throw new VaultError('locked', 'Log in before changing a password.')
   }
   requirePassphrase(newPassphrase)
 

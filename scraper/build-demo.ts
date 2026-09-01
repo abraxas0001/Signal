@@ -199,6 +199,41 @@ async function scrapeOne(person: { name: string }, h: RosterHandle): Promise<Dem
   }
 }
 
+
+/**
+ * Carry forward everything a re-scrape does not itself measure.
+ *
+ * A rebuild replaces the whole handle record, and the fields it does not
+ * produce went with it: the archived follower readings that a growth curve
+ * is made of, the comment reading behind every sentiment card, and the note
+ * saying why a reading was declined. None of those can be re-measured after
+ * the fact — an August follower count is gone the moment it is overwritten —
+ * so a run that re-reads posts must not cost the desk its history.
+ *
+ * Measured fields are NOT carried: followers, posts and the timestamp are
+ * what this run went to find, and a stale one masquerading as fresh is the
+ * failure this whole file exists to avoid. The one exception is a follower
+ * count the run failed to read at all, where the previous reading is kept
+ * with its own older timestamp, because "we could not read it today" is not
+ * the same claim as "the account has no followers".
+ */
+function carryForward(next: DemoHandle, prev: DemoHandle | undefined): DemoHandle {
+  if (!prev) return next
+  const before = prev as unknown as Record<string, unknown>
+  const merged = { ...next } as unknown as Record<string, unknown>
+  // Fields this file does not model, because it does not produce them: the
+  // comment reading, its refusal note, the archived follower readings and the
+  // grounded opinion survey all arrive from other scripts.
+  for (const key of ['standing', 'standingNote', 'followerHistory', 'opinion']) {
+    if (merged[key] === undefined && before[key] !== undefined) merged[key] = before[key]
+  }
+  if (next.followers === null && prev.followers !== null) {
+    merged['followers'] = prev.followers
+    merged['takenAt'] = prev.takenAt
+  }
+  return merged as unknown as DemoHandle
+}
+
 async function main(): Promise<void> {
   const wanted = process.argv.slice(2).filter((a) => !a.startsWith('--'))
   const people = wanted.length ? PEOPLE.filter((p) => wanted.includes(p.key)) : PEOPLE
@@ -289,9 +324,12 @@ Wrote ${OUT} (metadata only; posts untouched)
         )
       }
 
+      const previous = entry.handles.find(
+        (x) => x.platform === h.platform && x.handle === h.handle,
+      )
       entry.handles = [
         ...entry.handles.filter((x) => !(x.platform === h.platform && x.handle === h.handle)),
-        result,
+        carryForward(result, previous),
       ]
       file.people[person.key] = entry
       save(file) // after every handle, so an interruption keeps what it got
@@ -339,9 +377,12 @@ Wrote ${OUT} (metadata only; posts untouched)
           ? `FAILED — ${result.failure.slice(0, 60)}`
           : `${String(result.posts.length).padStart(2)} posts  followers=${result.followers ?? '—'}`,
       )
+      const previous = entry.handles.find(
+        (x) => x.platform === h.platform && x.handle === h.handle,
+      )
       entry.handles = [
         ...entry.handles.filter((x) => !(x.platform === h.platform && x.handle === h.handle)),
-        result,
+        carryForward(result, previous),
       ]
       file.creators = [...file.creators.filter((c) => c.key !== creator.key), entry]
       save(file)

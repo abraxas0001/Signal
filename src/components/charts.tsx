@@ -211,7 +211,7 @@ export function StatTile({
 
       {missing ? (
         <div>
-          <p className="text-xl font-semibold leading-none text-ink-3">—</p>
+          <p className="text-xl font-semibold leading-none text-ink-3">NA</p>
           <p className="mt-1 flex h-4 items-center overflow-hidden text-2xs text-ink-3">
             {onEdit ? 'Tap to add' : 'Not available'}
           </p>

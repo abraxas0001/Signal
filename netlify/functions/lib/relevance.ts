@@ -48,6 +48,7 @@ import { HOUSE_STYLE } from './house-style'
 export const RELEVANCE_VERDICTS = [
   'about-person',
   'about-seat',
+  'seat-routine',
   'about-party',
   'unrelated',
 ] as const
@@ -77,6 +78,25 @@ export interface RelevanceSubject {
    * read that headline as being about a stranger.
    */
   aliases: string[]
+  /**
+   * The ground: towns, mandals, spellings of the district, named local schemes.
+   *
+   * Separate from `aliases` because they answer a different question, and the
+   * two were being conflated. The desk's alias list carries the district's
+   * Telugu names because nothing else in the app holds a Telugu place name at
+   * all, and `describeSubject` then printed them under "Also written as",
+   * which tells the model that Palamuru is a way of writing this member's
+   * name. It is not; it is where she is the member.
+   *
+   * The judge needs both, under their own headings. A story about Devarkadra
+   * or Jadcherla is her seat, and a model never told those words belong to
+   * Mahabubnagar is placing them from its own general knowledge, which is
+   * exactly the part that degrades when the provider fails over.
+   *
+   * Optional, so a caller with no gazetteer sends nothing rather than an
+   * empty claim.
+   */
+  places?: string[]
 }
 
 export interface RelevanceCandidate {
@@ -144,8 +164,20 @@ const BATCH_SIZE = 15
  */
 const BATCH_MIN_MS = 12_000
 
-/** Enough for fifteen rows of verdict, confidence and a short sentence. */
-const OUTPUT_TOKENS = 2_000
+/**
+ * Room for the answer, scaled to how many rows were asked for.
+ *
+ * This was a flat 2,000, and 2,000 is not enough for fifteen rows: the model
+ * ran out mid-sentence, the response was truncated JSON, `JSON.parse` threw,
+ * and `judgeBatch` reported the whole batch as failed. The desk's symptom was
+ * not "some stories were judged badly" — it was every story coming back
+ * unjudged, which the filter then passes, which is how a page of district
+ * routine reached a desk that had a working judge all along. Measured on the
+ * real Eenadu page: at 2,000 a batch of fifteen answered 0 of 15 twice; at
+ * 8,000 it answered 15 of 15 twice. Telugu is the expensive case, because a
+ * reason written about a Telugu headline costs more tokens than the headline.
+ */
+const outputTokensFor = (rows: number): number => Math.min(8_000, 480 * rows + 800)
 
 /**
  * How much of each story the model gets.
@@ -218,21 +250,31 @@ const SYSTEM = `You work for the office of an Indian elected representative. You
 
 You are told who the office belongs to, then given a numbered list of headlines from local and national mastheads. Rule on every one.
 
-THE FOUR VERDICTS
+THE FIVE VERDICTS
 
 "about-person": the story is about this individual. It counts whether or not the story writes their name. Indian mastheads routinely refer to a member by their office instead: "the Mahabubnagar MP", "the sitting member", "the local MP", "the former minister". A story about something they said, did, promised, attended, were accused of, or were criticised for is about-person.
 
-"about-seat": the story is about their constituency, their district, or the administration of it, and is not about them. A road, a hospital, a water scheme, a flood, a collector's order, a local protest, a district court ruling. This belongs on their desk. It is not a story about them, and calling it one would be false.
+"about-seat": the story is about their constituency or district AND it is the kind of thing an elected member is expected to act on, ask about, fund, escalate, or answer for. Public works and the absence of them. Drinking water, power, roads, buses and trains, irrigation and lift schemes. Hospitals, primary health centres, schools and welfare hostels as institutions. Land, crops, procurement, farmer distress. Employment, welfare payments and pensions. Floods, drought, fire, epidemic. A protest, a demand, a memorandum, a bandh. A project's funding, sanction or delay. An order by the collector or a department that affects the public. A civic failure. A law-and-order or communal situation of public significance. Central or state funds coming to the district, or not coming.
+
+"seat-routine": the story happens in their constituency or district, but nothing in it needs the member. One crime, one accident, one court date, one arrest. An examination being conducted normally. A festival, a temple event, a school function, a wedding, an obituary. One person's donation or award. The transfer or posting of an officer. Bus ridership, market rates, a weather note. It is their district and the office may care to look, but there is nothing here to act on, ask about or answer for.
 
 "about-party": the story is about their party inside their own state, and is not about them and not about their seat. A state unit appointment, a state-level party dispute, a party programme in another district of the same state.
 
 "unrelated": everything else.
 
+THE TEST THAT SEPARATES about-seat FROM seat-routine
+
+Ask: would a chief of staff put this in front of the member this morning because the member may need to do, say, ask, fund or answer something about it? If the honest answer is no, it is seat-routine, however local the story is.
+
+"Drinking water supply disrupted for a third day in the town" is about-seat: the member is asked about water. "Woman murdered in a village of the district" is seat-routine: it is a police matter, and an MP is not the person it needs. "Farmer donates chairs to a school" is seat-routine. "Farmers protest over pending crop loan waivers" is about-seat. "NEET PG conducted peacefully" is seat-routine. "Two hundred candidates stranded as the examination centre was moved without notice" is about-seat.
+
+Do not use seat-routine to hedge. A story that plainly needs the member is about-seat, and a story that plainly does not is seat-routine. Both are honest answers; neither is the safe one.
+
 WHAT "UNRELATED" COVERS, AND YOU MUST NOT BE SHY WITH IT
 
 A story that merely CONTAINS their name, or a name resembling it, is unrelated unless the story is about them. Many people share a name. A surname in a crime report, a different politician with the same first name, a business owner, a doctor: unrelated.
 
-SPORT IS UNRELATED. A cricket match, a kabaddi tournament, an athletics meet, a player transfer, a team result, a stadium announcement. It stays unrelated when it happens in their district, when it is played by their community, and when a player or an official shares their name. This is the single most common mistake made on this task and it has already reached this office's screen.
+SPORT IS NOT THIS OFFICE'S BUSINESS. A cricket match, a kabaddi tournament, an athletics meet, a player transfer, a team result. It is "unrelated" when it happens anywhere, and at best "seat-routine" when it is plainly a fixture of their own district. It is never about-person because a player or an official shares their name, and never about-seat because it was played in their district. This is the single most common mistake made on this task and it has already reached this office's screen. The one exception is a stadium, ground or sports facility being sanctioned, funded, promised or denied, which is a public works story and therefore about-seat.
 
 Films, television listings, horoscopes, gold and silver rates, weather bulletins, recipes, examination results, job advertisements and traffic notices are unrelated.
 
@@ -256,7 +298,7 @@ Telugu, Hindi and English count exactly the same. Read them.
 
 Judge only what is in front of you. A headline and a web address is often all you get, and guessing at the body of a story you cannot see is how a desk ends up with a fabricated verdict.
 
-When a headline is too thin to tell anything from, the verdict is "unrelated" at "low" confidence, and why says the headline is too thin to tell. Do not promote a fragment to "about-person" because it might be.
+When a headline is too thin to tell anything from, the verdict is "unrelated" at "low" confidence, and why says the headline is too thin to tell. Do not promote a fragment to "about-person" because it might be, and do not promote one to "about-seat" because it might be local.
 
 Return one row for every number you were given. Never merge two, never invent a number you were not given.
 
@@ -295,20 +337,39 @@ function describeSubject(subject: RelevanceSubject): string {
   const or = (v: string | null, cap = 120): string =>
     v && v.trim() ? sanitise(v, cap) : 'not recorded'
 
+  const places = (subject.places ?? [])
+    .map((a) => sanitise(a, 60))
+    .filter(Boolean)
+    .slice(0, 40)
+
+  /* A place is not a spelling of a person's name. Where the desk supplied its
+     gazetteer, anything in it comes out of the name line and is printed under
+     the ground instead, so the two claims stop contradicting each other inside
+     one block. */
+  const placeSet = new Set(places.map((x) => x.toLowerCase()))
   const aliases = subject.aliases
     .map((a) => sanitise(a, 60))
     .filter(Boolean)
+    .filter((a) => !placeSet.has(a.toLowerCase()))
     .slice(0, 12)
 
-  return [
+  const lines = [
     'THIS DESK BELONGS TO:',
     `- Name: ${or(subject.name)}`,
-    `- Also written as: ${aliases.length ? aliases.join('; ') : 'nothing else recorded'}`,
+    `- The name is also written: ${aliases.length ? aliases.join('; ') : 'nothing else recorded'}`,
     `- Office held: ${or(subject.role)}`,
     `- Seat: ${or(subject.constituency)}`,
     `- State: ${or(subject.state)}`,
     `- Party: ${or(subject.party)}`,
-  ].join('\n')
+  ]
+  if (places.length > 0) {
+    lines.push(
+      `- Places in this seat, and how they are spelled: ${places.join('; ')}`,
+      '  A story set in one of those places is in this seat even when the seat is not named.',
+      '  These are PLACES. None of them is a way of writing the member name.',
+    )
+  }
+  return lines.join('\n')
 }
 
 const words = (s: string): string[] =>
@@ -393,6 +454,64 @@ function exactly<T extends string>(value: unknown, allowed: readonly T[]): T | n
  * it to "about-person" would put an unread story on the desk under a claim
  * nobody stands behind. A dropped row is reported as unjudged, which is true.
  */
+/**
+ * The rows the model actually returned, even when it stopped mid-answer.
+ *
+ * A truncated response used to cost the entire batch: `JSON.parse` threw on the
+ * unterminated string and thirty judged stories were thrown away over one
+ * missing brace. Nothing is repaired here — a half-written row is still
+ * discarded — but the complete rows in front of it are kept, because they are
+ * finished answers about specific stories and the model's later running out of
+ * room says nothing about them.
+ *
+ * Whole-document parse first, so the normal case pays nothing.
+ */
+function readStories(text: string): { stories?: unknown } {
+  try {
+    return JSON.parse(text) as { stories?: unknown }
+  } catch {
+    /* fall through to salvage */
+  }
+
+  const rows: unknown[] = []
+  // Scan for balanced {...} objects, respecting strings and escapes, and keep
+  // only the ones that closed. An object still open when the text ran out is
+  // exactly the row that was cut off.
+  let depth = 0
+  let start = -1
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') {
+      if (depth === 0) start = i
+      depth++
+    } else if (ch === '}') {
+      depth--
+      if (depth === 0 && start >= 0) {
+        try {
+          const row: unknown = JSON.parse(text.slice(start, i + 1))
+          // The envelope itself is an object too; only rows carry an index.
+          if (row && typeof row === 'object' && 'index' in (row as object)) rows.push(row)
+        } catch {
+          /* a row that will not parse on its own is a row nobody wrote */
+        }
+        start = -1
+      }
+      if (depth < 0) depth = 0
+    }
+  }
+  if (rows.length === 0) throw new Error('The model returned nothing that parsed as a verdict.')
+  return { stories: rows }
+}
+
 async function judgeBatch(
   batch: RelevanceCandidate[],
   subject: RelevanceSubject,
@@ -417,10 +536,10 @@ async function judgeBatch(
         system: SYSTEM,
         user,
         schema: SCHEMA,
-        maxTokens: OUTPUT_TOKENS,
+        maxTokens: outputTokensFor(batch.length),
         ...(options.signal ? { signal: options.signal } : {}),
       })
-      parsed = JSON.parse(out.text) as { stories?: unknown }
+      parsed = readStories(out.text)
       provider = p.label
       break
     } catch (err) {

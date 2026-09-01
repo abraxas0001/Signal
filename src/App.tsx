@@ -26,15 +26,21 @@ import { Persona } from '@/components/Persona'
 import { Actions } from '@/components/Actions'
 import { Settings } from '@/components/Settings'
 import { WeekCompare } from '@/components/WeekCompare'
+import { PostHighlights } from '@/components/PostHighlights'
+import { AudienceScreen } from '@/components/AudienceScreen'
 import { Onboarding } from '@/components/Onboarding'
 import { TabBar, type Tab } from '@/components/TabBar'
 import { MoreSheet } from '@/components/MoreSheet'
+import { ContentStudio } from '@/components/ContentStudio'
 import { SideNav } from '@/components/SideNav'
-import { emptyStore, isDemoScope, isDeskScope, subscribe, useStore, update, writeStore } from '@/lib/store'
+import { emptyStore, isDemoScope, isDeskScope, readStore, subscribe, useStore, update, writeStore } from '@/lib/store'
+import { reconcileOwnership } from '@/lib/handles'
 import { currentNavState, restoredTab, useNavHistory } from '@/lib/nav-history'
-import { LockButton, LockScreen, useVaultState } from '@/components/Lock'
+import { isUnlisted } from '@/lib/nav'
+import { cn } from '@/lib/utils'
+import { EntryScreen, useVaultState } from '@/components/Lock'
 import { activeAccount, signOut } from '@/lib/vault'
-import { deskSignOut, onDeskRefresh, readDeskSession } from '@/lib/desk-session'
+import { lockDesk, onDeskRefresh, readDeskSession } from '@/lib/desk-session'
 import { Avatar, Button, Card, Shell, SignalGlyph } from '@/components/ui'
 import { applyDeviceClass, ease, haptic, pageIn } from '@/lib/motion'
 
@@ -61,23 +67,44 @@ export default function App() {
   // Seeded from the history entry, which survives a reload: F5 on Compare
   // must come back to Compare, not walk the reader home.
   const [tab, setTab] = useState<Tab>(() => restoredTab() ?? 'dashboard')
+  /**
+   * Whether the current screen is one the bottom bar has no slot for.
+   *
+   * Eight of the thirteen destinations are reached through the sheet behind
+   * the avatar, and on those eight the bar lights nothing at all, so the one
+   * piece of persistent chrome on a phone gave no answer to "where am I". The
+   * avatar carries the answer instead, because that is where the route lives.
+   */
+  const onSheetRoute = tab === 'settings' || isUnlisted(tab)
   const [lastRequest, setLastRequest] = useState<AnalyseRequest | null>(null)
   /** An issue the dashboard asked to have opened, cleared once it is left. */
   const [focusIssue, setFocusIssue] = useState<string | null>(null)
 
   const [demo, setDemo] = useState<Report | null>(null)
 
+
+
   /**
    * Who is signed in, if anyone.
    *
-   * The gate only appears once somebody has created an account. A desk that has
-   * never been locked opens straight into the work, because forcing a passphrase
-   * on an office that did not ask for one is how a tool gets abandoned on day
-   * one — and there is nothing to protect yet. From the first account onward the
-   * app is sealed until someone signs in.
+   * This was `vault.exists && vault.locked` — the gate only appeared once a
+   * device already HAD an account. The consequence was not a small one: on a
+   * brand-new device there are no accounts, so the entrance never rendered and
+   * the first screen anybody saw was the setup wizard. Log in and Create
+   * account were reachable only through the padlock in the header. The sign-up
+   * screen was not on the sign-up path, which is the one place it has to be.
+   *
+   * So the gate is now "nothing is open" — no vault account, no handed-over
+   * desk, no demo. All three of those doors are ON the entrance, and the demo
+   * needs no account at all, so this asks nobody to commit before they have
+   * seen the product.
+   *
+   * A device that has been used signed-out is not stranded by this: the first
+   * account created on it ADOPTS the cleartext records already there
+   * (`adoptableCleartext` in lib/vault), and the create card says so in
+   * advance rather than leaving it to be discovered.
    */
   const vault = useVaultState()
-  const sealed = vault.exists && vault.locked
 
   // The only badge worth showing: things a person has not cleared yet. A count
   // of everything ever recorded is a number that only ever grows, which the eye
@@ -120,6 +147,24 @@ export default function App() {
    */
   const [demoRoster, setDemoRoster] = useState<DemoRoster | null>(null)
   const [deskKey, setDeskKey] = useState(0)
+
+  /**
+   * Put the ownership flags right whenever a desk opens.
+   *
+   * `own` means "belongs to the person this desk is for", and it is a stored
+   * flag set once at add-time — so a desk that was set up for somebody else, or
+   * handed a bundle somebody else assembled, carries their accounts marked as
+   * ours. A dozen screens read that flag directly and fold those accounts into
+   * figures labelled "yours".
+   *
+   * Here rather than on the dashboard, because the dashboard is not the only
+   * way in: Compare, Influencers and the studio all read the same flag, and
+   * whichever screen the office happens to open first must not be the one that
+   * decides whether the numbers are right.
+   */
+  useEffect(() => {
+    reconcileOwnership(readStore().identity)
+  }, [deskKey, store.identity])
   /**
    * Whether the demo desk is open.
    *
@@ -324,14 +369,22 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
         // member's signed-in desk told her she was in somebody's example.
         label: 'Logout',
         note: readDeskSession()?.name ?? 'Signed-in desk',
+        /**
+         * `lockDesk`, not `deskSignOut`. Both end the session; only this one
+         * leaves the one-shot note the entrance reads, so the member is
+         * greeted by "Locked. Enter the password to open this desk again."
+         * with her desk id already filled in, rather than a bare login form
+         * that looks like it forgot her. That note used to be set by the
+         * header padlock, which is gone — this is the control that replaced
+         * it, so it inherits the behaviour.
+         */
         onClick: () => {
-          deskSignOut()
+          lockDesk()
           window.location.reload()
         },
       }
     }
-    if (demoRoster === null) return undefined
-    if (demoOpen) {
+    if (demoOpen && demoRoster !== null) {
       return {
         mode: 'leave' as const,
         // Kept under ~20 characters: the column is 240px and the note truncates
@@ -341,10 +394,44 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
         onClick: leaveDemo,
       }
     }
+
+    /**
+     * A signed-in account gets the same door, with the same word.
+     *
+     * This slot has always been "which desk am I on, and how do I leave it" —
+     * it said Logout on a handed-over desk and Leave the demo in the example
+     * one, and offered nothing at all to somebody signed into their own
+     * account. Their only way out was a padlock icon in the header that opened
+     * a sheet, which is two guesses and a menu for the one action every
+     * product on the phone puts in exactly one place.
+     *
+     * `signOut` is enough on its own: the shell watches the vault, so the
+     * entrance takes the screen back the moment the key is dropped. No reload,
+     * which would also throw away a report the office was part-way through
+     * reading.
+     */
     const account = activeAccount()
+    if (account) {
+      return {
+        mode: 'leave' as const,
+        label: 'Logout',
+        note: account.name,
+        onClick: () => {
+          void signOut()
+          window.scrollTo({ top: 0 })
+        },
+      }
+    }
+
+    /**
+     * Only reachable before anybody has signed in, which the entrance now
+     * gates — so in practice the example desk is entered from the login card
+     * and this branch is the door standing open behind it.
+     */
+    if (demoRoster === null) return undefined
     return {
       mode: 'enter' as const,
-      note: account ? 'Signs you out first' : 'Real data, no setup',
+      note: 'Real data, no setup',
       onClick: () => void openDemo(),
     }
   }, [deskOpen, demoRoster, demoOpen, vault.exists, vault.account, leaveDemo, openDemo])
@@ -459,6 +546,20 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
    * paste box. Without it, reading three mentions means walking back through
    * the dashboard three times.
    */
+  /**
+   * Open a report that already exists, on the analyse screen, instantly.
+   *
+   * Same rendering path as the worked example: the report is handed over
+   * whole, nothing runs, and Back returns to where the reader was. The
+   * dashboard's content tables use this for posts read in full, so a reading
+   * costs its model calls exactly once, ever.
+   */
+  const openStoredReport = useCallback((report: Report) => {
+    setDemo(report)
+    setTab('analyse')
+    window.scrollTo({ top: 0 })
+  }, [])
+
   const readPost = useCallback(
     (postUrl: string, from: 'influencers' | 'dashboard') => {
       const req: AnalyseRequest = { url: postUrl }
@@ -622,23 +723,23 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
   }
 
   /**
-   * The demo desk opens through the lock, not around it.
+   * The entrance, whenever nothing at all is open.
    *
-   * `demoOpen` bypasses the seal because there is nothing sealed to reach: the
-   * store is pointed at a separate, unencrypted namespace holding public posts
-   * by public figures. No account is signed in, no private record is decrypted,
+   * `demoOpen` bypasses it because there is nothing sealed to reach: the store
+   * is pointed at a separate, unencrypted namespace holding public posts by
+   * public figures. No account is signed in, no private record is decrypted,
    * and the real accounts stay locked exactly as they were — leaving the demo
    * puts this screen straight back.
    */
-  if (sealed && !demoOpen && !deskOpen) {
+  if (vault.locked && !demoOpen && !deskOpen) {
     return (
       <LazyMotion features={domAnimation} strict>
         {/* Offered unconditionally, not gated on the roster having loaded.
-            Gating it raced: the sign-in screen paints immediately while the
-            dataset is still being fetched, so the button appeared a beat late
-            or, on a slow read, not at all. The dataset ships with the app, and
+            Gating it raced: the entrance paints immediately while the dataset
+            is still being fetched, so the button appeared a beat late or, on a
+            slow read, not at all. The dataset ships with the app, and
             `openDemo` already no-ops if it is somehow absent. */}
-        <LockScreen
+        <EntryScreen
           onUnlocked={() => window.scrollTo({ top: 0 })}
           onDemo={() => void openDemo()}
           onDeskOpened={() => {
@@ -664,7 +765,6 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
     return (
       <LazyMotion features={domAnimation} strict>
         <Onboarding
-          onDemo={() => void openDemo()}
           onDone={() => {
             setTab('dashboard')
             window.scrollTo({ top: 0 })
@@ -849,6 +949,8 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
               mode="compare"
               onClose={go('dashboard')}
               onOpenActions={() => goTo('actions')}
+              onRead={(postUrl) => readPost(postUrl, 'dashboard')}
+              onOpenReport={openStoredReport}
             />
           </>
         )
@@ -856,6 +958,28 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
       // scores, read closely, with the lessons filing onto the task list.
       case 'weekly':
         return <WeekCompare key={`weekly-${deskKey}`} onClose={go('dashboard')} />
+      // The one screen here that makes something rather than reads something.
+      case 'studio':
+        return <ContentStudio key={`studio-${deskKey}`} onClose={go('dashboard')} />
+      // The long form of the dashboard's two reading cards. Both read the
+      // stored readings the dashboard already holds, so neither costs a call.
+      case 'highlights':
+        return (
+          <PostHighlights
+            key={`highlights-${deskKey}`}
+            onClose={go('dashboard')}
+            onOpenReport={openStoredReport}
+            onRead={(postUrl) => readPost(postUrl, 'dashboard')}
+          />
+        )
+      case 'audience':
+        return (
+          <AudienceScreen
+            key={`audience-${deskKey}`}
+            onClose={go('dashboard')}
+            onOpenAccounts={() => goTo('accounts')}
+          />
+        )
       case 'settings':
         return (
           <Settings
@@ -912,7 +1036,16 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
             )}
             <Briefing
             key={`dashboard-${deskKey}`}
+            /* The same remount the example desk's principal switch uses. A
+               persona change moves the storage suffix under every per-desk
+               cache, so nothing on screen is re-derivable in place — the desk
+               has to be read again from the namespace that is now live. */
+            onPersonaSwitched={() => {
+              setDeskKey((k) => k + 1)
+              window.scrollTo({ top: 0 })
+            }}
             onRead={(postUrl) => readPost(postUrl, 'dashboard')}
+            onOpenReport={openStoredReport}
             onEditIdentity={() => {
               // Clearing the stamp is what puts the setup screen back in front:
               // it is the same one-screen flow, pre-filled with nothing, and it
@@ -941,7 +1074,16 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
     <LazyMotion features={domAnimation} strict>
       {/* The rail is fixed, so the page reserves its width from lg up rather
           than sliding underneath it. */}
-      <div className="relative min-h-screen-safe overflow-x-hidden lg:pl-[var(--rail-w)]">
+      {/* `overflow-x: clip`, not `hidden`. They look identical and they are not:
+          `hidden` makes this a scroll container, and a scroll container is what
+          `position: sticky` resolves against. The header below declares itself
+          sticky and was silently not sticky on every screen at every width, so
+          on a phone it scrolled away and took the avatar with it — and the
+          avatar is the ONLY route to Settings and to the seven screens that
+          hang off it, because the sidebar is desktop-only and the bottom bar
+          has five slots. `clip` clips the same overflow without creating a
+          scrollport, so sticky resolves against the viewport again. */}
+      <div className="relative min-h-screen-safe overflow-x-clip lg:pl-[var(--rail-w)]">
         {/*
           One header, and it stays.
 
@@ -970,7 +1112,12 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
                 goTo('dashboard')
                 startOver()
               }}
-              className="group flex min-w-0 items-center gap-2.5 lg:hidden"
+              /* min-h-11 and the negative inline margin: this is the only way
+                 back to the dashboard below lg, and at 24px tall it was the
+                 one control on the phone under the 44px tap floor the rest of
+                 this toolbar holds. The margin keeps the wordmark optically
+                 flush while the target grows around it. */
+              className="group -mx-2 flex min-h-11 min-w-0 items-center gap-2.5 px-2 lg:hidden"
               aria-label="Signal: dashboard"
             >
               <span className="shrink-0 text-[var(--accent)] transition-transform group-active:scale-95">
@@ -1032,7 +1179,18 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
                 aria-haspopup="dialog"
                 aria-expanded={moreOpen}
                 title={store.identity?.name ?? 'Your desk'}
-                className="grid size-11 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] shadow-[var(--e1)] transition-colors hover:bg-[var(--surface-2)] lg:hidden"
+                aria-current={onSheetRoute ? 'page' : undefined}
+                /* Lit while the reader is on one of the eight destinations the
+                   bottom bar has no slot for. The sheet's own Settings row
+                   already computes that state, but the sheet is closed the
+                   whole time a person is on those screens, so the indicator
+                   never reached anybody. It belongs where the route lives. */
+                className={cn(
+                  'grid size-11 shrink-0 place-items-center rounded-full border bg-[var(--surface)] shadow-[var(--e1)] transition-colors hover:bg-[var(--surface-2)] lg:hidden',
+                  onSheetRoute
+                    ? 'border-[var(--accent)] ring-2 ring-[var(--accent-soft)]'
+                    : 'border-[var(--border)]',
+                )}
               >
                 <Avatar
                   src={store.identity?.photoUrl}
@@ -1041,11 +1199,44 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
                 />
               </button>
 
-              {/* On a laptop the sidebar already lists every destination, so
-                  the sheet has nothing to add and the padlock stays a padlock. */}
-              <span className="hidden lg:block">
-                <LockButton />
-              </span>
+              {/*
+                The desk's face, not a padlock.
+                
+                A padlock icon sat here and meant three different things: on a
+                signed-in device it opened an account menu, on a device with no
+                account it opened a whole sign-in screen over the top, and on a
+                handed-over desk it ended the session. One icon, three
+                behaviours, no words. Nobody could tell which they were about
+                to get, and "lock" is not what any of them did.
+                
+                It is the person this desk is for instead, which is the one
+                thing a header control in this position says on every other
+                product a person uses. It goes to Settings, where the identity
+                and the account now live together. Signing out moved to the
+                navigation foot, beside the other control that changes which
+                desk you are on.
+              */}
+              <button
+                onClick={() => setTab('settings')}
+                title={store.identity ? `${store.identity.name} — your account and settings` : 'Your account and settings'}
+                aria-label={store.identity ? `${store.identity.name}: your account and settings` : 'Your account and settings'}
+                aria-current={tab === 'settings' ? 'page' : undefined}
+                className={cn(
+                  'hidden min-h-11 shrink-0 items-center gap-2.5 rounded-full border bg-[var(--surface)] py-1 pl-1 pr-3.5 shadow-[var(--e1)] transition-colors hover:bg-[var(--surface-2)] lg:inline-flex',
+                  tab === 'settings'
+                    ? 'border-[var(--accent)] ring-2 ring-[var(--accent-soft)]'
+                    : 'border-[var(--border)]',
+                )}
+              >
+                <Avatar
+                  src={store.identity?.photoUrl}
+                  name={store.identity?.name ?? 'Signal'}
+                  size={30}
+                />
+                <span className="max-w-[10rem] truncate text-sm font-semibold">
+                  {store.identity?.name ?? 'Your desk'}
+                </span>
+              </button>
             </div>
           </Shell>
         </header>
@@ -1071,8 +1262,9 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
           // back with it: mentions nobody has cleared yet, the same number
           // the screen's own subtitle promises. The other rows — dashboard,
           // grievances, compare — still have no waiting number to show.
-          // No onLock: the padlock in the header is the one Lock control now,
-          // present at every width. The sidebar's foot carries Settings.
+          // Both navigations carry one door and it is the same door: `navDemo`,
+          // which now says Logout for a signed-in account, Logout for a
+          // handed-over desk, and Leave the demo in the example one.
           counts={{ influencers: unacknowledged }}
           onSelect={(next) => {
             if (next === 'history') {
@@ -1116,14 +1308,13 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
         />
 
         {/* The sheet carries the Settings row again — OVERFLOW in lib/nav.ts
-            feeds it — plus the person header, the example-desk door and Lock.
+            feeds it — plus the person header and the desk door.
             No counts: Settings has no waiting number of its own. */}
         <MoreSheet
           open={moreOpen}
           active={tab}
           onClose={() => setMoreOpen(false)}
           demo={navDemo}
-          onLock={vault.exists ? () => void signOut() : undefined}
           person={store.identity}
           onSelect={(next) => {
             if (next === 'history') {

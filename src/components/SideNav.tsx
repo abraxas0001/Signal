@@ -38,7 +38,7 @@ interface Props {
    * The example desk, if there is one to offer.
    *
    * An optional callback rather than a boolean, the same shape MoreSheet's
-   * `onLock` already uses: absent means the door does not exist, so it is never
+   * the door prop already uses: absent means it does not exist, so it is never
    * offered onto a dataset that was not deployed. `mode` and `note` come from
    * the caller because only App knows whether this tap costs a sign-out.
    */

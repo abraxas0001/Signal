@@ -1,5 +1,8 @@
 import type { Platform } from '@shared/taxonomy'
+import type { Identity } from '@shared/identity'
+import { parseHandleUrl } from '@shared/handle-url'
 import { scopedKey } from '@/lib/store'
+import { deskKey } from '@/lib/personas'
 
 /**
  * The dashboard's store, kept on the reader's own machine.
@@ -24,7 +27,19 @@ import { scopedKey } from '@/lib/store'
  * module-level constant would freeze whichever account happened to be active
  * when this module was first imported.
  */
-const KEY = (): string => scopedKey('signal.handles.v1')
+/**
+ * All four of these caches are per-PERSONA, not just per-account.
+ *
+ * `scopedKey` separates one signed-in account from another; `personaKey` then
+ * separates the politicians one account is watching. Between them they are the
+ * whole of the multi-persona feature — switching persona changes the suffix,
+ * and every consumer of tracked accounts, follower history, rivals and opinion
+ * readings moves with it without knowing personas exist.
+ *
+ * The primary persona adds no suffix, so a desk that never adds a second one
+ * reads and writes exactly the keys it always did. See lib/personas.ts.
+ */
+const KEY = (): string => deskKey('signal.handles.v1')
 /** Roughly a year of daily refreshes per handle, and a bound on the quota. */
 const MAX_SNAPSHOTS = 400
 
@@ -160,6 +175,93 @@ export function addSnapshot(id: string, snapshot: HandleSnapshot): TrackedHandle
 // ─────────────────────────────────────────────────────────────────────────────
 // Derived numbers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The accounts that actually belong to the person this desk is FOR.
+ *
+ * `own` is a flag set once, when an account is added, and never looked at
+ * again. Nothing re-derives it when the desk's subject changes — and the
+ * subject does change: setup can be reopened and a different politician named,
+ * a handed-over desk arrives with a bundle somebody else assembled, and a
+ * device can be reused. The flag then still says "ours" about a person this
+ * desk has nothing to do with.
+ *
+ * That is not a cosmetic staleness. Every total on the dashboard is built from
+ * the own accounts and labelled "across your accounts": one stray 1.6-crore
+ * Instagram account belonging to somebody else turned a desk with 4.6 lakh
+ * followers into one with 1.6 crore, and a growth rate of 3477.9%. Nobody
+ * reading that screen can tell it is wrong, which is the worst property a
+ * number can have.
+ *
+ * SO THE FLAG IS CHECKED AGAINST THE RECORD. `identity.handles` is what the
+ * identity lookup found for this person — the authoritative answer to "who is
+ * D. K. Aruna on Instagram". When it names accounts on a platform, an
+ * own-marked account on that platform that is not one of them is not hers, and
+ * is excluded from the totals.
+ *
+ * DELIBERATELY CONSERVATIVE. Where the record names nobody on a platform, the
+ * flag is trusted exactly as before — an office that added a second Facebook
+ * page the lookup never knew about keeps it. The rule only ever fires when
+ * there is positive evidence of who the subject is on that platform, so it can
+ * drop an impostor and cannot drop a legitimate account the record simply
+ * missed.
+ */
+export function ownedBySubject(
+  handles: TrackedHandle[],
+  identity: Identity | null,
+): TrackedHandle[] {
+  const own = handles.filter((h) => h.own)
+  if (!identity) return own
+
+  const bare = (h: string): string => h.replace(/^@+/, '').trim().toLocaleLowerCase()
+
+  /** Platform -> the handles the record says are the subject's. */
+  const theirs = new Map<Platform, Set<string>>()
+  for (const h of identity.handles) {
+    const ref = parseHandleUrl(h.url)
+    if (!ref) continue
+    const set = theirs.get(ref.platform) ?? new Set<string>()
+    set.add(bare(ref.handle))
+    theirs.set(ref.platform, set)
+  }
+  if (theirs.size === 0) return own
+
+  return own.filter((h) => {
+    const known = theirs.get(h.platform)
+    // Nothing on file for the subject on this platform: the flag stands.
+    if (!known || known.size === 0) return true
+    return known.has(bare(h.handle))
+  })
+}
+
+/**
+ * Correct the `own` flag on disk, once, against who the desk is for.
+ *
+ * `ownedBySubject` computes the right answer for one render. This persists it,
+ * and that matters because `own` is read in a dozen places — the headline
+ * totals, the follower board, the mention counts, the week against rivals, the
+ * comparison columns, the greeting — and every one of them reads the stored
+ * flag directly. Correcting them one at a time is how the next one gets
+ * missed, and a missed one is a wrong number nobody can see is wrong.
+ *
+ * Only ever DEMOTES, and only on positive evidence: the record has to name the
+ * subject's accounts on that platform for a mismatch to count. Nothing is
+ * promoted, nothing is deleted — a demoted account stays tracked and appears
+ * on the comparison board, where showing another politician is the point. If
+ * the record was wrong, the Accounts screen marks it back.
+ *
+ * Returns the number corrected, so a caller can say so rather than silently
+ * changing what the office is looking at.
+ */
+export function reconcileOwnership(identity: Identity | null): number {
+  if (!identity) return 0
+  const all = listHandles()
+  const keep = new Set(ownedBySubject(all, identity).map((h) => h.id))
+  const stale = all.filter((h) => h.own && !keep.has(h.id))
+  if (stale.length === 0) return 0
+  replaceAllHandles(all.map((h) => (h.own && !keep.has(h.id) ? { ...h, own: false } : h)))
+  return stale.length
+}
 
 export interface HandleStats {
   followers: number | null
@@ -319,7 +421,7 @@ export interface RivalCache {
   foundAt: string
 }
 
-const RIVALS_KEY = (): string => scopedKey('signal.rivals.v1')
+const RIVALS_KEY = (): string => deskKey('signal.rivals.v1')
 
 /**
  * Discovery is cached because it is the expensive half.
@@ -376,6 +478,12 @@ export interface Standing {
   neutral: number
   praise: string[]
   criticism: string[]
+  /**
+   * Up to three verbatim examples of comments that took no side, so the
+   * "neutral" number has faces. Absent on readings taken before the field
+   * existed; the card then explains instead of listing.
+   */
+  neutralQuotes?: string[]
   summary: string
   commentsRead: number
   postsRead: number
@@ -501,7 +609,7 @@ export function standingFromSurvey(survey: Record<string, unknown>): Standing {
   }
 }
 
-const STANDING_KEY = (): string => scopedKey('signal.standing.v1')
+const STANDING_KEY = (): string => deskKey('signal.standing.v1')
 
 /**
  * Cached because it is the most expensive thing this product does: several live
@@ -527,7 +635,7 @@ export function saveStandingCache(handleId: string, standing: Standing): void {
   }
 }
 
-const STANDING_NOTE_KEY = (): string => scopedKey('signal.standingNote.v1')
+const STANDING_NOTE_KEY = (): string => deskKey('signal.standingNote.v1')
 
 /**
  * Why an account has no standing, when we know why.

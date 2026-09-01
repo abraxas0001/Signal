@@ -437,7 +437,7 @@ export function applyPrincipal(roster: DemoRoster, principalKey: string): Tracke
         .filter((h) => !h.failure)
         .map((h) => ({ url: h.profileUrl, label: h.platform })),
       notes: [
-        'Example data. These are real public accounts, read once and stored — not a live feed.',
+        'Example data. These are real public accounts, read once and stored, not a live feed.',
       ],
       resolvedAt: roster.generatedAt,
     },

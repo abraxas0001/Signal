@@ -86,12 +86,17 @@ export const ANALYSIS_SCHEMA = obj({
   },
 
   sentiment: obj({
-    label: enumOf(SENTIMENTS, 'Overall sentiment of the post toward its subject.'),
+    label: enumOf(
+      SENTIMENTS,
+      'Overall sentiment. When public comments were retrieved, judge it from HOW THE AUDIENCE IS RESPONDING in those comments; only without comments judge the post itself.',
+    ),
     score: {
       type: 'integer' as const,
       description: 'Sentiment as -100 (most negative) to +100 (most positive). 0 is neutral.',
     },
-    rationale: str('One line on why this label was assigned. Point at specific wording.'),
+    rationale: str(
+      'One line on why this label was assigned, naming whether it reads the comments or the post, and pointing at specific wording.',
+    ),
     tone: enumOf(TONES, 'The register the author writes in.'),
     publicNarrative: enumOf(
       PUBLIC_NARRATIVES,
@@ -102,7 +107,7 @@ export const ANALYSIS_SCHEMA = obj({
   emotions: {
     type: 'array' as const,
     description:
-      'The 3–4 strongest emotions present, with weights that sum to roughly 100. Strongest first.',
+      'The 3–4 strongest emotions, weights summing to roughly 100, strongest first. When public comments were retrieved these are the emotions IN THE COMMENTS — what the audience feels — not the post’s own register.',
     items: obj({
       emotion: enumOf(EMOTIONS, 'Emotion category.'),
       weight: { type: 'integer' as const, description: 'Relative strength, 0–100.' },

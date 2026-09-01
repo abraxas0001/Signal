@@ -5,6 +5,7 @@ import type { Identity } from '@shared/identity'
 import { Button, Card, Chip, SectionTitle } from './ui'
 import { Legend, RadarChart } from '@/components/kit'
 import { cn } from '@/lib/utils'
+import { deskKey } from '@/lib/personas'
 import { fadeUp } from '@/lib/motion'
 import { fileFreeAction, hasOpenAction } from '@/lib/actions'
 import { actionIdForSource, requestActionFocus } from '@/lib/focus'
@@ -115,7 +116,19 @@ export interface CompareResult {
  * rather than localStorage, so it leaves with the tab.
  */
 const NOTES_TTL_MS = 6 * 60 * 60 * 1000
-const notesKey = (name: string): string => `signal:compare-notes:${name.trim().toLowerCase()}`
+/**
+ * Scoped to the desk, not just to the rival's name.
+ *
+ * This was `signal:compare-notes:<name>` and nothing else — the one cache in
+ * the app that never went through `scopedKey`. Every account on a shared
+ * office phone, every handed-over desk and the example desk all read and wrote
+ * the same entry for a given name, so two offices comparing themselves against
+ * the same rival on one device were served each other's reading. That is the
+ * exact leak `scopedKey` was introduced to close for four other caches, and
+ * this one was missed because it builds its key inline from an argument.
+ */
+const notesKey = (name: string): string =>
+  deskKey(`signal:compare-notes:${name.trim().toLowerCase()}`)
 
 function cachedNotes(name: string): { notes: string; sources: unknown[] } | null {
   try {

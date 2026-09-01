@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { AnimatePresence, useReducedMotion } from 'motion/react'
 import * as m from 'motion/react-m'
-import { Lock, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { Avatar } from './ui'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { ease, spring } from '@/lib/motion'
@@ -12,7 +12,7 @@ import { isDemoScope, subscribe } from '@/lib/store'
 
 /**
  * The desk's own sheet, on a phone: whose desk this is, the Settings row, the
- * example-desk door and Lock.
+ * example-desk door.
  *
  * Settings is back in `OVERFLOW_GROUPS` — it gave its bar slot to Influencers
  * when the product owner asked for that button back — so the loop below
@@ -20,7 +20,7 @@ import { isDemoScope, subscribe } from '@/lib/store'
  * empty spell: one edit in lib/nav.ts, no UI work here.
  *
  * The sheet's other three jobs never depended on the destination list: the
- * header avatar needs somewhere to open, Lock belongs behind the member's own
+ * header avatar needs somewhere to open, the way out belongs behind the member's own
  * face, and the example desk needs a door on every width — the sidebar's is
  * lg:+ only.
  */
@@ -45,7 +45,6 @@ export function MoreSheet({
   counts,
   onSelect,
   onClose,
-  onLock,
   demo,
   person,
 }: {
@@ -55,7 +54,6 @@ export function MoreSheet({
   onSelect: (t: Tab) => void
   onClose: () => void
   /** Omitted when there is no account to lock, and then no lock row. */
-  onLock?: () => void
   /**
    * The example desk, if there is one to offer. Identical shape to SideNav's,
    * and App passes both surfaces the same binding — the sidebar is `lg:`+ only,
@@ -220,21 +218,26 @@ export function MoreSheet({
               ))}
 
               {/* The way out of the desk, where the sidebar also puts it —
-                  last, under a rule, away from the destinations. The example
-                  desk shares the block, above Lock: locking is the terminal
-                  act and stays last. */}
-              {(demo || onLock) && (
+                  last, under a rule, away from the destinations.
+                  
+                  There was a second control here called "Lock", which signed
+                  the account out. Two rows for one action, and the one whose
+                  label nobody could read was the one that did it. `demo` is
+                  now that door for every kind of session — Logout on an
+                  account and on a handed-over desk, Leave the demo in the
+                  example one — so there is one row and it says what it does. */}
+              {demo && (
                 <div className="mt-6 space-y-2 border-t border-[var(--border)] pt-3">
                   {demo && (
                     <DemoDoor
                       {...demo}
                       /* The sheet closes only if the scope actually moved.
-                         The Lock row's `onClose(); onLock()` shape would have
-                         shut the sheet even when the reader cancelled the
-                         sign-out confirmation — costing them the menu they
-                         were in the middle of using, for a choice they
-                         declined. Asking the store where it is now beats
-                         threading a boolean back through the callback. */
+                         A naive `onClose(); onClick()` would shut the sheet
+                         even when the reader cancelled the sign-out
+                         confirmation — costing them the menu they were in the
+                         middle of using, for a choice they declined. Asking
+                         the store where it is now beats threading a boolean
+                         back through the callback. */
                       onClick={() => {
                         /**
                          * Subscribed, not awaited.
@@ -266,18 +269,6 @@ export function MoreSheet({
                         demo.onClick()
                       }}
                     />
-                  )}
-                  {onLock && (
-                    <button
-                      onClick={() => {
-                        onClose()
-                        onLock()
-                      }}
-                      className={cn(PILL_ROW, PILL_FOCUS, 'px-4 text-sm font-medium', PILL_IDLE)}
-                    >
-                      <Lock size={16} strokeWidth={1.9} className="shrink-0" aria-hidden />
-                      Lock
-                    </button>
                   )}
                 </div>
               )}

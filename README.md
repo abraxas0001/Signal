@@ -37,15 +37,20 @@ cp .env.example .env      # optional — see "Choosing a provider" below
 npm run dev               # then open http://localhost:5173
 ```
 
-Open **5173**, not 8888. `netlify dev` serves the app on 8888 with
-`netlify.toml`'s production CSP applied, and that CSP (`script-src 'self'`)
-blocks the inline preamble Vite's dev server injects — so 8888 renders blank.
-The CSP is correct: the production build contains no inline script at all, which
-is why `theme.js` is a separate file. Vite proxies `/api` back to 8888, so 5173
+Open **5173**, not 8888. `netlify dev` announces itself on 8888 and serves the
+app there with `netlify.toml`'s production rules applied, and two of them are
+fatal in development: the SPA catch-all answers Vite's module requests with
+`index.html`, and the CSP (`script-src 'self'`) blocks the inline preamble
+Vite's dev server injects. 8888 therefore renders a blank page. Both rules are
+right for production, where the built app has no inline script at all — which is
+why `theme.js` is a separate file — so rather than weaken them, `theme.js`
+forwards 8888 to 5173 for you. If you land on 8888 you will simply arrive at
+5173 with your path intact. `/api` stays on 8888, which Vite proxies to, so 5173
 gives you the full interface and a working API on one URL.
 
-`http://localhost:5173/?demo=1` shows a complete worked example without needing
-any key.
+`http://localhost:5173/?example=1` shows a complete worked example without
+needing any key. (It used to be `?demo=1`; that parameter now does something
+else and lands you on the setup screen.)
 
 ### Deploying to Netlify
 

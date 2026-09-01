@@ -60,9 +60,17 @@ export function isDemoMode(): boolean {
  * before, so a visitor carrying a namespace from an older build gets the new
  * shape instead of a half-filled one.
  */
-// 17: YouTube readings rest on the channel's all-time popular videos, where
-// the audience actually is, not only the newest uploads.
-const SEED_VERSION = '17'
+// 20: YouTube videos carry their real publish dates, read from the channel
+// feed and the watch pages rather than left null.
+// 22: FLUSH. A persona suffix was briefly applied to the demo's storage keys
+// too, so `applyPrincipal` could write the new principal's accounts under one
+// key while the dashboard read another — leaving the PREVIOUS politician's
+// handles in the list, still marked as the desk's own. A desk showed D. K.
+// Aruna's accounts and Rahul Gandhi's 1.6-crore Instagram together, and summed
+// both into "followers across your accounts". The cause is fixed in
+// lib/personas.ts (the demo is never persona-scoped); this bump is what clears
+// the merged list out of browsers that already have one.
+const SEED_VERSION = '22'
 const SEED_KEY = 'signal.demo.seed'
 
 /**

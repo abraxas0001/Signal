@@ -269,7 +269,7 @@ export function RescueSheet({
                           setError(null)
                           setFieldErrors((f) => f.filter((x) => x !== k))
                         }}
-                        placeholder="—"
+                        placeholder="Type the count"
                         aria-invalid={fieldErrors.includes(k)}
                         className={cn(
                           'mt-1 w-full min-h-11 rounded-[var(--radius-sm)] border bg-[var(--surface-2)] px-3 py-2 tabular-nums outline-none transition-colors focus:border-[var(--accent)] focus:bg-[var(--surface)]',

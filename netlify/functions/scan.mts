@@ -118,6 +118,11 @@ function readSubject(raw: unknown): RelevanceSubject | null {
     state: text(o['state'], 120),
     party: text(o['party'], 120),
     aliases: strings(o['aliases'], 12).map((a) => a.trim().slice(0, 60)),
+    // The desk's own gazetteer: towns, mandals and spellings of the district
+    // it is configured for. Forty because a seat has seven segments and each
+    // carries several spellings, and a judge told where the seat IS stops
+    // placing headlines from its own general knowledge.
+    places: strings(o['places'], 40).map((a) => a.trim().slice(0, 60)),
   }
 }
 
@@ -252,8 +257,17 @@ export default async function handler(req: Request, _context: Context): Promise<
   */
   const notes = [...result.notes, ...relevance.notes]
   if (result.candidates.length > judgeLimit) {
+    /*
+      Say what being unjudged now costs a story.
+      
+      It used to be harmless: the desk showed unjudged stories, so "listed
+      unjudged" meant "shown, with a label". It is not harmless any more. A
+      story swept up by the wide harvest and never read has no evidence of any
+      kind behind it, so the desk sets it aside rather than opening on it, and
+      a note that does not say so describes the old behaviour.
+    */
     notes.push(
-      `Read ${result.candidates.length} stories and sent the first ${judgeLimit} to be judged. The rest are listed unjudged.`,
+      `Read ${result.candidates.length} stories and sent the best-ranked ${judgeLimit} to be judged. The rest are returned unjudged, and a desk that asked for a wide harvest sets those aside rather than showing them.`,
     )
   }
 

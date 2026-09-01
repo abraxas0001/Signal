@@ -64,7 +64,7 @@ export function PlatformReachRow({ reach, own }: { reach: PlatformReach[]; own: 
               <span className="truncate">{r.platform}</span>
             </p>
             <p className="tnum mt-2 text-[20px] font-bold leading-none tracking-[-0.02em] sm:mt-2.5 sm:text-[22px]">
-              {r.followers == null ? '—' : compact(r.followers)}
+              {r.followers == null ? 'NA' : compact(r.followers)}
             </p>
             <p className="mt-1 text-[11px] text-ink-3">
               {r.followers == null ? 'Followers were never read' : 'followers'}

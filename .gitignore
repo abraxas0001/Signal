@@ -40,3 +40,9 @@ docs/
 # Live social sessions — same sensitivity as the profile itself.
 .scraper-session.json
 .desk-pull/
+
+# Named citizens' comment text, read through a signed-in browser. Megabytes of
+# it, rewritten whole on every walk, in a public repository. public/sample-data.json
+# is ignored for the same reason: this is other people's words, and a scraper
+# intermediate has no business in the history.
+scraper/demo-comments.json

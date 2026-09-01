@@ -77,6 +77,11 @@ const PAIRS: Array<[fg: string, bg: string, min: number, where: string]> = [
   ['accent', 'surface', 4.5, 'links and inline actions'],
   ['accent', 'accent-soft', 4.5, 'accent chip text'],
   ['accent-fg', 'accent', 4.5, 'primary button label'],
+  // The entrance's two solid non-blue buttons. Both take `--accent-fg`
+  // rather than white on purpose: white is 2.0:1 on the dark `--pos` and
+  // 2.7:1 on the dark `--accent-2`, and both fail. This pins that.
+  ['accent-fg', 'pos', 4.5, 'create-account button label'],
+  ['accent-fg', 'accent-2', 4.5, 'demo door button label'],
   ['pos', 'pos-soft', 4.5, 'positive chip text'],
   ['warn', 'warn-soft', 4.5, 'warning chip text'],
   ['neg', 'neg-soft', 4.5, 'negative chip text'],

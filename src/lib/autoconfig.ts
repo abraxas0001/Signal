@@ -1,6 +1,6 @@
 import type { Identity, SocialHandle } from '@shared/identity'
 import { partyAbbreviation } from '@shared/identity'
-import { resolvePlace, placeVariants, type ResolvedPlace } from '@shared/places'
+import { resolvePlace, placeTermsFor, type ResolvedPlace } from '@shared/places'
 import {
   PORTALS,
   portalsForState,
@@ -430,12 +430,46 @@ export interface DeskTerms {
    * being reported to a member as coverage of themselves.
    */
   persona: string[]
+  /**
+   * Not a fourth group but a subset of the three: the words that are only ever
+   * evidence when another watched word lands with them.
+   *
+   * Every term in here matched something real and wrong. "BJP" returned the
+   * national wire. "Aruna", the surname this planner mints out of "D. K.
+   * Aruna", matched a cricketer, and a cricket report reached an MLA's desk. A
+   * district token carved out of a compound name matched a district sports
+   * meet. None of them can be dropped instead: a Telugu masthead prints the
+   * surname alone, and no masthead ever prints "Jogulamba Gadwal".
+   *
+   * A word the office named itself is never in here, however it also arrives.
+   * See `owned` in planTerms.
+   *
+   * So they stay in `all` and are named here instead, and the scanner's
+   * `worthKeeping` (netlify/functions/lib/scan.ts) keeps a story only when
+   * something outside this list matched it too. That machinery already exists
+   * for the party term, and this covers everything that machinery covers today
+   * plus the two words the planner mints.
+   *
+   * It is not, however, the whole of what a `broadTags` caller needs. Only
+   * words this planner produced can be listed here, and an office can add its
+   * own: `broadTermsFor` in netlify/functions/daily-scan.mts also demotes the
+   * desk's state and the registered party name, neither of which this planner
+   * ever emits. Sending this list in place of that one would hand "Telangana"
+   * back its old power to stand alone, which is the state-wide feed arriving as
+   * local news. A caller wanting both has to union the two.
+   */
+  corroborating: string[]
 }
 
 export function planTerms(identity: Identity, place: ResolvedPlace): DeskTerms {
   const nameTerms: string[] = []
   const placeTerms: string[] = []
   const partyTerms: string[] = []
+  /**
+   * The words below that must not stand alone. Named for the scanner's own
+   * parameter, because this is the list that becomes its `broadTags`.
+   */
+  const broad: string[] = []
 
   const push = (into: string[], value: string | null | undefined): void => {
     const trimmed = value?.trim()
@@ -448,7 +482,13 @@ export function planTerms(identity: Identity, place: ResolvedPlace): DeskTerms {
   const parts = identity.name.trim().split(/\s+/).filter(Boolean)
   if (parts.length > 1) {
     // The surname alone: Telugu and Hindi mastheads routinely print only that.
+    // Watched, and marked broad, because by itself it is also a name half the
+    // subcontinent shares: on its own "Aruna" put a cricketer's innings on the
+    // desk of the member of Gadwal, which is the story this office complained
+    // about. Alongside her seat or her full name it is still what finds the
+    // Telugu headline that carries nothing else.
     push(nameTerms, parts[parts.length - 1])
+    push(broad, parts[parts.length - 1])
     if (parts.length > 2) push(nameTerms, `${parts[0]} ${parts[parts.length - 1]}`)
     // "D. K. Aruna" is also written "DK Aruna", and neither form matches the
     // other under a plain substring test.
@@ -456,15 +496,37 @@ export function planTerms(identity: Identity, place: ResolvedPlace): DeskTerms {
     if (initials.length >= 2) push(nameTerms, `${initials} ${parts[parts.length - 1]}`)
   }
 
-  for (const variant of placeVariants(place.districtMatch, identity.district)) {
-    push(placeTerms, variant)
-  }
+  const where = placeTermsFor(place.districtMatch, identity.district)
+  for (const variant of where.all) push(placeTerms, variant)
+  // A token split out of a compound district name is the other half of the same
+  // failure the surname is: "Gadwal", carved off "Jogulamba Gadwal", matched a
+  // district sports meet. placeTermsFor decides which tokens it invented.
+  for (const fragment of where.corroborating) push(broad, fragment)
   push(placeTerms, identity.constituency)
 
   // The abbreviation, not the registered name: a week of Telugu coverage
   // carries "BJP" a hundred times and the full name once.
   const abbreviation = partyAbbreviation(identity.party)
   push(partyTerms, abbreviation ?? identity.party)
+  push(broad, abbreviation ?? identity.party)
+
+  /**
+   * A word the office wrote whole is not a fragment, however else it reaches
+   * this list.
+   *
+   * A desk that gave its seat as "Gadwal" watches "Gadwal" as its subject, and
+   * the same string also arrives here as a token carved off the district name
+   * "Jogulamba Gadwal". Demoting it on that account would take the desk's own
+   * patch away from it and leave "Gadwal hospital has no doctors" needing a
+   * second word before it counted. The same protection covers an alias the
+   * office typed in by hand: choosing to watch a word is a decision this
+   * planner does not get to overrule.
+   */
+  const owned = new Set(
+    [identity.name, identity.constituency, ...identity.aliases]
+      .map((value) => value?.trim().toLowerCase() ?? '')
+      .filter(Boolean),
+  )
 
   return {
     name: nameTerms,
@@ -472,6 +534,7 @@ export function planTerms(identity: Identity, place: ResolvedPlace): DeskTerms {
     party: partyTerms,
     all: [...new Set([...nameTerms, ...placeTerms, ...partyTerms])],
     persona: [...new Set([...nameTerms, ...placeTerms])],
+    corroborating: broad.filter((term) => !owned.has(term.toLowerCase())),
   }
 }
 

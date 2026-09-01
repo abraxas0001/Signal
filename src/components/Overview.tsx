@@ -113,7 +113,7 @@ function Mark({ state, what }: { state: Connector['posts']; what: string }) {
   )
 }
 
-const fmt = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('en-IN'))
+const fmt = (n: number | null | undefined) => (n == null ? 'NA' : n.toLocaleString('en-IN'))
 
 export function Overview({
   onAnalyse,
@@ -230,7 +230,7 @@ export function Overview({
                     </span>
                     <span className="shrink-0 text-right">
                       <span className="tnum block text-2xl font-bold leading-none tracking-[-0.02em] text-ink">
-                        {s.engagementRate != null ? s.engagementRate.toFixed(2) : '—'}
+                        {s.engagementRate != null ? s.engagementRate.toFixed(2) : 'NA'}
                         {s.engagementRate != null && (
                           <span className="text-sm font-semibold text-ink-3">%</span>
                         )}

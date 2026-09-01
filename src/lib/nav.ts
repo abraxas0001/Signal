@@ -7,10 +7,13 @@ import {
   Link2,
   ListChecks,
   Megaphone,
+  MessagesSquare,
   Newspaper,
   Settings as SettingsIcon,
+  Sparkles,
   Swords,
   UserSearch,
+  Wand2,
 } from 'lucide-react'
 
 /**
@@ -43,6 +46,9 @@ export type Tab =
   | 'compare'
   | 'actions'
   | 'weekly'
+  | 'highlights'
+  | 'audience'
+  | 'studio'
   | 'settings'
 
 export interface NavItem {
@@ -66,9 +72,17 @@ export const NAV = {
   history: { id: 'history', label: 'History', Icon: Clock },
   settings: { id: 'settings', label: 'Settings', Icon: SettingsIcon },
   analyse: { id: 'analyse', label: 'Analyse a link', Icon: Link2 },
+  // Where the desk makes something rather than reads something. It is the one
+  // screen here whose output is published under the member's own name, which
+  // is why it carries its own door rather than hiding under a tools list.
+  studio: { id: 'studio', label: 'Content studio', Icon: Wand2 },
   // Reached from the dashboard's week card, never from a bar: a sub-page of
   // a section, not a place of its own.
   weekly: { id: 'weekly', label: 'Week against rivals', Icon: Swords },
+  // Reached from their own dashboard cards, never from a bar: each is the
+  // long form of a card that already says the short form.
+  highlights: { id: 'highlights', label: 'Post highlights', Icon: Sparkles },
+  audience: { id: 'audience', label: 'What people are saying', Icon: MessagesSquare },
 } as const satisfies Record<Tab, NavItem>
 
 /**
@@ -111,7 +125,16 @@ export const OVERFLOW = ['settings'] as const
  * read to move under Settings. Influencers did too, and then left again when
  * the owner asked for it back on the bar.
  */
-export const UNLISTED = ['personas', 'accounts', 'history', 'actions', 'weekly'] as const
+export const UNLISTED = [
+  'studio',
+  'personas',
+  'accounts',
+  'history',
+  'actions',
+  'weekly',
+  'highlights',
+  'audience',
+] as const
 
 /**
  * Every destination is on the bar, in the sheet, or explicitly unlisted —
@@ -143,7 +166,10 @@ export const isUnlisted = (t: Tab): boolean => UNLISTED_SET.has(t)
 
 /** The sidebar's taxonomy, which the More sheet reuses so the two agree. */
 export const GROUPS: ReadonlyArray<{ heading: string; items: readonly NavItem[] }> = [
-  { heading: 'Today', items: [NAV.dashboard, NAV.grievances, NAV.influencers, NAV.compare] },
+  {
+    heading: 'Today',
+    items: [NAV.dashboard, NAV.grievances, NAV.influencers, NAV.compare, NAV.studio],
+  },
   { heading: 'Reference', items: [NAV.settings] },
 ]
 

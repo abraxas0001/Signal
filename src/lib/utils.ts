@@ -10,7 +10,7 @@ export function cn(...inputs: ClassValue[]) {
  * audience reads in lakh and crore. 12,00,000 → "12L", not "1.2M".
  */
 export function compact(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
+  if (n == null || !Number.isFinite(n)) return 'NA'
   const abs = Math.abs(n)
   if (abs >= 1e7) return `${trim(n / 1e7)}Cr`
   if (abs >= 1e5) return `${trim(n / 1e5)}L`
@@ -26,7 +26,7 @@ function trim(v: number): string {
 
 /** Full precision with Indian digit grouping, for tooltips and detail rows. */
 export function full(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
+  if (n == null || !Number.isFinite(n)) return 'NA'
   return n.toLocaleString('en-IN')
 }
 
@@ -81,4 +81,20 @@ export function scoreToPosition(score: number): number {
 
 export function pluralise(n: number, one: string, many = `${one}s`): string {
   return n === 1 ? one : many
+}
+
+/**
+ * A quoted comment, with model control tokens stripped out.
+ *
+ * The readings are produced by a model, and a generation that slips a control
+ * sentinel into its output ("జై బ<|channel|>...") carries it all the way to a
+ * screen whose whole claim is that the words on it are what a person typed.
+ * The sentinel is not a person's word, so it does not survive to the page.
+ * The comment around it is left exactly as it was written.
+ */
+export function cleanQuote(text: string): string {
+  return text
+    .replace(/<\|[^|]*\|>/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
 }

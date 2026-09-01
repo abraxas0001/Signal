@@ -36,7 +36,7 @@ const AVATAR_DIR = resolve(process.cwd(), 'public/demo-avatars')
 const MEDIA_DIR = resolve(process.cwd(), 'public/demo-media')
 
 /** How many post pictures to keep per handle. See the loop for why it is capped. */
-const THUMBS_PER_HANDLE = 15
+const THUMBS_PER_HANDLE = 25
 
 /** Below this, what came back is not a photograph. */
 const MIN_BYTES = 3_000
@@ -306,10 +306,11 @@ async function main(): Promise<void> {
           /**
            * The post pictures, from the page already open.
            *
-           * Capped per handle: the dashboard shows a handful of posts at a
-           * time, and downloading all twenty-five for twenty handles would be
-           * five hundred images for a few dozen that are ever seen. The cap is
-           * what makes this affordable rather than a second scrape.
+           * Capped per handle. The cap started at a dozen, when the dashboard
+           * showed three posts a side; it now shows eight a side and the
+           * compare board opens any of them, so the cap sits at the full
+           * stored reading — a picture that is missing is a row that reads as
+           * broken, and that costs more than the request did.
            */
           const posts = (h.posts ?? []) as Post[]
 

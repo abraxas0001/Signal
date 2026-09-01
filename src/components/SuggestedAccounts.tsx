@@ -106,7 +106,17 @@ export function SuggestedAccounts({
 }: {
   identity: Identity | null
   /** Handed the new list so the caller can re-read without a round trip. */
-  onAdded: (handles: TrackedHandle[]) => void
+  /**
+   * The whole tracked list, and the handles this component just created.
+   *
+   * The second argument is the point. Adding an account here saved it with an
+   * empty `snapshots` array and told the host to re-render — and nothing read
+   * it. Every other way of adding an account on the dashboard reads the new
+   * handle straight away; this one, the one a desk uses on its first visit,
+   * did not, so a brand-new desk opened on a row of "NA · Not read yet" that
+   * no amount of waiting would fill.
+   */
+  onAdded: (handles: TrackedHandle[], created: TrackedHandle[]) => void
 }) {
   const suggestions = useMemo(() => suggestionsFromIdentity(identity), [identity])
   const [added, setAdded] = useState<Set<string>>(new Set())
@@ -119,7 +129,7 @@ export function SuggestedAccounts({
 
   if (!identity) return null
 
-  const addOne = (suggestion: AccountSuggestion): void => {
+  const addOne = (suggestion: AccountSuggestion): TrackedHandle | null => {
     const id = handleId(suggestion.platform, suggestion.handle)
     const created: TrackedHandle = {
       id,
@@ -137,13 +147,44 @@ export function SuggestedAccounts({
     }
     const next = saveHandle(created)
     setAdded((prev) => new Set(prev).add(id))
-    onAdded(next)
+    onAdded(next, [created])
+    return created
   }
 
+  /**
+   * One notification for the whole batch, not one per account.
+   *
+   * Calling `addOne` in a loop would fire a read per suggestion, and the read
+   * endpoint takes six at a time — so the batch is collected and handed over
+   * once, which is both fewer requests and the only version where the spinner
+   * means anything.
+   */
   const addAll = (): void => {
+    const created: TrackedHandle[] = []
+    let next: TrackedHandle[] = []
+    const ids = new Set(added)
     for (const suggestion of pending) {
-      if (!added.has(handleId(suggestion.platform, suggestion.handle))) addOne(suggestion)
+      const id = handleId(suggestion.platform, suggestion.handle)
+      if (ids.has(id)) continue
+      ids.add(id)
+      const made: TrackedHandle = {
+        id,
+        platform: suggestion.platform,
+        handle: suggestion.handle,
+        displayName: suggestion.displayName,
+        profileUrl: suggestion.url,
+        avatarUrl: suggestion.avatarUrl,
+        own: true,
+        label: null,
+        listingNote: '',
+        snapshots: [],
+      }
+      next = saveHandle(made)
+      created.push(made)
     }
+    if (!created.length) return
+    setAdded(ids)
+    onAdded(next, created)
   }
 
   /* ── nothing found ─────────────────────────────────────────────────────── */

@@ -270,7 +270,49 @@ async function readYouTube(handle: string): Promise<HandleSummary> {
   let followers: number | null = null
 
   if (!channelId) {
-    const page = await fetchText(profileUrl, { agent: 'browser', timeout: 9000 })
+    /**
+     * 15s, not 9s. A YouTube channel page is two megabytes of embedded JSON —
+     * measured at 2.03MB for @RahulGandhi — and 9 seconds was a budget the
+     * first, cold request could miss while every warm one finished in under
+     * two. The failure that produced was not "slow", it was the paragraph
+     * below.
+     */
+    const page = await fetchText(profileUrl, { agent: 'browser', timeout: 15_000 })
+
+    /**
+     * A page that did not arrive is not a handle that does not exist.
+     *
+     * This function used to run the regexes over whatever came back, find no
+     * channel id in an empty string, and return "Could not resolve this
+     * channel. Check the handle." — the same sentence for a timeout, a 429, a
+     * 5xx and a genuine typo. A desk that had just added its own correct
+     * YouTube channel was told the channel was wrong, and the dashboard kept
+     * a snapshot of nulls that read "Not read yet" for ever, because nothing
+     * retries a read that reported itself as finished.
+     *
+     * Throwing puts it on the caller's error path instead, which the client
+     * already treats as "no snapshot, show the reason" rather than "read it,
+     * it was empty".
+     */
+    /**
+     * 404 and 410 are NOT transport failures — they are YouTube saying this
+     * channel does not exist, which is the one case where "check the handle"
+     * is the right thing to tell somebody. Those fall through to the branch
+     * below, which says exactly that. Everything else is the network, and
+     * blaming the handle for the network is what this guard exists to stop.
+     */
+    if (!page.ok && page.status !== 404 && page.status !== 410) {
+      throw new Error(
+        page.status === 408
+          ? 'YouTube did not answer in time. It usually does on a second try.'
+          : page.status === 429
+            ? 'YouTube is rate-limiting this deploy. Wait a minute and try again.'
+            : page.blockedReason
+              ? `That channel address could not be fetched: ${page.blockedReason}`
+              : `YouTube answered ${page.status || 'nothing'} for that channel page. Try again in a moment.`,
+      )
+    }
+
     channelId =
       /channel_id=(UC[\w-]{20,})/.exec(page.body)?.[1] ??
       /"externalId":"(UC[\w-]{20,})"/.exec(page.body)?.[1] ??
@@ -311,6 +353,8 @@ async function readYouTube(handle: string): Promise<HandleSummary> {
       avatarUrl,
       followers,
       posts: [],
+      // Reached only when the page arrived intact and carried no channel id,
+      // which really does mean the handle names nothing.
       listing: { available: false, note: 'Could not resolve this channel. Check the handle.' },
     }
   }

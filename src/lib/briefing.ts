@@ -6,14 +6,7 @@ import type { PersonaMention } from '@/components/Persona'
 import type { Store } from '@/lib/store'
 import { compact, full } from '@/lib/utils'
 import { listHandles, readStandingCache, type Standing, type TrackedHandle } from '@/lib/handles'
-import {
-  countVerdicts,
-  readVerdicts,
-  verdictFor,
-  worthShowing,
-  type RelevanceCounts,
-  type Verdict,
-} from '@/lib/news-relevance'
+import { readVerdicts, verdictFor, worthShowing, type Verdict } from '@/lib/news-relevance'
 
 /**
  * What the dashboard is actually about.
@@ -232,6 +225,35 @@ export interface Perception {
 }
 
 /**
+ * Which stories get a vote on how the press is reading this person.
+ *
+ * Stories judged unrelated do not, because they are not about this person. A
+ * cricket report that matched the word "Aruna" was counted here as one more
+ * neutral story, and six of them in a week were enough to move the headline
+ * figure and to talk the panel out of saying the coverage had turned.
+ *
+ * Deliberately NOT `worthShowing`. That rule decides what a news list puts in
+ * front of the office, and it sets party coverage aside because a Mahabubnagar
+ * desk did not ask to open every morning on a party tour of Karimnagar. This is
+ * a different question. A reporter will put that tour to the member, so it is
+ * part of how the press is reading her even when it has not earned a card.
+ *
+ * `seat-routine` is the one that does not count, and that is the whole reason
+ * the category was split out of `about-seat`. One crime, one exam conducted
+ * normally, one donation to one school: each happened in her district and says
+ * nothing about her or about her office. Counting them here repeats the
+ * cricket arithmetic with district filler instead of sport.
+ *
+ * `unjudged` counts only when the story carried a word this office watches. A
+ * story swept up by a whole-front-page harvest and never judged is not evidence
+ * of anything, least of all of a mood.
+ */
+function countsAsCoverage(v: Verdict): boolean {
+  if (v.verdict === 'unjudged') return v.via !== 'harvested'
+  return v.verdict === 'about-person' || v.verdict === 'about-seat' || v.verdict === 'about-party'
+}
+
+/**
  * What the coverage says about this person, as the reader assessed it.
  *
  * The dashboard already had a "what people are saying" panel and it measured
@@ -258,23 +280,13 @@ export function perceptionOf(
   since: number,
   verdicts?: Map<string, Verdict>,
 ): Perception {
-  /*
-    Stories judged unrelated do not get a vote on how the press reads this
-    person, because they are not about this person. A cricket report that
-    matched the word "Aruna" was counted here as one more neutral story, and
-    six of them in a week were enough to move the headline figure and to talk
-    the panel out of saying the coverage had turned.
-
-    Coverage of the seat and of the party is still counted. It is not a
-    mistake in the way sport is: an office answers for what is written about
-    its district and its party, and a reporter will put both to the member.
-  */
   // Opened once. Resolving it per story would parse the whole cache blob for
   // every headline in the window.
   const cache = verdicts ?? readVerdicts()
   const recent = mentions.filter(
     (m) =>
-      (at(m.seenAt) ?? at(m.publishedAt) ?? 0) >= since && worthShowing(verdictFor(m.url, cache)),
+      (at(m.seenAt) ?? at(m.publishedAt) ?? 0) >= since &&
+      countsAsCoverage(verdictFor(m.url, cache)),
   )
 
   let supportive = 0
@@ -488,39 +500,7 @@ export interface NewsItem {
   reason: 'suspect' | 'critical' | 'action' | 'recent'
   /** Suspected fabricated, recycled or misleading. */
   suspect: boolean
-  /**
-   * Whether the relevance check thinks this is about the member at all.
-   *
-   * Carried on every item, including the ones that pass, because a screen has
-   * to be able to say "about your seat rather than about you" and "nobody has
-   * checked this one" on the cards it shows.
-   */
-  verdict: Verdict
 }
-
-export interface NewsSelection {
-  /** Ranked, capped, and everything the rule says may be shown. */
-  shown: NewsItem[]
-  /**
-   * Judged unrelated, kept rather than dropped.
-   *
-   * A filter the reader cannot open is a filter they cannot check, and this one
-   * is a model's opinion about a headline. The office must be able to see what
-   * was taken away from them and disagree with it.
-   */
-  hidden: NewsItem[]
-  /** The arithmetic behind both lists, so a screen can report it honestly. */
-  counts: RelevanceCounts
-}
-
-/**
- * How many hidden stories are carried for the reveal.
- *
- * The count reported to the reader is the true one; this only bounds how many
- * rows are built, because a quiet week of word matching can produce dozens of
- * sport results and none of them is worth the render cost until somebody asks.
- */
-const HIDDEN_LIMIT = 20
 
 /**
  * Rank, then take a few.
@@ -534,18 +514,32 @@ const HIDDEN_LIMIT = 20
  * that ordering matters: a fabricated-looking cricket story would otherwise
  * take the top slot on the dashboard and the lead sentence with it, on the
  * strength of a coincidental word match.
+ *
+ * What the filter sets aside is dropped here rather than returned. This once
+ * handed back the hidden stories and the verdict arithmetic as well, and the
+ * dashboard used them: it said how many stories had been set aside and offered
+ * to show them, so that a scan which read nine stories and ruled all nine out
+ * could never be mistaken for a scan that found nothing. That block is off the
+ * dashboard now, and the arithmetic was being built for a reader that is no
+ * longer there. Grievances still carries the same rule, with its own count and
+ * its own reveal, over its own records.
+ *
+ * So the obligation moves rather than lifting: the moment a news list comes
+ * back to this screen, the count of what was set aside has to come back with
+ * it. Showing fewer cards and saying nothing about why is the failure this
+ * filter was built to avoid, not a state it is allowed to end in.
  */
 export function newsSelection(
   mentions: PersonaMention[],
   since: number,
   limit = 6,
   verdicts?: Map<string, Verdict>,
-): NewsSelection {
+): NewsItem[] {
   const cache = verdicts ?? readVerdicts()
 
   const scored = mentions
     .filter((m) => (at(m.seenAt) ?? at(m.publishedAt) ?? 0) >= since)
-    .map((mention): NewsItem & { rank: number; when: number } => {
+    .map((mention): NewsItem & { verdict: Verdict; rank: number; when: number } => {
       const suspect = mention.fake !== null && mention.fake.suspicion !== 'No'
       const needsAction = mention.recommendation !== null
       const critical = mention.stance === 'critical'
@@ -573,27 +567,13 @@ export function newsSelection(
     })
     .sort((a, b) => b.rank - a.rank || b.when - a.when)
 
-  const strip = ({ mention, reason, suspect, verdict }: NewsItem): NewsItem => ({
-    mention,
-    reason,
-    suspect,
-    verdict,
-  })
-
-  return {
-    shown: scored.filter((s) => worthShowing(s.verdict)).slice(0, limit).map(strip),
-    hidden: scored.filter((s) => !worthShowing(s.verdict)).slice(0, HIDDEN_LIMIT).map(strip),
-    counts: countVerdicts(scored.map((s) => s.verdict)),
-  }
-}
-
-/** The shown half on its own, for callers that do not report the filter. */
-export function newsWorthNoticing(
-  mentions: PersonaMention[],
-  since: number,
-  limit = 6,
-): NewsItem[] {
-  return newsSelection(mentions, since, limit).shown
+  // The verdict is a filtering input, not part of a news item. It is dropped
+  // on the way out rather than carried: no screen labels these cards, and a
+  // field nothing reads is how the last relevance feature came to look shipped.
+  return scored
+    .filter((s) => worthShowing(s.verdict))
+    .slice(0, limit)
+    .map(({ mention, reason, suspect }) => ({ mention, reason, suspect }))
 }
 
 /* ── what to do ──────────────────────────────────────────────────────────── */
@@ -980,20 +960,6 @@ export interface Briefing {
   /** What the accounts with a local audience are saying. */
   voice: InfluencerVoice
   news: NewsItem[]
-  /**
-   * Stories the relevance check set aside, ranked the same way as the shown
-   * ones and capped, so the screen can offer to reveal them.
-   */
-  newsHidden: NewsItem[]
-  /**
-   * What the relevance check did to this window.
-   *
-   * Exposed so a screen can say "six stories were hidden as unrelated" instead
-   * of quietly showing fewer cards. A filter nobody is told about is
-   * indistinguishable from a scan that found nothing, and this desk has already
-   * been accused of both.
-   */
-  newsFilter: RelevanceCounts
   suspect: NewsItem[]
   suggestions: Suggestion[]
   issues: RankedIssue[]
@@ -1031,8 +997,7 @@ export function briefingOf(store: Store, now: Date = new Date()): Briefing {
   */
   const verdicts = readVerdicts(identity?.name ?? null)
 
-  const selection = newsSelection(store.personaMentions, since, 6, verdicts)
-  const news = selection.shown
+  const news = newsSelection(store.personaMentions, since, 6, verdicts)
   const suspect = news.filter((n) => n.suspect)
   const mood = moodOf()
   const perception = perceptionOf(store.personaMentions, since, verdicts)
@@ -1079,8 +1044,6 @@ export function briefingOf(store: Store, now: Date = new Date()): Briefing {
     perception,
     voice,
     news,
-    newsHidden: selection.hidden,
-    newsFilter: selection.counts,
     suspect,
     suggestions: suggestionsFrom(
       news.map((n) => n.mention),

@@ -397,7 +397,7 @@ export function MetricStat({
         <p className="text-[13px] font-medium text-ink-3">{label}</p>
         {missing ? (
           <>
-            <p className="mt-0.5 text-[26px] font-bold leading-none text-ink-3">—</p>
+            <p className="mt-0.5 text-[26px] font-bold leading-none text-ink-3">NA</p>
             <div className="mt-1.5 flex h-4 items-center overflow-hidden text-[11px] text-ink-3">
               {onEdit ? 'Tap to add' : 'Not available'}
             </div>

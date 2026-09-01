@@ -18,6 +18,8 @@ import {
   BarChart3,
 } from 'lucide-react'
 import type { Platform } from '@shared/taxonomy'
+import type { Report } from '@shared/types'
+import { loadPostReports } from '@/lib/post-reports'
 import { Button, Card, Chip, PageHeader, SectionTitle, selectClass } from './ui'
 import {
   CardHead,
@@ -38,7 +40,7 @@ import { geocodePlace } from './gazetteer'
 import { SuggestedAccounts } from './SuggestedAccounts'
 import { FindByName } from './FindByName'
 import { HeadToHead, type RivalRef } from './HeadToHead'
-import { CompareTable } from './CompareTable'
+import { CompareBoard } from './CompareBoard'
 import { useStore } from '@/lib/store'
 import { cn, compact } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
@@ -51,6 +53,7 @@ import {
   saveRivals,
   listHandles,
   saveHandle,
+  readStandingNote,
   removeHandle,
   addSnapshot,
   handleId,
@@ -94,7 +97,7 @@ const PLATFORMS: Platform[] = [
 const AUTO = new Set<Platform>(['YouTube', 'Bluesky', 'Mastodon', 'Reddit'])
 
 const fmt = (n: number | null | undefined): string =>
-  n == null ? '—' : n.toLocaleString('en-IN')
+  n == null ? 'NA' : n.toLocaleString('en-IN')
 
 function ago(iso: string | null): string {
   if (!iso) return 'never'
@@ -198,10 +201,18 @@ const MEASURES: {
   },
 ]
 
+/**
+ * How many accounts `/api/handle` will read in one request (MAX_HANDLES in
+ * netlify/functions/handle.mts). Named here so the client cannot drift past a
+ * limit it has no other way to learn about.
+ */
+const READ_BATCH = 6
+
 export function Dashboard({
   onClose,
   onOpenActions,
   onRead,
+  onOpenReport,
   mode = 'accounts',
 }: {
   onClose: () => void
@@ -214,6 +225,8 @@ export function Dashboard({
    * cards simply link out, which is what they did before.
    */
   onRead?: (postUrl: string) => void
+  /** Open a reading that already exists, instantly, on the analyse screen. */
+  onOpenReport?: (report: Report) => void
   /**
    * 'compare' shows only the side-by-side. It is the same data and the same
    * component — a separate screen would have meant a second copy of every
@@ -241,6 +254,22 @@ export function Dashboard({
   const [rivals, setRivals] = useState<RivalCache | null>(null)
   const [finding, setFinding] = useState(false)
   const [standings, setStandings] = useState<Record<string, Standing>>({})
+
+  /**
+   * Why an account has no reading, keyed by handle id.
+   *
+   * The reader records its own refusal — "only 4 comments across 25 posts,
+   * too few to read a mood from" — and that sentence is what turns a blank
+   * comparison cell into a finding about the account.
+   */
+  const standingNotes = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const h of handles) {
+      const note = readStandingNote(h.id)
+      if (note) out[h.id] = note
+    }
+    return out
+  }, [handles])
   const [reading, setReading] = useState<string | null>(null)
   /**
    * Which half of the record reading is running.
@@ -257,6 +286,23 @@ export function Dashboard({
    * across two people plus a structuring call.
    */
   const [versus, setVersus] = useState<RivalRef | null>(null)
+
+  /**
+   * Stored full readings, for the dates a scrape did not carry. The compare
+   * board windows on post dates, and half the Instagram posts on this desk
+   * carry none in the scrape while their reading does.
+   */
+  const [reports, setReports] = useState<Map<string, Report> | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadPostReports().then(
+      (map) => alive && setReports(map),
+      () => alive && setReports(new Map()),
+    )
+    return () => {
+      alive = false
+    }
+  }, [])
   // The head to head takes the whole window, so back closes it rather than
   // leaving the comparison screen.
   useBackToDismiss(versus !== null, useCallback(() => setVersus(null), []))
@@ -277,49 +323,76 @@ export function Dashboard({
 
   useEffect(() => setHandles(listHandles()), [])
 
-  /** Read one or more handles and store a snapshot of each. */
+  /**
+   * Read one or more handles and store a snapshot of each.
+   *
+   * IN BATCHES OF SIX, because that is what `/api/handle` accepts. "Refresh
+   * all" handed it the whole desk, so a desk tracking seven accounts got a 400
+   * carrying `{ error }` and no `handles` array — the loop below then ran zero
+   * times, every card kept its old reading, and nothing on screen said why.
+   * The size of the desk silently decided whether the button worked.
+   */
   const refresh = useCallback(async (targets: TrackedHandle[]) => {
     if (!targets.length) return
     setBusy(targets.length === 1 ? targets[0]!.id : 'all')
     setError(null)
     try {
-      const qs = targets.map((h) => `q=${encodeURIComponent(h.profileUrl || h.handle)}`).join('&')
-      const res = await fetch(`/api/handle?${qs}`)
-      const json = (await res.json()) as { handles?: unknown[] }
       let next = listHandles()
-      for (const [i, raw] of (json.handles ?? []).entries()) {
-        const s = raw as {
-          platform?: Platform
-          handle?: string
-          displayName?: string | null
-          avatarUrl?: string | null
-          followers?: number | null
-          posts?: TrackedHandle['snapshots'][number]['posts']
-          listing?: { note?: string }
-          error?: string
-        }
-        const target = targets[i]
-        if (!target) continue
-        if (s.error) {
-          setError(s.error)
+      for (let from = 0; from < targets.length; from += READ_BATCH) {
+        const batch = targets.slice(from, from + READ_BATCH)
+        const qs = batch.map((h) => `q=${encodeURIComponent(h.profileUrl || h.handle)}`).join('&')
+        const res = await fetch(`/api/handle?${qs}`)
+        const json = (await res.json()) as { handles?: unknown[]; error?: string }
+        // A whole-request refusal, which is not the same as one account that
+        // could not be read. It was going unreported entirely.
+        if (json.error) {
+          setError(json.error)
           continue
         }
-        const existing = next.find((h) => h.id === target.id)
-        if (existing) {
-          // The server knows the real handle; the client only had whatever was
-          // pasted, which for a URL meant the card read "@https://www.youtu…".
-          if (s.handle) existing.handle = s.handle
-          if (s.platform) existing.platform = s.platform
-          existing.displayName = s.displayName ?? existing.displayName
-          existing.avatarUrl = s.avatarUrl ?? existing.avatarUrl
-          existing.listingNote = s.listing?.note ?? existing.listingNote
-          next = saveHandle(existing)
+        for (const [i, raw] of (json.handles ?? []).entries()) {
+          const s = raw as {
+            platform?: Platform
+            handle?: string
+            displayName?: string | null
+            avatarUrl?: string | null
+            followers?: number | null
+            posts?: TrackedHandle['snapshots'][number]['posts']
+            listing?: { note?: string }
+            error?: string
+          }
+          const target = batch[i]
+          if (!target) continue
+          /**
+           * A read that failed stores NOTHING.
+           *
+           * Not a snapshot of nulls — that is a claim that this account was
+           * read and found empty, and the card says "Not read yet" over it for
+           * ever because nothing retries a finished read. Leaving the handle
+           * with no snapshot keeps it honestly unread, and the message says
+           * what went wrong so the next press of Refresh is an informed one.
+           */
+          if (s.error) {
+            setError(s.error)
+            continue
+          }
+          const existing = next.find((h) => h.id === target.id)
+          if (existing) {
+            // The server knows the real handle; the client only had whatever
+            // was pasted, which for a URL meant the card read
+            // "@https://www.youtu…".
+            if (s.handle) existing.handle = s.handle
+            if (s.platform) existing.platform = s.platform
+            existing.displayName = s.displayName ?? existing.displayName
+            existing.avatarUrl = s.avatarUrl ?? existing.avatarUrl
+            existing.listingNote = s.listing?.note ?? existing.listingNote
+            next = saveHandle(existing)
+          }
+          next = addSnapshot(target.id, {
+            takenAt: new Date().toISOString(),
+            followers: s.followers ?? null,
+            posts: s.posts ?? [],
+          })
         }
-        next = addSnapshot(target.id, {
-          takenAt: new Date().toISOString(),
-          followers: s.followers ?? null,
-          posts: s.posts ?? [],
-        })
       }
       setHandles(next)
     } catch {
@@ -515,8 +588,16 @@ export function Dashboard({
     [input, platform, refresh],
   )
 
-  /** The account we discover rivals for: the first one marked as yours. */
-  const primary = useMemo(() => handles.find((h) => h.own) ?? handles[0], [handles])
+  /**
+   * The account we discover rivals for: the first one marked as yours.
+   *
+   * No `?? handles[0]` fallback. It meant a desk that had marked nothing as
+   * its own discovered rivals for whatever account happened to be first in the
+   * list — some other politician entirely — and cached the result under that
+   * account's id. Rivals "for you" that are somebody else's rivals is the same
+   * class of wrong as totalling their followers as yours.
+   */
+  const primary = useMemo(() => handles.find((h) => h.own), [handles])
 
   useEffect(() => {
     if (primary) setRivals(readRivals(primary.id))
@@ -1219,7 +1300,19 @@ export function Dashboard({
           are should meet their own accounts before they meet an empty field. */}
       {mode === 'accounts' && store.identity && (
         <m.div variants={fadeUp}>
-          <SuggestedAccounts identity={store.identity} onAdded={setHandles} />
+          {/* `onAdded` hands back what it just created, and those get read
+              immediately — every other add path on this screen already does
+              (`refresh([created])` below). This one did not, so the accounts a
+              desk adds on its very first visit, from the suggestions for the
+              person it just named, were saved with no snapshot and never
+              fetched. That is the "NA / Not read yet" a fresh desk opens on. */}
+          <SuggestedAccounts
+            identity={store.identity}
+            onAdded={(all, created) => {
+              setHandles(all)
+              if (created.length) void refresh(created)
+            }}
+          />
         </m.div>
       )}
 
@@ -1368,20 +1461,33 @@ export function Dashboard({
           number. */}
       {mode === 'compare' && !versus && handles.length > 0 && (
         <m.section variants={fadeUp}>
-          <SectionTitle>
-            Side by side
-          </SectionTitle>
-          <CompareTable
+          <CompareBoard
             handles={handles}
             identity={identity}
             standings={standings}
-            readingId={reading}
-            readingPhase={readingPhase}
-            onReadOpinion={(h) => void readOpinion(h)}
-            onCompareRecord={identity ? (ref) => setVersus(ref) : undefined}
-            onTracked={(next, created) => {
+            notes={standingNotes}
+            reports={reports}
+            onAddCompetitor={() => setShowRivals(true)}
+            onOpenPost={(url) => {
+              // A post read once is read forever: the stored reading opens
+              // with no model call, and only an unread post starts one.
+              const stored = reports?.get(url)
+              if (stored && onOpenReport) onOpenReport(stored)
+              else onRead?.(url)
+            }}
+            onUntrack={(person, theirs) => {
+              if (
+                !window.confirm(
+                  `Stop tracking ${person.name}? Their ${theirs.length} ${
+                    theirs.length === 1 ? 'account' : 'accounts'
+                  } and every reading taken of them are removed from this desk.`,
+                )
+              ) {
+                return
+              }
+              let next = handles
+              for (const h of theirs) next = removeHandle(h.id)
               setHandles(next)
-              void refresh([created])
             }}
           />
         </m.section>
@@ -1476,7 +1582,7 @@ export function Dashboard({
                                 <span className="tnum text-xs text-ink-3">
                                   {r.followers != null
                                     ? `${r.followers.toLocaleString('en-IN')} followers`
-                                    : '—'}
+                                    : 'NA'}
                                 </span>
                               </div>
                               <p className="mt-1 text-xs text-ink-2">{r.why}</p>
@@ -1605,7 +1711,7 @@ export function Dashboard({
                                   leads ? 'font-bold text-[var(--accent)]' : 'font-medium text-ink',
                                 )}
                               >
-                                {v == null ? '—' : measure.fmt(v)}
+                                {v == null ? 'NA' : measure.fmt(v)}
                               </span>
                             </div>
                             <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-3)]">
@@ -1827,7 +1933,7 @@ export function Dashboard({
                       <Tile label="Per post" value={fmt(s.avgEngagement)} />
                       <Tile
                         label="Engagement"
-                        value={s.engagementRate != null ? `${s.engagementRate.toFixed(2)}%` : '—'}
+                        value={s.engagementRate != null ? `${s.engagementRate.toFixed(2)}%` : 'NA'}
                       />
                     </div>
 

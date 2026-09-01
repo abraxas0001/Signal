@@ -160,13 +160,41 @@ function notifyRefresh(): void {
 /* ── the session ─────────────────────────────────────────────────────────── */
 
 export async function deskSignIn(deskId: string, passphrase: string): Promise<void> {
-  const res = await fetch('/api/desk-auth', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'signin', deskId, passphrase }),
-    signal: AbortSignal.timeout(20_000),
-  })
-  const body = (await res.json()) as { token?: string; name?: string; expiresAt?: number; error?: string }
+  /**
+   * The transport's own failures, said in words.
+   *
+   * `AbortSignal.timeout` rejects with a DOMException whose message is the
+   * literal string "signal timed out", and an unreachable host rejects with
+   * "Failed to fetch". Both are Errors, so both sailed straight past the
+   * caller's fallback message and onto the login card — where "signal timed
+   * out" reads like this product's own name announcing a fault, to a member
+   * whose only actual problem is a train tunnel.
+   */
+  let res: Response
+  try {
+    res = await fetch('/api/desk-auth', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'signin', deskId, passphrase }),
+      signal: AbortSignal.timeout(20_000),
+    })
+  } catch (err) {
+    throw new Error(
+      err instanceof DOMException && err.name === 'TimeoutError'
+        ? 'The office server did not answer in time. Check the connection and try again.'
+        : 'Could not reach the office server. Check the connection and try again.',
+    )
+  }
+
+  let body: { token?: string; name?: string; expiresAt?: number; error?: string }
+  try {
+    body = (await res.json()) as typeof body
+  } catch {
+    // A desk id typed onto a deploy with no desk sync answers with the SPA's
+    // own index.html, not JSON. Parsing that must not throw a syntax error at
+    // somebody who simply mistyped their name.
+    throw new Error('The office server answered with something Signal could not read.')
+  }
   if (!res.ok || !body.token) {
     throw new Error(body.error ?? 'That desk id and passphrase do not open anything.')
   }

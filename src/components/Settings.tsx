@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import * as m from 'motion/react-m'
+import { AccountSection } from '@/components/settings/Account'
 import { useReducedMotion } from 'motion/react'
 import { ChevronRight, Search } from 'lucide-react'
 import { Avatar, Button, Card, Chip, PageHeader } from './ui'
@@ -37,6 +38,13 @@ import { currentNavState } from '@/lib/nav-history'
  * well would be a second door beside an open one.
  */
 const TOOLS: { id: Tab; blurb: string }[] = [
+  { id: 'studio', blurb: 'Make a poster or a post to publish under your own name.' },
+  // `weekly` was filed as UNLISTED on the strength of a comment saying the
+  // dashboard's week card opens it. No card does, and nothing else did either,
+  // so the screen rendered correctly and was reachable from nowhere. On a
+  // phone this list is the only route to any of these, so it is the list that
+  // has to carry it.
+  { id: 'weekly', blurb: 'How your week reads against the accounts you track.' },
   { id: 'accounts', blurb: 'Every handle the desk follows and how its posts are doing.' },
   { id: 'actions', blurb: 'Work the desk has raised and what is still open.' },
   { id: 'history', blurb: 'Every report this device has run, ready to reopen.' },
@@ -259,6 +267,27 @@ export function Settings({
             </Button>
           </Card>
         )}
+      </m.section>
+
+      {/* ── Your account ──────────────────────────────────────────────────
+          Last, and its own section. Changing a password is a rare, deliberate
+          act; putting it above the desk's tools would greet every visit with
+          a security form. It was behind a padlock icon in the header, which is
+          where nobody looks for it — Settings is where a person goes when they
+          think "I want to change my password". Renders nothing on a
+          handed-over desk, whose password belongs to the office that issued
+          it. */}
+      <m.section variants={fadeUp} aria-labelledby="account-heading">
+        <div className="mb-3">
+          <h2 id="account-heading" className="text-lg font-semibold tracking-[-0.011em]">
+            Your account
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-ink-2">
+            The password that encrypts this desk&rsquo;s records on this device, and the backup that
+            is their only other copy.
+          </p>
+        </div>
+        <AccountSection />
       </m.section>
     </m.div>
   )

@@ -253,7 +253,15 @@ export function ReportView({
 
       {/* ── Sentiment ───────────────────────────────────────────────────── */}
       <m.section variants={fadeUp}>
-        <SectionTitle>Sentiment</SectionTitle>
+        <SectionTitle
+          hint={
+            (report.snapshot.comments?.length ?? 0) > 0
+              ? `From ${report.snapshot.comments!.length} comments on this post`
+              : 'From the post itself'
+          }
+        >
+          Sentiment
+        </SectionTitle>
         <Card>
           <SentimentMeter sentiment={analysis.sentiment} />
 
@@ -269,7 +277,15 @@ export function ReportView({
       {/* ── Emotions ────────────────────────────────────────────────────── */}
       {analysis.emotions.length > 0 && (
         <m.section variants={fadeUp} className="defer-paint">
-          <SectionTitle>Emotion</SectionTitle>
+          <SectionTitle
+            hint={
+              (report.snapshot.comments?.length ?? 0) > 0
+                ? 'What the audience feels, from the comments'
+                : 'The register of the post itself'
+            }
+          >
+            Emotion
+          </SectionTitle>
           <Card>
             <EmotionBars emotions={analysis.emotions} />
           </Card>

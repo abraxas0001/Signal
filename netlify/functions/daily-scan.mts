@@ -292,6 +292,7 @@ async function scanDesk(
       state: desk.state,
       party: desk.party,
       aliases: desk.aliases,
+      places: desk.places,
     },
     { deadline: opts.deadline - JUDGE_RESERVE_MS },
   )

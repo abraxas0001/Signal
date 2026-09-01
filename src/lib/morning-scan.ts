@@ -4,6 +4,15 @@ import { planDesk, applyDeskPlan, planTerms } from '@/lib/autoconfig'
 import { resolvePlace } from '@shared/places'
 import { pruneMentions } from '@shared/grievance'
 import { fetchWithTimeout } from '@/lib/net'
+import { pluralise } from '@/lib/utils'
+import {
+  asVerdict,
+  readVerdicts,
+  saveVerdicts,
+  verdictFor,
+  worthShowing,
+  type Verdict,
+} from '@/lib/news-relevance'
 
 /**
  * The scan that runs without being asked.
@@ -249,7 +258,43 @@ export interface ScanState {
 }
 
 interface FindResponse {
-  candidates?: { url?: unknown; title?: unknown; portal?: unknown }[]
+  candidates?: {
+    url?: unknown
+    title?: unknown
+    portal?: unknown
+    /**
+     * What a judge made of this story, when anything judged it.
+     *
+     * Absent from every reply this endpoint sends today, and read anyway,
+     * because not reading it is the defect this block answers. The morning
+     * scan is the second and unattended way into the desk, and while it threw
+     * these fields away every story arriving at 07:30 was recorded as
+     * unjudged for ever: no verdict was written down for it, so nothing could
+     * judge it after the fact either.
+     */
+    verdict?: unknown
+    confidence?: unknown
+    why?: unknown
+    /**
+     * The desk's words this story carried, when the endpoint says which.
+     *
+     * Absent here, and on THIS path its absence means matched rather than
+     * harvested: findPersonaMentions returns only stories whose headline or
+     * address carried a watch tag and re-checks each against the name pattern
+     * before handing it back. Reading an absent list as a harvest, which is
+     * the right reading on the /api/scan path, would mark every story here as
+     * swept up and unchecked, and the filter below would empty the morning.
+     *
+     * An EMPTY list is read as a harvest, which is the opposite reading and is
+     * deliberate. Nothing sends one today; the only way this endpoint could is
+     * by learning to harvest wide the way /api/scan already does, and at that
+     * point an empty list honestly means the story carried none of the desk's
+     * words. If an empty list ever arrives on a story that was in fact
+     * name-matched, every unjudged story is hidden and the morning empties, so
+     * this is the line to read first when that is the symptom.
+     */
+    matched?: unknown
+  }[]
   sources?: { portal?: unknown; url?: unknown; found?: unknown; error?: unknown }[]
   notes?: unknown[]
   error?: string
@@ -368,6 +413,32 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
 
       void (async () => {
         const collected: { url: string; title: string; portal: string }[] = []
+        /**
+         * What the judge said, kept beside the stories rather than inside them.
+         *
+         * The store holds the three fields it has always held. A verdict lives
+         * in the relevance cache, which is the one place every screen reads it
+         * from, so putting it anywhere else would create a second answer.
+         */
+        const verdicts: Verdict[] = []
+        /**
+         * Whether anything on this run was actually ruled on.
+         *
+         * Saving regardless would be worse than saving nothing. A row written
+         * as 'unjudged' overwrites a real verdict the manual scan recorded for
+         * the same story, and sixty of them a morning would push genuine
+         * verdicts out of a cache that holds four hundred. So the cache is
+         * written only when a reply carries a ruling, which is the same guard
+         * the /api/scan path applies.
+         *
+         * The guard is per REPLY and not per row, so a reply the judge only
+         * half finished still writes its unfinished rows as 'unjudged' over
+         * whatever had been recorded for those stories before. That gap is
+         * kept rather than closed here only because /api/scan has the same
+         * one: two paths writing this cache by two different rules is a worse
+         * failure than one gap both of them share.
+         */
+        let anyJudged = false
         const seen = new Set<string>()
         const readSources: ScanState['sources'] = []
         const said: string[] = []
@@ -436,6 +507,22 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
               if (!url || !title || seen.has(url)) continue
               seen.add(url)
               collected.push({ url, title, portal: text(raw.portal) ?? 'unknown' })
+
+              if (raw.verdict !== undefined) anyJudged = true
+              // `asVerdict` normalises the whole row and returns null for one
+              // it cannot trust, so a malformed entry is dropped rather than
+              // recorded as a decision nobody made.
+              const ruling = asVerdict({
+                url,
+                verdict: raw.verdict ?? 'unjudged',
+                confidence: raw.confidence ?? null,
+                why: raw.why ?? null,
+                via:
+                  Array.isArray(raw.matched) && raw.matched.length === 0
+                    ? 'harvested'
+                    : 'matched',
+              })
+              if (ruling) verdicts.push(ruling)
             }
 
             for (const s of payload?.sources ?? []) {
@@ -483,6 +570,40 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
             )
           }
 
+          /**
+           * Write down what the judge decided, before anything else reads it.
+           *
+           * This is the join the whole relevance feature hangs on, and the
+           * morning scan was not part of it: the /api/scan path saved its
+           * verdicts and this path saved none. A story that reached the desk
+           * at 07:30 therefore read as unchecked on every screen for ever,
+           * and could not be judged later either, because nothing had
+           * recorded what it was.
+           */
+          if (anyJudged && verdicts.length > 0) saveVerdicts(verdicts, person.name)
+
+          /*
+            And do not take in a story the judge ruled out.
+
+            `worthShowing` is the same predicate the screens filter on, so a
+            story can never be filed here under one rule and hidden under
+            another. The cache is consulted rather than this run's rulings
+            alone, so a verdict an earlier manual scan recorded still counts
+            for a story the papers are still carrying.
+
+            What was set aside is counted and said out loud. This scan runs
+            with nobody watching it, and one that quietly shrinks the
+            morning's list is one nobody can correct.
+          */
+          const cache = readVerdicts(person.name)
+          const keep = collected.filter((c) => worthShowing(verdictFor(c.url, cache)))
+          const setAside = collected.length - keep.length
+          if (setAside > 0) {
+            said.push(
+              `${setAside} ${pluralise(setAside, 'story', 'stories')} set aside as not this desk's business; ${keep.length} kept.`,
+            )
+          }
+
           setSources(readSources)
           setNotes(said)
 
@@ -491,7 +612,7 @@ export function useMorningScan(): ScanState & { run: (force?: boolean) => void }
             // office has already had analysed must not push it back into the
             // "unread" pile every morning.
             const read = new Set(prev.personaMentions.map((m) => m.url))
-            const fresh = collected.filter((c) => !read.has(c.url))
+            const fresh = keep.filter((c) => !read.has(c.url))
             // A catch-up keeps what earlier mornings found underneath what this
             // one found; an ordinary morning replaces, so a desk opened daily
             // does not accumulate a fortnight of unread headlines.

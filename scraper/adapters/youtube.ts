@@ -87,6 +87,74 @@ function normaliseHandle(handle: string): string {
   return (asUrl?.[1] ?? h).replace(/^@/, '').replace(/\/+$/, '')
 }
 
+/**
+ * Exact publish dates for a channel's videos, from YouTube's own statements.
+ *
+ * Two sources, cheapest first. The channel's Atom feed carries an exact
+ * `<published>` for its newest videos in ONE request; each watch page carries
+ * `<meta itemprop="datePublished">` for anything older. Both are dates the
+ * platform states, not a relative age converted into a guess — a post dated
+ * by arithmetic on "3 weeks ago" would land in the wrong week on every filter
+ * that reads it.
+ *
+ * Fetched inside the page context so the signed-in session's cookies come
+ * along; YouTube serves a consent wall to anonymous requests from some
+ * regions. Anything neither source dates stays null, which the app renders as
+ * "Date not published" rather than as a guess.
+ */
+async function datesFor(
+  page: AdapterContext['page'],
+  ids: string[],
+  log: AdapterContext['log'],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (ids.length === 0) return out
+
+  // 1. The channel feed: one request, the newest ~15 videos, exact.
+  try {
+    const channelId = await page.evaluate(() => {
+      const m = document.documentElement.innerHTML.match(/"externalId":"(UC[\w-]{20,})"/)
+      return m?.[1] ?? null
+    })
+    if (channelId) {
+      const xml = await page.evaluate(async (cid: string) => {
+        const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${cid}`)
+        return res.ok ? await res.text() : ''
+      }, channelId)
+      const entries = xml.split('<entry>').slice(1)
+      for (const entry of entries) {
+        const id = entry.match(/<yt:videoId>([\w-]+)<\/yt:videoId>/)?.[1]
+        const at = entry.match(/<published>([^<]+)<\/published>/)?.[1]
+        if (id && at) out.set(id, new Date(at).toISOString())
+      }
+    }
+  } catch (err) {
+    log(`YouTube: channel feed unavailable — ${(err as Error).message.split('\n')[0]}`)
+  }
+
+  // 2. The watch page, for whatever the feed did not cover.
+  const missing = ids.filter((id) => !out.has(id))
+  for (const id of missing) {
+    try {
+      const at = await page.evaluate(async (vid: string) => {
+        const res = await fetch(`https://www.youtube.com/watch?v=${vid}`)
+        if (!res.ok) return null
+        const html = await res.text()
+        return (
+          html.match(/itemprop="datePublished"\s+content="([^"]+)"/)?.[1] ??
+          html.match(/"datePublished":"([^"]+)"/)?.[1] ??
+          null
+        )
+      }, id)
+      if (at) out.set(id, new Date(at).toISOString())
+    } catch {
+      /* one undated video is a gap, not a failed read */
+    }
+  }
+
+  return out
+}
+
 export const youtube: PlatformAdapter = {
   platform: 'YouTube',
 
@@ -171,9 +239,10 @@ export const youtube: PlatformAdapter = {
           url,
           id,
           title: r.title?.slice(0, 140) ?? null,
-          // The listing gives "1 hour ago", not a date. Converting a relative
-          // age into an ISO timestamp would invent a precision the page never
-          // offered, so this stays null and the app's own reader supplies it.
+          // Filled in below from YouTube's own exact timestamps. The listing
+          // itself only offers "1 hour ago", and converting a relative age
+          // would invent precision — so the date comes from the channel feed
+          // and the watch pages, both of which state it outright.
           publishedAt: null,
           likes: null,
           comments: null,
@@ -191,6 +260,19 @@ export const youtube: PlatformAdapter = {
       const grew = await autoScroll(page, { rounds: 1, pauseMs: 2_000 })
       if (grew === 0 && round > 2) break
     }
+
+    /* The dates, from YouTube's own statements, before anything is returned. */
+    const items = [...found.values()]
+    const dates = await datesFor(page, items.map((i) => i.id).filter((i): i is string => Boolean(i)), log)
+    let dated = 0
+    for (const item of items) {
+      const at = item.id ? dates.get(item.id) : undefined
+      if (at) {
+        item.publishedAt = at
+        dated++
+      }
+    }
+    log(`YouTube: dated ${dated} of ${items.length} videos`)
 
     if (found.size === 0) {
       return {

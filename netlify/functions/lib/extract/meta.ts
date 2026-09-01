@@ -2,7 +2,7 @@ import type { Comment, MediaItem, Metric, PostSnapshot } from '../../../../share
 import type { UrlIdentity } from '../platform'
 import { fetchText, fetchJson, ALLOW_CRAWLER_UA } from '../fetcher'
 import { parseMetadata, parseCount } from '../metadata'
-import { readJsonStringField, decodeEntities } from './json-scan'
+import { readJsonStringField, decodeEntities, extractBalanced } from './json-scan'
 import type { ExtractContext, ExtractResult } from './types'
 
 /**
@@ -842,6 +842,89 @@ function readEmbedUsername(html: string): string | null {
 // Instagram
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface InstagramComments {
+  edges?: Array<{
+    node?: {
+      text?: string
+      created_at?: number
+      comment_like_count?: number
+      parent_comment_id?: string | null
+      user?: { username?: string }
+    }
+  }>
+  page_info?: { has_next_page?: boolean }
+}
+
+/**
+ * Comment bodies, out of the post page this adapter has already downloaded.
+ *
+ * The reason Instagram published no audience anywhere in this product was not
+ * that Instagram withholds one. The `instagram:og-page` fetch below pulls
+ * ~880KB, and the previous code read a publish date and a thumbnail out of it
+ * and dropped the rest on the floor — while a `comments_connection` sat in the
+ * same string, in plain JSON, holding the comments and their authors. Every
+ * Instagram post therefore reported that no public comments were retrievable
+ * for it, from a response that contained them.
+ *
+ * The crawler identity is what unlocks the page, so this inherits the adapter's
+ * existing posture rather than adding to it. Measured on five posts, twice
+ * each, through this codebase's own fetcher:
+ *
+ *   facebookexternalhit -> ~880KB, 9 / 7 / 2 / 6 / 7 comments   ★ what we send
+ *   Googlebot           -> ~880KB, the same counts
+ *   a browser UA        -> ~607KB login wall, zero comments
+ *
+ * YIELD IS A SAMPLE on anything popular. Instagram serves the first page of
+ * the connection and no more: 14 comments of 2,016 on one post, 15 of 201 on
+ * another, and 12 of 15 and 9 of 10 on quiet ones. `has_next_page` is returned
+ * so the caller can say which of those it is rather than implying the slice is
+ * the whole. Paging is not possible from here: `end_cursor` is present, but
+ * spending it needs a persisted query id that appears nowhere in the payload,
+ * and guessing one would dress an invention up as a measurement.
+ */
+function readInstagramComments(
+  html: string,
+  limit = 100,
+): { comments: Comment[]; hasMore: boolean } {
+  const raw = extractBalanced(html, '"comments_connection"')
+  if (!raw) return { comments: [], hasMore: false }
+
+  let connection: InstagramComments
+  try {
+    connection = JSON.parse(raw) as InstagramComments
+  } catch {
+    // The connection is Instagram's to reshape, and a post whose counts and
+    // caption were read successfully must not be lost to a comment parse.
+    return { comments: [], hasMore: false }
+  }
+
+  const comments: Comment[] = []
+  for (const edge of connection.edges ?? []) {
+    if (comments.length >= limit) break
+    const node = edge?.node
+    // Instagram serves the occasional node with an empty body — a comment that
+    // was deleted or hidden. It is a real node, so it is not a parse failure,
+    // but it is not something anyone said either.
+    if (!node || typeof node.text !== 'string' || !node.text.trim()) continue
+
+    // A zero here is Instagram reporting no likes; a missing field is Instagram
+    // not saying. The interface distinguishes them and so must this.
+    const likes = typeof node.comment_like_count === 'number' ? node.comment_like_count : null
+    const at = node.created_at
+    const seconds = typeof at === 'number' && at > 0 && at < 4e9 ? at : null
+
+    comments.push({
+      text: node.text,
+      author: node.user?.username ?? null,
+      likes,
+      publishedAt: seconds == null ? null : new Date(seconds * 1000).toISOString(),
+      isReply: node.parent_comment_id != null,
+    })
+  }
+
+  return { comments, hasMore: connection.page_info?.has_next_page === true }
+}
+
 async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<ExtractResult> {
   const attempts: ExtractResult['attempts'] = []
   const shortcode = id.id
@@ -920,6 +1003,8 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
 
   let publishedAt: string | null = null
   let image: string | null = null
+  let commentBodies: Comment[] = []
+  let moreComments = false
 
   if (page.ok && page.body) {
     const meta = parseMetadata(page.body, page.url)
@@ -935,12 +1020,36 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
     if (comments == null) comments = parseCount(/([\d.,KM]+)\s+comments/i.exec(desc)?.[1] ?? null)
     if (!username) username = /- ([\w.]+) on/.exec(desc)?.[1] ?? null
     if (!caption) caption = /:\s*"([\s\S]+)"/.exec(desc)?.[1] ?? meta.description
+
+    const read = readInstagramComments(page.body)
+    commentBodies = read.comments
+    moreComments = read.hasMore
   }
 
   attempts.push({
     strategy: 'instagram:og-page',
     ok: Boolean(publishedAt || image),
     note: publishedAt ? 'publish date + image' : `HTTP ${page.status}`,
+  })
+
+  // Reported separately from the page fetch that carried them, because "we read
+  // the post" and "we read what the public said about it" are different claims
+  // and the second is the one the sentiment now rests on.
+  //
+  // The empty case is split in two on purpose. "Instagram served no comment
+  // bodies" is a statement about what Instagram published, and it is only true
+  // when a page actually came back: saying it after a 404 or a rate-limited 429
+  // would report a fetch we never got as a platform that publishes nothing.
+  attempts.push({
+    strategy: 'instagram:comments',
+    ok: commentBodies.length > 0,
+    note: commentBodies.length
+      ? `${commentBodies.length} comment ${commentBodies.length === 1 ? 'body' : 'bodies'}${
+          comments != null ? ` of ${comments}` : ''
+        }${moreComments ? ', the rest need a login' : ''}`
+      : page.ok && page.body
+        ? 'Instagram served no comment bodies on this post'
+        : `HTTP ${page.status}, no page to read comments from`,
   })
 
   // 3. Profile API — the only source of followers, verified, and video views.
@@ -981,6 +1090,7 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
     confidence: likes != null ? 'high' : 'medium',
     snapshot: {
       platform: 'Instagram',
+      ...(commentBodies.length ? { comments: commentBodies } : {}),
       postType: id.postType,
       publishedAt,
       author: {

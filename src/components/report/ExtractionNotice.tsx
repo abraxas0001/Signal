@@ -74,9 +74,17 @@ export function ExtractionNotice({
           <p className="text-sm font-medium">
             {headline(missing, userEntered, textIsUsers)}
           </p>
-          {explanation(snapshot, missing, userEntered) && (
+          {/* The per-platform paragraph that used to sit here explained what
+              each company does and does not publish. The headline above
+              already names what is missing, which is the part an office acts
+              on; the rest was a lecture on somebody else's product. Only the
+              provenance line survives, because "these figures are yours, not
+              the platform's" is a fact about the data rather than an excuse
+              for it. */}
+          {userEntered.length > 0 && (
             <p className="mt-0.5 text-xs leading-relaxed text-ink-3">
-              {explanation(snapshot, missing, userEntered)}
+              {listOut(userEntered)} {userEntered.length === 1 ? 'is' : 'are'} the figure
+              {userEntered.length === 1 ? '' : 's'} you supplied, not the platform&rsquo;s.
             </p>
           )}
 
@@ -109,67 +117,6 @@ function headline(missing: string[], userEntered: string[], textIsUsers: boolean
   if (missing.length === 0) return 'Read the post in full'
   if (missing.length >= 4) return 'Read the post, but no engagement numbers'
   return `Read the post, but not ${listOut(missing)}`
-}
-
-/**
- * Platform-specific truth. Generic "some data unavailable" copy is what makes
- * a tool feel unfinished; naming the actual constraint makes it feel informed.
- *
- * User-entered figures are called out first and never described as coming from
- * the platform — conflating the two would quietly undo the provenance marks on
- * every tile.
- */
-function explanation(snapshot: PostSnapshot, missing: string[], userEntered: string[]): string {
-  const p = snapshot.platform
-
-  if (userEntered.length) {
-    const yours = `The ${listOut(userEntered)} ${userEntered.length === 1 ? 'figure is' : 'figures are'} the ${userEntered.length === 1 ? 'one' : 'ones'} you entered, not measured by us.`
-    return missing.length
-      ? `${yours} ${p} still withheld the rest.`
-      : `${yours} Everything else came from ${p}.`
-  }
-
-  if (missing.length === 0) {
-    return ''
-  }
-
-  switch (p) {
-    case 'Facebook':
-      return missing.length >= 4
-        ? 'Facebook served us its logged-out page, which carries no engagement bar. The post text and author came through fine.'
-        : missing.includes('shares')
-          ? 'Facebook publishes no share count on reels, not to us and not in its own interface.'
-          : 'Facebook reports reactions rather than likes, and only video posts carry a view count. Text posts have none to give.'
-    case 'Instagram':
-      return 'Instagram publishes likes and comments on public posts but not shares or views. Follower counts are available for most accounts, not all.'
-    case 'YouTube':
-      return 'YouTube does not publish share counts for any video.'
-    case 'Twitter/X':
-      return 'X only reports view counts on posts from 2023 onward. Older posts genuinely have no view figure to show.'
-    case 'TikTok':
-      return 'TikTok rounds every count above ten thousand before publishing it, so large figures here are the platform’s own approximations. It reports no share-of-voice or reach beyond the play count.'
-    case 'Threads':
-      return 'Threads shows impression counts to nobody, including the author, so there is no view figure to withhold.'
-    case 'Reddit':
-      return 'Reddit publishes a post’s score and comment count to embeds, but the body text, subscriber counts and view counts need a logged-in read. The score is upvotes minus downvotes, not a like count.'
-    case 'Pinterest':
-      return 'Pinterest counts saves and repins rather than likes. Reactions are a newer, far less-used control, so a small number beside a large save count is real. It publishes no view count.'
-    case 'Snapchat':
-      return 'Snapchat Spotlight reports views and comments but no likes, and its share count is not populated for organic snaps.'
-    case 'Telegram':
-      return 'Telegram channels report view counts but no reactions or comments.'
-    case 'LinkedIn':
-      return 'LinkedIn publishes reactions and comments on public posts, but not shares or views.'
-    case 'Bluesky':
-      return 'Bluesky has no view counter at all: not for us, and not for the account owner either.'
-    case 'Mastodon':
-      return 'Mastodon deliberately does not count impressions; no instance has that number.'
-    case 'News Site':
-    case 'Blog':
-      return 'Articles do not carry social engagement numbers. This is the published piece itself.'
-    default:
-      return 'This platform does not publish those numbers to anyone but the account owner.'
-  }
 }
 
 function listOut(items: string[]): string {

@@ -384,19 +384,83 @@ export function resolvePlace(input: {
   }
 }
 
-/** Every spelling of a place worth searching a headline for. */
-export function placeVariants(match: PlaceMatch | null, given?: string | null): string[] {
+/**
+ * The place words worth searching a headline for, split by what each one is
+ * worth on its own.
+ *
+ * `all` is every spelling, and it is exactly the list this file has always
+ * produced. `corroborating` names the subset that must never be enough by
+ * itself, and it exists because of a measured failure: splitting "Jogulamba
+ * Gadwal" into its tokens minted "Jogulamba" and "Gadwal" as independent watch
+ * terms, and a term of "Gadwal" then matched a district sports meet, so the
+ * desk opened its morning on volleyball.
+ *
+ * The tokens are demoted rather than deleted. No masthead writes "Jogulamba
+ * Gadwal", so deleting the token would cost the desk every genuine story about
+ * its own district, and that is the more expensive of the two mistakes.
+ * Demoted, the token still finds the story whenever a second word lands with
+ * it, which is how the party name has been handled since a national wire
+ * arrived on a Mahabubnagar desk: see `worthKeeping` in
+ * netlify/functions/lib/scan.ts.
+ *
+ * Only a token this function invented is demoted. A word somebody wrote whole,
+ * or the registry's own spelling, is a place name and not a fragment of one: a
+ * desk that gave its district as "Gadwal" is watching its own subject, and
+ * demoting that would take the desk's patch away from it.
+ */
+export interface PlaceTerms {
+  /** Every spelling, in the order a search should try them. */
+  all: string[]
+  /** Those of `all` that need another word beside them to mean anything. */
+  corroborating: string[]
+}
+
+export function placeTermsFor(match: PlaceMatch | null, given?: string | null): PlaceTerms {
   const out = new Set<string>()
+  const invented = new Set<string>()
+
+  // Compared folded rather than literally, because the whole subject of this
+  // file is that "Mahaboobnagar" and "Mahabubnagar" are one word written twice,
+  // and a fragment that merely re-spells what somebody wrote is still theirs.
+  const whole = new Set<string>()
+  const keepWhole = (value: string | null | undefined): void => {
+    const folded = value ? foldPlace(value) : ''
+    if (folded) whole.add(folded)
+  }
+
   if (match) {
     out.add(match.canonical)
-    if (match.given && match.given !== '(derived)') out.add(match.given)
+    keepWhole(match.canonical)
+    if (match.given && match.given !== '(derived)') {
+      out.add(match.given)
+      keepWhole(match.given)
+    }
+  }
+  // Recorded before the split below rather than with the other `out.add` calls,
+  // so a token that repeats what the office actually typed is recognised as
+  // their word instead of as our fragment of a longer one.
+  keepWhole(given)
+
+  if (match) {
     // "Jogulamba Gadwal" is never how a headline writes it; the distinctive
     // word is. Multi-word district names contribute their longest token.
     const parts = match.canonical.split(/\s+/).filter((p) => p.length > 4)
-    if (parts.length > 1) for (const part of parts) out.add(part)
+    if (parts.length > 1) {
+      for (const part of parts) {
+        out.add(part)
+        if (!whole.has(foldPlace(part))) invented.add(part)
+      }
+    }
   }
   if (given) out.add(given)
-  return [...out].filter((t) => t.trim().length > 2)
+
+  const all = [...out].filter((t) => t.trim().length > 2)
+  return { all, corroborating: all.filter((t) => invented.has(t)) }
+}
+
+/** Every spelling of a place worth searching a headline for. */
+export function placeVariants(match: PlaceMatch | null, given?: string | null): string[] {
+  return placeTermsFor(match, given).all
 }
 
 export { stateOfCity }

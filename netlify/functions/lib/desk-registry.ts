@@ -93,6 +93,8 @@ export interface DeskRecord {
   party: string | null
   /** Other spellings of the name, which is how Telugu mastheads are matched. */
   aliases: string[]
+  /** Towns, mandals and district spellings the seat is known by. */
+  places: string[]
   /** The words the scan searches headlines for. */
   watchTerms: string[]
   /** Masthead labels from shared/regions.ts PORTALS. */
@@ -122,6 +124,7 @@ export interface DeskUpsert {
   state?: string | null
   party?: string | null
   aliases?: string[]
+  places?: string[]
   watchTerms?: string[]
   portals?: string[]
   customPortalUrls?: string[]
@@ -239,6 +242,7 @@ function toRecord(deskId: string, data: Record<string, unknown> | undefined): De
     state: text(data['state'], 80),
     party: text(data['party'], 120),
     aliases: strings(data['aliases'], 20, 60),
+    places: strings(data['places'], 40, 60),
     watchTerms: strings(data['watchTerms'], 40, 60),
     portals: strings(data['portals'], 24, 80),
     customPortalUrls: strings(data['customPortalUrls'], 24, 300),
@@ -337,6 +341,7 @@ export async function upsertDesk(input: DeskUpsert): Promise<RegistryResult<Desk
       state: text(input.state, 80),
       party: text(input.party, 120),
       aliases: strings(input.aliases, 20, 60),
+      places: strings(input.places, 40, 60),
       watchTerms,
       portals,
       customPortalUrls,

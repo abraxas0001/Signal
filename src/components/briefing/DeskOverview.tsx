@@ -271,9 +271,15 @@ export function DeskOverview({
    * The headline figures describe THIS desk, not everything it can see.
    * `own` is the desk; anything else is being watched, and watched accounts
    * appear on the board below and on Compare, labelled as rivals rather than
-   * folded into a total. The fallback covers a desk that marked nothing.
+   * folded into a total.
+   *
+   * There is no "and if nothing is marked, total everything" fallback any
+   * more. It was here and in Briefing, and it is how a desk holding one
+   * 1.6-crore account belonging to another politician reported 1.6 crore as
+   * its own reach. A desk that marks nothing as its own has no own figures,
+   * and saying so is the only true answer.
    */
-  const counted = own.length > 0 ? own : handles
+  const counted = own
 
   // The seat, geocoded once. Null when it will not resolve — the map then
   // centres on India and says so rather than pinning a plausible dot. The
@@ -343,7 +349,7 @@ export function DeskOverview({
   })()
 
   // The home shows the office's OWN posts. Rivals are compared on Accounts.
-  const allPosts = collectDeskPosts(own.length > 0 ? own : handles)
+  const allPosts = collectDeskPosts(own)
   const zones = seat ? [{ lon: seat.lon, lat: seat.lat, radiusDeg: 1.3, label: `${seat.name}, ${seat.state}` }] : []
 
   /**

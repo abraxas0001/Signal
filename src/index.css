@@ -238,8 +238,16 @@
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   /* The bottom navigation's height, so anything else anchored to the bottom of
-     the viewport can clear it rather than be hidden behind it. */
-  --tabbar-h: calc(64px + var(--sab));
+     the viewport can clear it rather than be hidden behind it.
+
+     Measured, not assumed: the bar is no longer welded to the bottom edge. It
+     floats, and what it actually occupies is 12px of inset plus a 66px card
+     plus the raised centre button that stands proud of both. From the viewport
+     floor to the top of that circle is 99px. The old 64px described the welded
+     bar this replaced, and the 35px difference is why the report's docked
+     action bar rendered underneath the tab bar with the raised Analyse circle
+     sitting on top of the primary button. */
+  --tabbar-h: calc(100px + var(--sab));
 
   color-scheme: light;
 }
@@ -612,6 +620,26 @@ p {
 
 .low-end .field {
   display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   The entrance's specimen card stands down on a short window.
+
+   The login screen is the one screen that has to be readable without
+   scrolling: a sign-in form below the fold is a sign-in form some people never
+   find. The pitch column beside it is written to a height budget, and the
+   report specimen is the one part of that column that is a bonus rather than
+   the point — so on anything shorter than a 15" laptop it goes, and the card
+   comes back above the fold.
+
+   A height query rather than a width one, because the thing being run out of
+   is height. A 1280x720 projector and a 1280x1024 monitor are the same width
+   and completely different problems.
+   --------------------------------------------------------------------------- */
+@media (max-height: 860px) {
+  .pitch-specimen {
+    display: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .field span {
@@ -1264,7 +1292,9 @@ select option,
 /* The bottom of every scrolling screen has to clear the mobile tab bar, and on
    desktop simply wants air under the last section. */
 .page-end {
-  padding-bottom: calc(6rem + var(--sab));
+  /* Has to clear --tabbar-h, which is 100px. 6rem was 96px and left the last
+     line of a long screen tucked behind the raised centre button. */
+  padding-bottom: calc(7rem + var(--sab));
 }
 @media (min-width: 1024px) {
   .page-end {
@@ -1467,6 +1497,25 @@ select option,
   }
   .text-sm {
     font-size: 15px;
+  }
+
+  /* THE FORM-CONTROL FLOOR, RESTATED SO IT WINS.
+     iOS Safari zooms the whole page when a focused field is under 16px, and it
+     does not zoom back out. The rule at the top of this file sets that floor on
+     `input, select, textarea`, but every control in this app also carries a
+     Tailwind size class, and a class beats an element selector: `.text-sm`
+     above was dragging nine controls on the grievance desk, the dashboard's
+     person picker, the compare board's field and the window pickers down to
+     15px, one pixel under the threshold. The attribute selector raises the
+     specificity just enough to win without an `!important` and without moving
+     the body scale. */
+  input[class],
+  select[class],
+  textarea[class],
+  input,
+  select,
+  textarea {
+    font-size: 16px;
   }
 
   /* The two label classes hardcode 11px and 10.5px, below the floor. Uppercase

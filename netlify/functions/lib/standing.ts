@@ -37,6 +37,8 @@ export interface Standing {
   neutral: number
   /** What people praise, in their words, summarised. */
   praise: string[]
+  /** Up to three verbatim examples of comments that took no side. */
+  neutralQuotes?: string[]
   /** What people complain about. The half an office actually needs. */
   criticism: string[]
   summary: string
@@ -76,6 +78,7 @@ const SCHEMA: Record<string, unknown> = {
     neutral: { type: 'number' },
     praise: { type: 'array', items: { type: 'string' } },
     criticism: { type: 'array', items: { type: 'string' } },
+    neutralQuotes: { type: 'array', items: { type: 'string' } },
     summary: { type: 'string' },
   },
 }
@@ -275,6 +278,7 @@ async function scoreComments(
     neutral: num(parsed['neutral']),
     praise: list(parsed['praise']),
     criticism: list(parsed['criticism']),
+    neutralQuotes: list(parsed['neutralQuotes']).slice(0, 3),
     summary: typeof parsed['summary'] === 'string' ? parsed['summary'] : '',
     commentsRead: comments.length,
     postsRead: about.postsTried,

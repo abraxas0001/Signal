@@ -46,6 +46,23 @@
   # was still writing.
   timeout = 30
 
+[functions."post-idea"]
+  # One model call over a single post's stored reading, answering what to post
+  # next and drafting the post in the same breath. The same shape and the same
+  # cost as "suggest-posts" above, so it gets the same window: on the platform's
+  # 10s default the highlights screen would blame the network for a model that
+  # was still writing.
+  timeout = 30
+
+[functions."post-copy"]
+  # One model call for the words on one poster: a headline, the line under it
+  # and the caption. The same shape and the same cost as the two blocks above,
+  # so it gets the same window. It is also the most visible place to be wrong
+  # about this: the studio shows a live preview, so a kill at the platform's 10s
+  # default would leave the office watching an empty poster and blaming the
+  # network for a model that was still writing.
+  timeout = 30
+
 [functions."scan"]
   # It had no block at all, so it ran on the platform's 10s default while
   # reading eight mastheads with a 9s fetch timeout each. That was already over

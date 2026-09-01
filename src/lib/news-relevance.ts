@@ -1,4 +1,5 @@
 import { scopedKey } from '@/lib/store'
+import { deskKey } from '@/lib/personas'
 
 /**
  * What the desk believes about whether a story is actually about this member.
@@ -37,7 +38,13 @@ import { scopedKey } from '@/lib/store'
  * treated a missing verdict as a failed check and dropped them. Naming the
  * state means there is one answer and it is written down here.
  */
-export type Relevance = 'about-person' | 'about-seat' | 'about-party' | 'unrelated' | 'unjudged'
+export type Relevance =
+  | 'about-person'
+  | 'about-seat'
+  | 'seat-routine'
+  | 'about-party'
+  | 'unrelated'
+  | 'unjudged'
 
 export type Confidence = 'high' | 'medium' | 'low'
 
@@ -48,11 +55,24 @@ export interface Verdict {
   confidence: Confidence | null
   /** The judge's reason, in its own words, so a filter can be argued with. */
   why: string | null
+  /**
+   * How the story reached the desk, which decides what `unjudged` is worth.
+   *
+   * `matched` means it carried a word this office watches. `harvested` means
+   * the scanner took the whole front page and this story matched nothing at
+   * all. The distinction is load-bearing: an unjudged MATCHED story still has
+   * word-match evidence behind it and is worth showing, and an unjudged
+   * HARVESTED story has no evidence of any kind. Absent on verdicts written
+   * before the field existed, and those are treated as matched, which is what
+   * the desk did with them at the time.
+   */
+  via?: 'matched' | 'harvested'
 }
 
 const RELEVANCES: readonly Relevance[] = [
   'about-person',
   'about-seat',
+  'seat-routine',
   'about-party',
   'unrelated',
   'unjudged',
@@ -65,17 +85,36 @@ const CONFIDENCES: readonly Confidence[] = ['high', 'medium', 'low']
 /**
  * The one predicate every screen filters on.
  *
+ * THE RULE THE OFFICE ASKED FOR, in their words: show news about the member,
+ * or about her electoral location where her involvement is required or could
+ * be important. Nothing else.
+ *
  * about-person  shows. This is the member, and it is the whole point.
- * about-seat    shows, labelled. Coverage of Mahabubnagar is the job of the
- *               office of the MP for Mahabubnagar, even when she is not named.
- * about-party   shows, labelled as being about the party rather than her, so
- *               a screen never lets party coverage borrow her name.
- * unjudged      shows, labelled. Nobody checked; that is not evidence of
- *               irrelevance and must never be presented as if it were.
- * unrelated     hides, counted, and revealable. Never deleted.
+ * about-seat    shows, labelled. Her constituency, on something an elected
+ *               member is expected to act on, ask about, fund or answer for.
+ * seat-routine  hides, counted, revealable. It happened in her district and
+ *               needs nobody: one crime, one exam conducted normally, one
+ *               donation to one school. This category exists because the desk
+ *               used to file all of it under about-seat and open on it.
+ * about-party   hides, counted, revealable. A Mahabubnagar desk was handed a
+ *               party tour of Karimnagar every morning, two hundred kilometres
+ *               from the seat, and party business elsewhere in the state is not
+ *               what the office asked to see.
+ * unjudged      shows ONLY when the story carried a word this office watches.
+ *               A matched story nobody checked still has evidence behind it.
+ *               A story swept up by a whole-front-page harvest and never
+ *               judged has none, and showing it is how a district paper's
+ *               entire front page reached the desk.
+ * unrelated     hides, counted, revealable. Never deleted.
+ *
+ * Everything hidden is COUNTED AND REVEALABLE. That is not a courtesy: a
+ * filter this sharp is wrong sometimes, and an office that cannot see what was
+ * set aside cannot correct it.
  */
 export function worthShowing(v: Verdict): boolean {
-  return v.verdict !== 'unrelated'
+  if (v.verdict === 'about-person' || v.verdict === 'about-seat') return true
+  if (v.verdict === 'unjudged') return v.via !== 'harvested'
+  return false
 }
 
 /**
@@ -87,7 +126,7 @@ export function worthShowing(v: Verdict): boolean {
  * stands out.
  */
 export function needsLabel(v: Verdict): boolean {
-  return v.verdict === 'about-seat' || v.verdict === 'about-party' || v.verdict === 'unjudged'
+  return v.verdict !== 'about-person'
 }
 
 export interface RelevanceCounts {
@@ -97,11 +136,14 @@ export interface RelevanceCounts {
   shown: number
   aboutPerson: number
   aboutSeat: number
+  /** Her district, but nothing an elected member is needed for. Hidden. */
+  seatRoutine: number
   aboutParty: number
-  /** Shown, but nothing has checked them. */
+  /** Nothing checked them. Shown when they carried a watched word, else not. */
   unjudged: number
-  /** The only ones hidden. Reported so the filter is never silent. */
   unrelated: number
+  /** Everything the rule set aside, whatever the reason. */
+  hidden: number
 }
 
 export function countVerdicts(verdicts: readonly Verdict[]): RelevanceCounts {
@@ -110,19 +152,59 @@ export function countVerdicts(verdicts: readonly Verdict[]): RelevanceCounts {
     shown: 0,
     aboutPerson: 0,
     aboutSeat: 0,
+    seatRoutine: 0,
     aboutParty: 0,
     unjudged: 0,
     unrelated: 0,
+    hidden: 0,
   }
   for (const v of verdicts) {
     if (worthShowing(v)) counts.shown += 1
+    else counts.hidden += 1
     if (v.verdict === 'about-person') counts.aboutPerson += 1
     else if (v.verdict === 'about-seat') counts.aboutSeat += 1
+    else if (v.verdict === 'seat-routine') counts.seatRoutine += 1
     else if (v.verdict === 'about-party') counts.aboutParty += 1
     else if (v.verdict === 'unjudged') counts.unjudged += 1
     else counts.unrelated += 1
   }
   return counts
+}
+
+/**
+ * What to call a verdict on screen, and what it means in one line.
+ *
+ * Written here rather than at each render site because there are now four
+ * screens that label these and they were already drifting: one said "About
+ * Mahabubnagar, not about you" and another re-derived the same branch by hand.
+ */
+export function describeVerdict(v: Verdict): { label: string; meaning: string } {
+  switch (v.verdict) {
+    case 'about-person':
+      return { label: 'About you', meaning: 'This story is about you.' }
+    case 'about-seat':
+      return {
+        label: 'Your seat',
+        meaning: 'Your constituency, on something an office like yours is asked to act on.',
+      }
+    case 'seat-routine':
+      return {
+        label: 'Your district, not your desk',
+        meaning: 'It happened in your district, but there is nothing here for you to act on.',
+      }
+    case 'about-party':
+      return {
+        label: 'Your party, elsewhere',
+        meaning: 'Party business in your state, away from your seat and not about you.',
+      }
+    case 'unjudged':
+      return {
+        label: 'Not checked',
+        meaning: 'Nothing has read this one against you yet.',
+      }
+    default:
+      return { label: 'Not about you', meaning: 'Read and ruled out.' }
+  }
 }
 
 /** The honest reading of a story nothing has looked at. */
@@ -152,12 +234,14 @@ export function asVerdict(raw: unknown): Verdict | null {
 
   const conf = typeof row['confidence'] === 'string' ? row['confidence'] : ''
   const why = typeof row['why'] === 'string' ? row['why'].trim() : ''
+  const via = row['via'] === 'harvested' ? 'harvested' : row['via'] === 'matched' ? 'matched' : null
 
   return {
     url,
     verdict,
     confidence: (CONFIDENCES as readonly string[]).includes(conf) ? (conf as Confidence) : null,
     why: why || null,
+    ...(via ? { via } : {}),
   }
 }
 
@@ -169,7 +253,7 @@ export function asVerdict(raw: unknown): Verdict | null {
  * a module-level constant would freeze whichever account was live when this
  * module was first imported.
  */
-const KEY = (): string => scopedKey('signal.relevance.v1')
+const KEY = (): string => deskKey('signal.relevance.v1')
 
 /**
  * How many judged stories are kept.
@@ -328,6 +412,7 @@ export function readVerdicts(subject: string | null = null): Map<string, Verdict
       verdict: entry.verdict,
       confidence: entry.confidence,
       why: entry.why,
+      ...(entry.via ? { via: entry.via } : {}),
     })
   }
   return map

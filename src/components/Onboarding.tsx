@@ -5,10 +5,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Building2,
-  ChevronRight,
   CircleAlert,
   ExternalLink,
-  Eye,
   Landmark,
   Link2,
   Loader2,
@@ -31,8 +29,6 @@ import { useStore } from '@/lib/store'
 import { Avatar, Button, Card, Chip, Shell, SignalGlyph } from './ui'
 import { CardHead } from '@/components/kit'
 import { IdentityRows } from './IdentityEditor'
-import { DeskDoor } from './DeskDoor'
-import { consumeRelock } from '@/lib/desk-session'
 import { applyDeskPlan, describePlan, planDesk } from '@/lib/autoconfig'
 import { cn } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
@@ -74,14 +70,7 @@ import { fadeUp, listStagger } from '@/lib/motion'
 type Step = 'choose' | 'working' | 'review'
 
 
-export function Onboarding({
-  onDone,
-  onDemo,
-}: {
-  onDone: () => void
-  /** Open the example desk. Absent when the dataset is not deployed. */
-  onDemo?: () => void
-}) {
+export function Onboarding({ onDone }: { onDone: () => void }) {
   /**
    * The desk already on the device, if there is one.
    *
@@ -95,11 +84,6 @@ export function Onboarding({
   const reduce = useReducedMotion() === true
 
   const [step, setStep] = useState<Step>('choose')
-  /** One-shot: the padlock just locked a desk on a device with no vault
-      account, so this welcome screen is what greets her next. Open the desk
-      login for her instead of making her find the pill again. Lazy state,
-      not a bare call, so re-renders cannot consume it twice. */
-  const [deskRelock] = useState(consumeRelock)
   const [mode, setMode] = useState<'link' | 'manual'>('link')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -330,49 +314,17 @@ export function Onboarding({
                 dashboard configure themselves from the answer.
               </p>
 
+              {/* The demo and the desk login used to sit here as well, because
+                  this screen was the FIRST thing a new device showed and they
+                  had nowhere else to be. They have somewhere else to be now:
+                  the entrance renders before this, every way in is on it, and
+                  the only way to reach this screen is with a session already
+                  open. A door offering to log in, to somebody who just did,
+                  is a door to nowhere. */}
               <div className="mt-7 border-t border-[var(--rule)] pt-5">
-                {/* The two ways past this form, on one line and correctly
-                    weighted. The demo led as a full-bleed bar across the
-                    column, which made the loudest thing on the screen an
-                    aside; the skip link sat above it underlined like a
-                    footnote. Now: one solid action, one quiet one, side by
-                    side, with the form itself still the primary path. */}
-                <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
-                  {onDemo !== undefined && !existing && (
-                    <button
-                      type="button"
-                      onClick={onDemo}
-                      className={cn(
-                        'group inline-flex min-h-12 items-center gap-2.5 rounded-full pl-4 pr-5',
-                        'bg-[var(--accent-2)] text-[15px] font-semibold text-[var(--accent-fg)]',
-                        'shadow-[0_1px_2px_rgb(16_24_40/0.08),0_8px_20px_-8px_color-mix(in_oklab,var(--accent-2)_55%,transparent)]',
-                        'transition-[transform,box-shadow,filter] duration-200 ease-out',
-                        'hover:-translate-y-0.5 hover:brightness-[1.07]',
-                        'hover:shadow-[0_2px_4px_rgb(16_24_40/0.1),0_14px_28px_-10px_color-mix(in_oklab,var(--accent-2)_65%,transparent)]',
-                        'active:translate-y-0 active:brightness-95',
-                      )}
-                    >
-                      <Eye size={17} aria-hidden />
-                      Try the demo
-                      <ChevronRight
-                        size={16}
-                        className="transition-transform duration-200 group-hover:translate-x-0.5"
-                        aria-hidden
-                      />
-                    </button>
-                  )}
-                  {/* The handed-over desk's door, for the member whose office
-                      issued them credentials: their first screen is this one,
-                      so the way into their own desk sits beside the demo, at
-                      the same weight. The quiet skip drops below the pair. */}
-                  <div className="w-full max-w-sm sm:w-auto">
-                    <DeskDoor onOpened={() => window.location.reload()} initialOpen={deskRelock} />
-                  </div>
-                </div>
-
                 <button
                   onClick={skip}
-                  className="mt-4 inline-flex min-h-11 items-center text-left text-sm font-medium text-ink-3 transition-colors hover:text-ink-2"
+                  className="inline-flex min-h-11 items-center text-left text-sm font-medium text-ink-3 transition-colors hover:text-ink-2"
                 >
                   {existing ? `Keep ${existing.name}` : 'Skip for now'}
                 </button>

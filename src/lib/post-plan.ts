@@ -3,6 +3,7 @@ import type { LandsReading, PlatformReach, RankedIssue } from '@/lib/briefing'
 import { readStandingCache, type TrackedHandle } from '@/lib/handles'
 import { weekOf } from '@/lib/week'
 import { scopedKey } from '@/lib/store'
+import { deskKey } from '@/lib/personas'
 import { fetchWithTimeout } from '@/lib/net'
 import { compact } from '@/lib/utils'
 
@@ -94,7 +95,7 @@ function payloadOf(input: PlanInput): Record<string, unknown> {
 
 /* ── cache: one plan per desk per day ────────────────────────────────────── */
 
-const CACHE_KEY = (): string => scopedKey('signal.postPlan.v1')
+const CACHE_KEY = (): string => deskKey('signal.postPlan.v1')
 const today = (): string => new Date().toISOString().slice(0, 10)
 
 export function readPlanCache(): PlanResult | null {

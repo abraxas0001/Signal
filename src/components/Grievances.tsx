@@ -29,7 +29,9 @@ import {
 } from 'lucide-react'
 import type { FakeSignal, GrievanceRecord, IssueCluster } from '@shared/grievance'
 import { CONSTITUENCIES, bySeverityThenRecency } from '@shared/grievance'
-import { partyAbbreviation } from '@shared/identity'
+import { partyAbbreviation, type Identity } from '@shared/identity'
+import { placeVariants, resolvePlace } from '@shared/places'
+import { planTerms } from '@/lib/autoconfig'
 import {
   formatDeskDay,
   groupByDay,
@@ -86,6 +88,15 @@ import {
   type SuggestionPerson,
 } from '@/lib/suggest'
 import { useBackToDismiss } from '@/lib/nav-history'
+import {
+  countVerdicts,
+  describeVerdict,
+  needsLabel,
+  readVerdicts,
+  verdictFor,
+  worthShowing,
+  type Verdict,
+} from '@/lib/news-relevance'
 
 /**
  * The grievance desk.
@@ -418,6 +429,153 @@ type Tab = (typeof TABS)[number]
  */
 export type DeskMode = 'issues' | 'records'
 
+/**
+ * The words that must not stand alone as evidence.
+ *
+ * `planTerms` already works this out and calls it `corroborating`, and until
+ * now nothing read it: `applyDeskPlan` persists only `watchTerms`, so the
+ * distinction the planner drew was thrown away before any scan saw it, and a
+ * bare surname went to the scanner with the same standing as the member's full
+ * name. Recomputed here from the identity the desk actually holds, so the
+ * scanner is told which of its own terms are corroboration rather than proof.
+ *
+ * The party stays in the list whatever the planner says, because that is the
+ * one this call site has always sent and losing it would widen the net rather
+ * than narrow it.
+ */
+function corroboratingTerms(
+  identity: Identity | null,
+  profile: { district?: string | null; constituency?: string | null; state?: string | null } | null,
+  party: string | null,
+): string[] {
+  const out = new Set<string>()
+  if (party) out.add(party)
+  if (identity) {
+    try {
+      const place = resolvePlace({
+        state: profile?.state ?? identity.state ?? null,
+        district: profile?.district ?? null,
+        constituency: profile?.constituency ?? identity.constituency ?? null,
+      })
+      for (const term of planTerms(identity, place).corroborating) out.add(term)
+    } catch {
+      // A planner that cannot read this identity is not a reason to scan with
+      // no broad terms at all; the party alone is the behaviour this had before.
+    }
+  }
+  return [...out]
+}
+
+/**
+ * Every spelling of this desk's own ground, for the relevance judge.
+ *
+ * Deliberately narrow. It answers "which words on a page mean this seat" and
+ * nothing more, and every word in it comes from something the office itself
+ * configured: the district, the constituency, their registry spellings, and
+ * any watch term that the shared place registry recognises as a real place. A
+ * term the office typed that is not a place stays out, because a person's name
+ * offered to the judge as geography is the bug this was written to end.
+ */
+function placesFor(
+  district: string | null,
+  constituency: string | null,
+  state: string | null,
+  watchTerms: readonly string[],
+): string[] {
+  const out = new Set<string>()
+  const add = (v: string | null | undefined): void => {
+    const t = (v ?? '').trim()
+    if (t.length > 2) out.add(t)
+  }
+
+  add(district)
+  add(constituency)
+
+  const resolved = resolvePlace({ state, district, constituency })
+  for (const v of placeVariants(resolved.districtMatch, district)) add(v)
+  add(resolved.district)
+
+  // A watch term earns its place only by resolving to one. "Aruna" does not.
+  for (const term of watchTerms) {
+    const t = term.trim()
+    if (t.length < 3) continue
+    const hit = resolvePlace({ state, district: t })
+    if (hit.districtMatch) {
+      add(t)
+      for (const v of placeVariants(hit.districtMatch, t)) add(v)
+    }
+  }
+
+  return [...out]
+}
+
+/**
+ * What the relevance rule set aside today, counted and revealable.
+ *
+ * The rule the office asked for is sharp: their name, or their seat on
+ * something an elected member is actually needed for. A sharp rule is wrong
+ * sometimes, and a desk that quietly shrinks the morning's work gives nobody
+ * any way to notice. So nothing is deleted, the reasons are broken out, and
+ * one press puts every set-aside story back on screen with its verdict on it.
+ */
+function SetAside({
+  counts,
+  revealed,
+  onToggle,
+}: {
+  counts: ReturnType<typeof countVerdicts>
+  revealed: boolean
+  onToggle: () => void
+}) {
+  if (counts.hidden === 0) return null
+
+  const reasons: string[] = []
+  if (counts.seatRoutine > 0) {
+    reasons.push(`${counts.seatRoutine} in your district with nothing for you to act on`)
+  }
+  if (counts.aboutParty > 0) {
+    reasons.push(
+      `${counts.aboutParty} about party business away from your seat`,
+    )
+  }
+  if (counts.unrelated > 0) reasons.push(`${counts.unrelated} read and ruled out`)
+  const swept = counts.hidden - counts.seatRoutine - counts.aboutParty - counts.unrelated
+  if (swept > 0) reasons.push(`${swept} swept up by the papers scan and never checked`)
+
+  return (
+    <Card level="quiet" className="mt-3">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <p className="min-w-0 flex-1 text-xs leading-relaxed text-ink-2">
+          <span className="font-semibold text-ink">
+            {counts.hidden} {pluralise(counts.hidden, 'story', 'stories')} set aside
+          </span>{' '}
+          as not this desk&rsquo;s business: {reasons.join(', ')}. Nothing was deleted.
+        </p>
+        <Button size="sm" variant="outline" onClick={onToggle} className="shrink-0">
+          {revealed ? 'Hide them again' : 'Show what was set aside'}
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
+/** The judge's ruling on one story, where it is not simply "about you". */
+function RelevanceChip({ verdict }: { verdict: Verdict }) {
+  if (!needsLabel(verdict)) return null
+  const { label, meaning } = describeVerdict(verdict)
+  const tone: ChipTone | undefined =
+    verdict.verdict === 'about-seat'
+      ? 'accent'
+      : verdict.verdict === 'unjudged'
+        ? undefined
+        : 'warning'
+  return (
+    <span title={verdict.why ? `${meaning} ${verdict.why}` : meaning}>
+      <Chip tone={tone}>{label}</Chip>
+    </span>
+  )
+}
+
 export function Grievances({
   onClose,
   mode = 'issues',
@@ -498,9 +656,54 @@ export function Grievances({
   const job = useScanJob()
   const running = job.status === 'scanning' || job.status === 'reading'
 
-  const records = useMemo(
+  const allRecords = useMemo(
     () => [...store.grievances].sort((a, b) => bySeverityThenRecency(SEVERITY_RANK, a, b)),
     [store.grievances],
+  )
+
+  /**
+   * What the judge said about each record's source story.
+   *
+   * The relevance verdicts have been written to a cache on every scan since
+   * the feature was built, and until now this screen never read them. The
+   * office's complaint was exactly that: a desk that opens on a district
+   * paper's whole front page, over a filter that existed, ran and was ignored.
+   *
+   * Judged against the desk's own subject, so a cache written about somebody
+   * else is discarded rather than applied.
+   */
+  const verdicts = useMemo(
+    () => readVerdicts(store.identity?.name ?? null),
+    [store.identity?.name, store.grievances],
+  )
+  const verdictOf = useCallback(
+    (r: GrievanceRecord): Verdict => verdictFor(r.sourceUrl, verdicts),
+    [verdicts],
+  )
+
+  /**
+   * Whether the office asked to see this at all.
+   *
+   * Records already on the desk were filed before this filter existed and
+   * carry no verdict, so they read as `unjudged`. That is shown rather than
+   * hidden: nothing checked them, and hiding a record on the strength of a
+   * judgement nobody made would be the same mistake in the other direction.
+   */
+  const [showSetAside, setShowSetAside] = useState(false)
+  const onDesk = useCallback(
+    (r: GrievanceRecord) => worthShowing(verdictOf(r)),
+    [verdictOf],
+  )
+
+  const records = useMemo(
+    () => (showSetAside ? allRecords : allRecords.filter(onDesk)),
+    [allRecords, onDesk, showSetAside],
+  )
+
+  /** What the rule set aside, counted, so the filter is never silent. */
+  const setAside = useMemo(
+    () => countVerdicts(allRecords.map(verdictOf)),
+    [allRecords, verdictOf],
   )
 
   /** The desk day being looked at. Declared here because the issue list
@@ -517,7 +720,7 @@ export function Grievances({
 
   // Every record ever filed, so an issue can still resolve the records behind
   // it when the desk has stepped to another day.
-  const byId = useMemo(() => new Map(records.map((r) => [r.id, r])), [records])
+  const byId = useMemo(() => new Map(allRecords.map((r) => [r.id, r])), [allRecords])
 
   /**
    * The issue filters.
@@ -551,9 +754,13 @@ export function Grievances({
       issues.filter((issue) => {
         const held = issue.recordIds.map((id) => byId.get(id)).filter(Boolean) as GrievanceRecord[]
         if (held.length === 0) return true
+        // An issue is the office's business when ANY story behind it is. A
+        // cluster whose every record was set aside is set aside with them,
+        // and reappears the moment the reveal is switched on.
+        if (!showSetAside && !held.some(onDesk)) return false
         return held.some((r) => recordDeskDay(r) === day)
       }),
-    [issues, byId, day],
+    [issues, byId, day, onDesk, showSetAside],
   )
 
   const visibleIssues = useMemo(
@@ -755,10 +962,22 @@ export function Grievances({
       // failure this reads as is a quiet news week.
       city: profile?.district ?? profile?.constituency ?? null,
       tags: profile?.watchTerms ?? [],
-      // The party is watched, but only alongside something narrower. On its own
-      // it returns the national wire: twenty-three stories about the party and
-      // none about this member.
-      broadTags: short ? [short] : party ? [party] : [],
+      /*
+       * Words that are only ever evidence when another watched word lands with
+       * them. The party has always been one: on its own it returns the national
+       * wire, twenty-three stories about the party and none about this member.
+       *
+       * The planner mints two more of exactly that kind and they were never
+       * passed here, so they stood alone as sufficient evidence. "Aruna" is the
+       * surname carved out of "D. K. Aruna" and it matches a cricketer.
+       * "Gadwal" is the distinctive token carved out of "Jogulamba Gadwal" and
+       * it matches a district sports meet. Both are named in this feature's
+       * own design notes as the reported failures, and both were reaching the
+       * desk on their own. They are demoted rather than dropped, because a
+       * Telugu masthead often prints only the surname and dropping them would
+       * cost real coverage.
+       */
+      broadTags: corroboratingTerms(store.identity, profile, short ?? party),
       state: profile?.state ?? null,
       /**
        * Who to judge each story against. Absent identity means no judging,
@@ -773,6 +992,28 @@ export function Grievances({
             state: profile?.state ?? store.identity.state ?? null,
             party,
             aliases: store.identity.aliases ?? [],
+            /**
+             * The ground, so the judge is not placing headlines from memory.
+             *
+             * Everything the judge knew about where this seat is was the one
+             * word in `constituency`. A headline naming a town, a mandal or an
+             * older spelling of the district reached it with no place signal at
+             * all, and landed correctly only when the model happened to know
+             * Telangana geography itself. That is the part that degrades when a
+             * rate-limited provider fails over to a weaker one, which is
+             * exactly when the desk fills with things it should not carry.
+             *
+             * Assembled only from places this desk can actually vouch for: the
+             * district and seat it is configured with, their registry
+             * spellings, and any watch term the office typed that resolves to a
+             * real place. No geography is invented here.
+             */
+            places: placesFor(
+              profile?.district ?? null,
+              profile?.constituency ?? store.identity.constituency ?? null,
+              profile?.state ?? store.identity.state ?? null,
+              profile?.watchTerms ?? [],
+            ),
           }
         : null,
     }
@@ -1268,11 +1509,17 @@ export function Grievances({
                       record={record}
                       active={record.id === selectedId}
                       onOpen={() => openRecord(record.id)}
+                      relevance={verdictOf(record)}
                     />
                   </m.li>
                 ))}
               </m.ul>
             )}
+            <SetAside
+              counts={setAside}
+              revealed={showSetAside}
+              onToggle={() => setShowSetAside((v) => !v)}
+            />
           </div>
 
           <div
@@ -1387,6 +1634,11 @@ export function Grievances({
               ))}
             </m.ul>
           )}
+          <SetAside
+            counts={setAside}
+            revealed={showSetAside}
+            onToggle={() => setShowSetAside((v) => !v)}
+          />
         </div>
       )}
     </m.div>
@@ -1855,10 +2107,13 @@ function RecordRow({
   record,
   active,
   onOpen,
+  relevance,
 }: {
   record: GrievanceRecord
   active: boolean
   onOpen: () => void
+  /** What the judge ruled about the story behind this record. */
+  relevance?: Verdict
 }) {
   /**
    * Whether the record has a page anyone can actually open. The demo's
@@ -1912,6 +2167,10 @@ function RecordRow({
               {SUSPICION_LABEL[record.fake.suspicion]}
             </Chip>
           )}
+          {/* Only where it is not simply "about you": a label on the norm is
+              decoration, and if every row carries one the row that is only
+              about the party stops standing out. */}
+          {relevance && <RelevanceChip verdict={relevance} />}
         </span>
 
         <span

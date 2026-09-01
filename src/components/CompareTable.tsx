@@ -776,7 +776,7 @@ export function CompareTable({
                 className="text-sm text-ink-3"
                 title={`${h.platform} has no follower reading yet. Refresh this account on the Accounts screen to take one.`}
               >
-                &mdash;
+                NA
               </span>
             )}
           </span>
@@ -878,7 +878,7 @@ export function CompareTable({
             </span>
           ) : (
             <span className="text-sm font-bold text-ink-3" title="No score came back for this reading.">
-              &mdash;
+              NA
             </span>
           )}
           <span className="text-xs font-semibold text-ink">{st.label}</span>
@@ -967,7 +967,7 @@ export function CompareTable({
       )
     }
 
-    return <Note>The platform publishes no reactions or views for these posts, so nothing can be ranked.</Note>
+    return <Note>Nothing here can be ranked.</Note>
   }
 
   /** Post count with per-platform figures, but only when platforms mix. */
@@ -1022,7 +1022,7 @@ export function CompareTable({
             className="text-sm font-bold text-ink-3"
             title="Reactions are not published on the posts from this week."
           >
-            &mdash;
+            NA
           </span>
           {viewsLine}
         </div>
