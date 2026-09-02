@@ -108,7 +108,7 @@ const MAX_JUDGE_LIMIT = 90
  */
 const JUDGE_DEADLINE_MS = Math.max(
   8_000,
-  Number(process.env['SCAN_BUDGET_MS']) || 20_000,
+  Number(process.env['SCAN_BUDGET_MS']) || 22_000,
 )
 
 /** The reading attached to one story, or nulls when nobody read it. */
@@ -244,6 +244,9 @@ export default async function handler(req: Request, _context: Context): Promise<
 
   const relevance = await judgeRelevance(toJudge, subject, {
     deadline: started + JUDGE_DEADLINE_MS,
+    // Measured from `started`, so the harvest that already ran is counted and
+    // the abort fires at the same wall-clock instant the deadline names.
+    signal: AbortSignal.timeout(Math.max(1_000, started + JUDGE_DEADLINE_MS - Date.now())),
   })
 
   const byUrl = new Map(relevance.judgements.map((j) => [j.url, j]))
