@@ -101,12 +101,14 @@ const MAX_JUDGE_LIMIT = 90
  * partial answer that arrives beats a complete one the platform throws away.
  *
  * Env-tunable, like daily-scan's RUN_BUDGET_MS, so an operator who knows their
- * plan allows longer can raise it without a deploy. The default leaves a
- * two-second margin under the 26-second cap the current runtime enforces.
+ * plan allows longer can raise it without a deploy. A batch needs twelve
+ * seconds of headroom to start, so a twenty-second budget stops new work
+ * eight seconds in and lands the function well under the 26-second cap the
+ * current runtime enforces, even when a final model batch runs long.
  */
 const JUDGE_DEADLINE_MS = Math.max(
   8_000,
-  Number(process.env['SCAN_BUDGET_MS']) || 24_000,
+  Number(process.env['SCAN_BUDGET_MS']) || 20_000,
 )
 
 /** The reading attached to one story, or nulls when nobody read it. */
