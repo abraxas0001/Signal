@@ -444,7 +444,19 @@ function UndatedCard({ occasion, onSaved }: { occasion: Occasion; onSaved: () =>
 
 /* ── the screen ──────────────────────────────────────────────────────────── */
 
-export function ContentStudio({ onClose }: { onClose: () => void }) {
+export function ContentStudio({
+  onClose,
+  seed = null,
+}: {
+  onClose: () => void
+  /**
+   * A brief handed across by the recommendations screen, so "make this in the
+   * studio" opens the studio already saying what the post is for. It seeds the
+   * initial state and nothing more: the office edits it like anything they
+   * typed, and it stays a draft here exactly as it was a draft there.
+   */
+  seed?: string | null
+}) {
   const reduce = useReducedMotion() === true
   const store = useStore()
   const identity = store.identity
@@ -452,7 +464,7 @@ export function ContentStudio({ onClose }: { onClose: () => void }) {
   const [templateId, setTemplateId] = useState<string>('festival')
   const [language, setLanguage] = useState<CopyLanguage>('English')
   const [occasionId, setOccasionId] = useState<string | null>(null)
-  const [brief, setBrief] = useState('')
+  const [brief, setBrief] = useState(seed ?? '')
   const [headline, setHeadline] = useState('')
   const [body, setBody] = useState('')
   const [caption, setCaption] = useState('')

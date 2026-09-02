@@ -5,6 +5,7 @@ import { Button, Card, Chip } from '../ui'
 import { DonutBreakdown, PlatformBadge, PostPicture } from '@/components/kit'
 import { highlightsOf } from '@/lib/highlights'
 import { audienceOf, audienceVerdict } from '@/lib/audience'
+import { nextPostModelOf } from '@/lib/next-post'
 import type { TrackedHandle } from '@/lib/handles'
 import { cn, compact } from '@/lib/utils'
 
@@ -349,6 +350,76 @@ export function AudienceGlance({
           </li>
         )}
       </ul>
+    </Card>
+  )
+}
+
+/* ── what to post next ───────────────────────────────────────────────────── */
+
+/**
+ * The door to the recommendations screen: the deterministic sentence and the
+ * top themes, nothing else. The sentence is the model's own, computed from
+ * the same findings the advice cards read, so this card, the advice cards and
+ * the full screen can only ever name the same themes. Nothing here quotes the
+ * AI-drafted plan: that is per-day cached model text, and a dashboard card
+ * quoting it would go stale against the screen's own regeneration.
+ */
+export function NextPostGlance({
+  handles,
+  reports,
+  onExplore,
+}: {
+  handles: TrackedHandle[]
+  reports: Map<string, Report> | null
+  onExplore: () => void
+}) {
+  const model = useMemo(() => nextPostModelOf(handles, reports, 'all'), [handles, reports])
+
+  if (model.empty) {
+    return (
+      <Card className="p-4">
+        <GlanceHead
+          title="What should you post next?"
+          sub="Written from your readings, once there are some."
+          onExplore={onExplore}
+        />
+      </Card>
+    )
+  }
+
+  const top = model.themes.slice(0, 3)
+  const most = top[0]?.posts ?? 1
+
+  return (
+    <Card className="@container p-4">
+      <GlanceHead
+        title="What should you post next?"
+        sub={`Over ${model.postsAnalysed} posts read in full and ${compact(model.commentsRead)} comments counted.`}
+        onExplore={onExplore}
+      />
+      <div className="mt-3 grid gap-3 @2xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] @2xl:items-center">
+        <p className="rounded-[var(--radius-md)] bg-[var(--accent-soft)] p-3 text-[12.5px] font-semibold leading-snug text-ink">
+          {model.recommendation}
+        </p>
+        {top.length > 0 && (
+          <ul className="space-y-1.5">
+            {top.map((t) => (
+              <li key={t.topic} className="flex items-center gap-2 text-[11.5px]">
+                <span className="w-[38%] min-w-0 truncate text-ink-2">{t.topic}</span>
+                <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--surface-3)]">
+                  <span
+                    className="block h-full rounded-full bg-[var(--accent)]"
+                    style={{ width: `${Math.max(8, Math.round((t.posts / most) * 100))}%` }}
+                  />
+                </span>
+                <span className="tnum shrink-0 text-[10.5px] text-ink-3">
+                  {t.posts} {t.posts === 1 ? 'post' : 'posts'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </Card>
   )
 }

@@ -18,7 +18,7 @@ import { SentimentOverview } from './briefing/SentimentOverview'
 import { TopMentions } from './briefing/TopMentions'
 import { ContentInsights } from './briefing/ContentInsights'
 import { FollowerGrowth } from './briefing/FollowerGrowth'
-import { AudienceGlance, HighlightsGlance } from './briefing/HighlightsGlance'
+import { AudienceGlance, HighlightsGlance, NextPostGlance } from './briefing/HighlightsGlance'
 
 /**
  * The dashboard, rebuilt to the product owner's reference design.
@@ -58,6 +58,7 @@ export type Destination =
   | 'weekly'
   | 'highlights'
   | 'audience'
+  | 'nextpost'
 
 export function Briefing({
   onNavigate,
@@ -258,6 +259,11 @@ export function Briefing({
               reports={reports}
               onExplore={go('audience')}
             />
+          </div>
+          {/* The third door: what to do about the two readings above. Full
+              width under them, because it is their conclusion, not a sibling. */}
+          <div className="mt-3">
+            <NextPostGlance handles={postHandles} reports={reports} onExplore={go('nextpost')} />
           </div>
         </m.section>
 

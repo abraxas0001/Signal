@@ -3,6 +3,7 @@ import {
   FileWarning,
   Gauge,
   GitCompareArrows,
+  Lightbulb,
   LayoutGrid,
   Link2,
   ListChecks,
@@ -48,6 +49,7 @@ export type Tab =
   | 'weekly'
   | 'highlights'
   | 'audience'
+  | 'nextpost'
   | 'studio'
   | 'settings'
 
@@ -83,6 +85,7 @@ export const NAV = {
   // long form of a card that already says the short form.
   highlights: { id: 'highlights', label: 'Post highlights', Icon: Sparkles },
   audience: { id: 'audience', label: 'What people are saying', Icon: MessagesSquare },
+  nextpost: { id: 'nextpost', label: 'What to post next', Icon: Lightbulb },
 } as const satisfies Record<Tab, NavItem>
 
 /**
@@ -134,6 +137,7 @@ export const UNLISTED = [
   'weekly',
   'highlights',
   'audience',
+  'nextpost',
 ] as const
 
 /**

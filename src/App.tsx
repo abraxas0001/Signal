@@ -28,6 +28,7 @@ import { Settings } from '@/components/Settings'
 import { WeekCompare } from '@/components/WeekCompare'
 import { PostHighlights } from '@/components/PostHighlights'
 import { AudienceScreen } from '@/components/AudienceScreen'
+import { NextPost } from '@/components/NextPost'
 import { Onboarding } from '@/components/Onboarding'
 import { TabBar, type Tab } from '@/components/TabBar'
 import { MoreSheet } from '@/components/MoreSheet'
@@ -79,6 +80,15 @@ export default function App() {
   const [lastRequest, setLastRequest] = useState<AnalyseRequest | null>(null)
   /** An issue the dashboard asked to have opened, cleared once it is left. */
   const [focusIssue, setFocusIssue] = useState<string | null>(null)
+  /**
+   * A brief the recommendations screen asked the studio to open with.
+   *
+   * The same shape as `focusIssue` above and for the same reason: a screen
+   * that was clicked INTO should open on the thing that was clicked, and the
+   * seed is cleared once the studio has been left so a stale draft does not
+   * greet somebody opening the studio cold a week later.
+   */
+  const [studioSeed, setStudioSeed] = useState<string | null>(null)
 
   const [demo, setDemo] = useState<Report | null>(null)
 
@@ -960,7 +970,16 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
         return <WeekCompare key={`weekly-${deskKey}`} onClose={go('dashboard')} />
       // The one screen here that makes something rather than reads something.
       case 'studio':
-        return <ContentStudio key={`studio-${deskKey}`} onClose={go('dashboard')} />
+        return (
+          <ContentStudio
+            key={`studio-${deskKey}`}
+            seed={studioSeed}
+            onClose={() => {
+              setStudioSeed(null)
+              goTo('dashboard')
+            }}
+          />
+        )
       // The long form of the dashboard's two reading cards. Both read the
       // stored readings the dashboard already holds, so neither costs a call.
       case 'highlights':
@@ -978,6 +997,17 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
             key={`audience-${deskKey}`}
             onClose={go('dashboard')}
             onOpenAccounts={() => goTo('accounts')}
+          />
+        )
+      case 'nextpost':
+        return (
+          <NextPost
+            key={`nextpost-${deskKey}`}
+            onClose={go('dashboard')}
+            onMakePost={(brief) => {
+              setStudioSeed(brief)
+              goTo('studio')
+            }}
           />
         )
       case 'settings':

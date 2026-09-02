@@ -1095,6 +1095,10 @@ export interface OwnPost {
   comments: number | null
   shares: number | null
   views: number | null
+  /** The platform's own date, where it published one. Facebook and Instagram
+      publish none to the collector; a reader wanting a date for those must
+      fall through to the full report's, where a report exists. */
+  publishedAt: string | null
   /** True only when the platform published at least one reaction figure. */
   measured: boolean
   /** Likes plus comments plus shares, over the figures actually published. */
@@ -1121,6 +1125,7 @@ export function ownPostsOf(handles: TrackedHandle[]): OwnPost[] {
         comments,
         shares,
         views: p.views ?? null,
+        publishedAt: p.publishedAt ?? null,
         measured: likes != null || comments != null || shares != null,
         reactions: (likes ?? 0) + (comments ?? 0) + (shares ?? 0),
       })
@@ -1266,6 +1271,11 @@ export function whatLandsOf(posts: OwnPost[], reports: Map<string, Report>): Lan
   }
   if (!thin) {
     for (const [topic, scores] of topicScores) {
+      // The same floor the buckets above enforce, and it was missing here: two
+      // posts is an anecdote and one is a headline, yet this loop was happy to
+      // rank a topic on either, so the desk's advice card could crown a theme
+      // on the strength of a single warm reading. Three before it may speak.
+      if (scores.length < 3) continue
       const avg = scores.reduce((s, v) => s + v, 0) / scores.length
       const n = scores.length
       const noun = n === 1 ? 'post' : 'posts'
