@@ -23,7 +23,7 @@ import {
   TARGETS,
   TOPICS,
 } from '@shared/taxonomy'
-import { fetchWithTimeout } from '@/lib/net'
+import { ApiError, fetchWithTimeout, readJson } from '@/lib/net'
 import { activeStorageKey, makeId, readStore, scopedKey, update } from '@/lib/store'
 import { deskKey } from '@/lib/personas'
 import { pluralise } from '@/lib/utils'
@@ -657,7 +657,12 @@ export async function findStories(
       }),
       ...(signal ? { signal } : {}),
     })
-    const data = (await res.json()) as {
+    if (!res.ok && (res.headers.get('content-type') ?? '').includes('application/json')) {
+      // A JSON error the endpoint chose to send: surface its own sentence.
+      const body = (await res.json().catch(() => null)) as { error?: string } | null
+      return { urls: [], note: null, error: body?.error ?? `The scanner answered ${res.status}.` }
+    }
+    const data = (await readJson(res)) as {
       candidates?: {
         url: string
         title: string
@@ -761,11 +766,21 @@ export async function findStories(
       error: null,
     }
   } catch (err) {
-    return {
-      urls: [],
-      note: null,
-      error: `Could not reach the scanner: ${err instanceof Error ? err.message : String(err)}`,
+    // An ApiError means the scanner WAS reached and answered badly (a timeout
+    // page, a 502): its message already says what to do, so it is shown as-is
+    // rather than dressed up as "could not reach", which would be false.
+    if (err instanceof ApiError) {
+      return { urls: [], note: null, error: err.message }
     }
+    // A real network failure or the client's own deadline firing: that is a
+    // reachability problem, and the prefix is true.
+    const why =
+      err instanceof DOMException && err.name === 'TimeoutError'
+        ? 'the request timed out before the scanner answered'
+        : err instanceof Error
+          ? err.message
+          : String(err)
+    return { urls: [], note: null, error: `Could not reach the scanner: ${why}` }
   }
 }
 

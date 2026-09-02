@@ -84,13 +84,30 @@ const MAX_JUDGE_LIMIT = 90
 /**
  * When to stop starting new work, measured from the top of the request.
  *
- * The function is allowed sixty seconds. Reading eight mastheads concurrently
- * can spend ten of them, so the judge is given a deadline rather than a budget:
- * it stops launching batches at forty-five seconds and the response is
- * assembled from what it has. A killed function returns nothing at all, and the
- * harvest has already been paid for by then.
+ * THIS IS SIZED FOR THE PLATFORM, NOT FOR THE JUDGE. `netlify.toml` asks for a
+ * sixty-second function, but Netlify hard-caps a synchronous function well
+ * below that on a standard plan, and when the wall-clock crosses that cap the
+ * platform KILLS the function and answers the browser with an HTML error page.
+ * The office then saw "Unexpected token '<'... is not valid JSON", very often,
+ * because a judged scan of real mastheads routinely ran past the cap: ten-odd
+ * seconds of concurrent fetches plus a forty-five-second judge is nearly a
+ * minute, and the function never lived to return it.
+ *
+ * So the whole request is budgeted to finish inside a cap it can actually
+ * count on. The judge stops launching batches at the budget, measured from the
+ * top of the request so the fetches it followed are already counted, and the
+ * response is assembled from what was judged in time; the rest come back
+ * unjudged, which is a real and honest state the desk already renders. A
+ * partial answer that arrives beats a complete one the platform throws away.
+ *
+ * Env-tunable, like daily-scan's RUN_BUDGET_MS, so an operator who knows their
+ * plan allows longer can raise it without a deploy. The default leaves a
+ * two-second margin under the 26-second cap the current runtime enforces.
  */
-const JUDGE_DEADLINE_MS = 45_000
+const JUDGE_DEADLINE_MS = Math.max(
+  8_000,
+  Number(process.env['SCAN_BUDGET_MS']) || 24_000,
+)
 
 /** The reading attached to one story, or nulls when nobody read it. */
 interface JudgedCandidate extends Candidate {
