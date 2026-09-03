@@ -52,7 +52,8 @@ export function ReportView({
    * True on the analyse screen, where the reader waited for it. False when the
    * same component is embedded somewhere reports are merely listed — the
    * dashboard's post highlights expand one inline, and confetti over a row
-   * filed under "What drew criticism" celebrates a post that landed badly.
+   * filed under "Worst received" celebrates a post whose comments were
+   * hostile.
    */
   celebrate?: boolean
 }) {

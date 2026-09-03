@@ -61,6 +61,9 @@ import { CardHead } from '@/components/kit'
  * its "Grievance desk settings" section. One component, two doors.
  */
 import { DeskSetup, useDeskProfile } from '@/components/settings/DeskConfig'
+import { KeywordsPanel } from '@/components/grievance/KeywordsPanel'
+import { TalkAbout } from '@/components/grievance/TalkAbout'
+import { IssuesTable } from '@/components/grievance/IssuesTable'
 import { LevelPips } from './charts'
 import { update, useStore } from '@/lib/store'
 import { absoluteDate, cn, hostOf, isIndicScript, pluralise } from '@/lib/utils'
@@ -581,11 +584,14 @@ export function Grievances({
   mode = 'issues',
   embedded = false,
   focusIssueId = null,
+  onOpenNextPost,
 }: {
   onClose: () => void
   mode?: DeskMode
   /** True when rendered inside Settings, which carries its own desk config. */
   embedded?: boolean
+  /** Opens the full "what to post next" plan, from the desk's talk-about panel. */
+  onOpenNextPost?: () => void
   /**
    * An issue to open on arrival.
    *
@@ -1247,6 +1253,68 @@ export function Grievances({
             </Card>
           </m.div>
         )}
+
+      {/* What the scan searched for, on the face of the screen.
+          The words were always here, behind the pencil; a reader looking at a
+          list of issues asks "what did you search for to get this?" and that
+          answer should not be two clicks away. Removing a chip writes straight
+          through to the same watch-term list the settings drawer edits. */}
+      {!embedded && (
+        <m.div variants={fadeUp} className="mt-4">
+          {/* The reference's numbered tab strip, sitting on the top edge of
+              the cards below it. Both panels render at once from xl, so these
+              read as step markers rather than a switch. */}
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { n: 1, label: 'List of issues' },
+              { n: 2, label: 'What should I talk about?' },
+            ].map((t, i) => (
+              <span
+                key={t.n}
+                className={cn(
+                  'inline-flex h-10 items-center gap-2 rounded-t-[10px] border border-b-0 px-4 text-[13px] font-semibold',
+                  i === 0
+                    ? 'border-[var(--border)] bg-[var(--surface)] text-[var(--accent)]'
+                    : 'border-[var(--rule)] bg-[var(--surface-2)] text-ink-2',
+                )}
+              >
+                <span
+                  className={cn(
+                    'tnum grid size-[21px] place-items-center rounded-full text-[11px]',
+                    i === 0
+                      ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+                      : 'bg-[var(--surface-3)] text-ink-2',
+                  )}
+                >
+                  {t.n}
+                </span>
+                {t.label}
+              </span>
+            ))}
+          </div>
+
+          {/* Card A beside Card B, in the reference's 695:621. */}
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,695fr)_minmax(0,621fr)] xl:items-start">
+            <Card className="p-4 sm:p-5">
+              <KeywordsPanel
+                terms={deskConfig.tags}
+                sources={deskConfig.portals.length + deskConfig.customUrls.length}
+                lastScanAt={store.lastScanAt}
+                onRemove={deskConfig.onToggleTag}
+                onAdd={deskConfig.onToggleTag}
+                onManage={() => setEditing(true)}
+              />
+              <div className="mt-4">
+                <IssuesTable records={records} onOpen={(r) => openRecord(r.id)} />
+              </div>
+            </Card>
+
+            <Card className="p-4 sm:p-5">
+              <TalkAbout since={0} onDraft={() => onOpenNextPost?.()} />
+            </Card>
+          </div>
+        </m.div>
+      )}
 
       {/* The day being read.
           A grievance desk is a daily instrument — the office works today's news

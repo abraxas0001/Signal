@@ -3,6 +3,7 @@ import * as m from 'motion/react-m'
 import {
   Plus,
   RefreshCw,
+  MessagesSquare,
   Trash2,
   ExternalLink,
   Radar,
@@ -1885,6 +1886,35 @@ export function Dashboard({
                           aria-label={`Refresh ${h.handle}`}
                         >
                           <RefreshCw size={16} className={busy === h.id ? 'animate-spin' : ''} />
+                        </button>
+                        {/* READ THE COMMENTS. `readOpinion` was written, wired
+                            to the server and to `saveStandingCache`, and then
+                            referenced by nothing but a comment — so outside the
+                            seeded example desk no standing was ever written,
+                            and every sentiment surface on a real desk read null
+                            forever: an empty Sentiment overview, an empty "What
+                            people are saying", no comment split on Compare. It
+                            is a real feature that only ever lacked a button. */}
+                        <button
+                          onClick={() => void readOpinion(h)}
+                          disabled={reading != null || busy != null}
+                          title={
+                            standings[h.id]
+                              ? `Comments last read for ${h.handle}. Read them again.`
+                              : `Read the comments on ${h.handle} to score how people are talking about this account.`
+                          }
+                          className="grid size-11 place-items-center rounded-full text-ink-3 transition-colors hover:bg-[var(--surface-2)] hover:text-ink disabled:opacity-45"
+                          aria-label={
+                            reading === h.id
+                              ? `Reading the comments on ${h.handle}`
+                              : `Read the comments on ${h.handle}`
+                          }
+                        >
+                          <MessagesSquare
+                            size={16}
+                            className={reading === h.id ? 'animate-pulse' : ''}
+                            style={standings[h.id] ? { color: 'var(--accent)' } : undefined}
+                          />
                         </button>
                         <button
                           onClick={() => setHandles(removeHandle(h.id))}

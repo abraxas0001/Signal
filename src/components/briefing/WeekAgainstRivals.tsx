@@ -72,15 +72,25 @@ export function WeekAgainstRivals({
 
       <div className="mt-4">
         <HBarBoard
-          rows={week.rows.slice(0, 5).map((r) => ({
-            label: r.name,
-            sublabel: `${r.posts} ${r.posts === 1 ? 'post' : 'posts'} this week`,
-            value: r.reactions,
-            lead: <Avatar src={r.avatarUrl} name={r.name} size={38} />,
-            emphasis: r.own,
-          }))}
+          rows={week.rows
+            .filter((r): r is typeof r & { reactions: number } => r.reactions != null)
+            .slice(0, 5)
+            .map((r) => ({
+              label: r.name,
+              sublabel: `${r.reactions.toLocaleString('en-IN')} on ${r.postsWithReactions} of ${r.posts} ${r.posts === 1 ? 'post' : 'posts'}`,
+              value: r.reactions,
+              lead: <Avatar src={r.avatarUrl} name={r.name} size={38} />,
+              emphasis: r.own,
+            }))}
           formatValue={(n) => compact(Math.round(n))}
         />
+        {week.rows.some((r) => r.reactions == null) && (
+          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">
+            {week.rows.filter((r) => r.reactions == null).length} of these accounts are not on the
+            board: the platforms they posted on published no like, comment or share figure this
+            week, and a bar of zero would say they were ignored rather than unmeasured.
+          </p>
+        )}
       </div>
     </Card>
   )

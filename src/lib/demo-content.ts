@@ -26,6 +26,17 @@
  * a screenshot of it would outlive any caveat attached to it here. A demo can
  * show how the workflow feels without putting words in a stranger's mouth about
  * a named public figure.
+ *
+ * THE PRESS CUTTINGS OBEY THE SAME RULE, AND NEED IT MORE. The local-news
+ * screen shows stories attributed to REAL mastheads — Eenadu, Sakshi, V6 —
+ * carrying a stance. So an invented cutting is two fabrications at once: a
+ * claim about a named person, and a claim that a named newspaper printed it.
+ * The seed below therefore writes only civic coverage of the SEAT: a road, a
+ * water scheme, a hostel, a bus route. A cutting may be read as critical, but
+ * it is critical of a CONDITION or a DEPARTMENT, exactly as the grievance
+ * records are. None alleges anything about a person, and none quotes anyone.
+ * The publishers are taken from the app's own portal list rather than made up,
+ * so the screen demonstrates the real mastheads a Telangana desk would read.
  */
 
 import type {
@@ -35,8 +46,9 @@ import type {
   InfluencerMention,
   IssueCluster,
 } from '@shared/grievance'
-import type { Topic } from '@shared/taxonomy'
-import type { TrackedPersona } from '@/components/Persona'
+import type { Sentiment, Topic } from '@shared/taxonomy'
+import { portalsForState } from '@shared/regions'
+import type { PersonaMention, TrackedPersona } from '@/components/Persona'
 import { rivalsOf, type DemoCreator, type DemoRoster } from '@/lib/demo-roster'
 
 /* ── the illustrative civic caseload ──────────────────────────────────────── */
@@ -208,17 +220,87 @@ export interface DemoContent {
   mentions: InfluencerMention[]
   /** The people this desk follows through the papers. */
   personas: TrackedPersona[]
+  /** Civic coverage of the seat, as the local-news screen counts it. */
+  personaMentions: PersonaMention[]
+}
+
+
+/* ── the illustrative press cuttings ──────────────────────────────────────── */
+
+/**
+ * Civic coverage of the seat, in the shape a district edition actually prints.
+ *
+ * Read the module header before adding to this list. Every line here is about
+ * a WORK or a CONDITION — a road, a transformer, a hostel, a bus route. None
+ * names a politician, none carries a quote, and none alleges anything about
+ * anybody. `tone` is how the desk would read the story about the ISSUE, not a
+ * verdict on a person: a finished water scheme reads well, a road still waiting
+ * on sanction reads badly, a tender notice reads as neither.
+ */
+interface Cutting {
+  headline: string
+  excerpt: string
+  tone: 'supportive' | 'critical' | 'neutral'
+  /** How many days back this one ran. Spread across two weeks on purpose, so
+   *  the screen's "vs previous 7 days" has a real previous week to compare. */
+  age: number
+}
+
+const CUTTINGS: Cutting[] = [
+  { headline: 'New drinking water pipeline commissioned at {place}', excerpt: 'The pipeline extends supply to wards that had been relying on tankers through the summer.', tone: 'supportive', age: 0 },
+  { headline: 'Road widening work at {place} still awaiting sanction, say residents', excerpt: 'Residents report that the stretch remains single-lane and floods during rain.', tone: 'critical', age: 1 },
+  { headline: 'District administration invites tenders for {place} bus shelter works', excerpt: 'The notice covers shelters at four stops along the main road.', tone: 'neutral', age: 2 },
+  { headline: 'Girls hostel at {place} gets new roof before the monsoon', excerpt: 'Repairs were completed ahead of the rains after the block was flagged last year.', tone: 'supportive', age: 3 },
+  { headline: 'Transformer failures continue to disrupt supply at {place}', excerpt: 'Households report outages lasting several hours through the week.', tone: 'critical', age: 4 },
+  { headline: 'Primary health centre at {place} adds a second duty doctor', excerpt: 'The centre had been running a single shift since the post fell vacant.', tone: 'supportive', age: 5 },
+  { headline: 'Survey work begins for the {place} link road', excerpt: 'Officials said the alignment is being marked before estimates are prepared.', tone: 'neutral', age: 6 },
+  { headline: 'Drainage overflow reported again at {place} market', excerpt: 'Traders say the channel silts up within weeks of each clearing.', tone: 'critical', age: 8 },
+  { headline: 'Anganwadi centres at {place} receive new kitchen equipment', excerpt: 'The supply covers twelve centres across the mandal.', tone: 'supportive', age: 9 },
+  { headline: 'Ration card correction camp held at {place}', excerpt: 'The camp cleared pending name and address changes over two days.', tone: 'neutral', age: 11 },
+  { headline: 'Street lighting restored along the {place} approach road', excerpt: 'The stretch had been dark since the poles were damaged in a storm.', tone: 'supportive', age: 12 },
+  { headline: 'School building at {place} still without a compound wall', excerpt: 'Parents raised safety concerns about the open frontage on the main road.', tone: 'critical', age: 13 },
+]
+
+const TONE_SENTIMENT: Record<Cutting['tone'], Sentiment> = {
+  supportive: 'Positive',
+  critical: 'Negative',
+  neutral: 'Neutral',
 }
 
 export function buildDemoContent(roster: DemoRoster, principalKey: string): DemoContent {
   const principal = roster.people[principalKey]
   if (!principal) {
-    return { grievances: [], issues: [], actions: [], influencers: [], mentions: [], personas: [] }
+    return {
+      grievances: [],
+      issues: [],
+      actions: [],
+      influencers: [],
+      mentions: [],
+      personas: [],
+      personaMentions: [],
+    }
   }
 
   const constituency = principal.office?.constituency ?? ''
   const places = PLACES[constituency] ?? [constituency].filter(Boolean)
   const rand = seeded(principalKey)
+
+  /**
+   * The papers this seat actually reads, for the caseload's provenance.
+   *
+   * The grievance desk is a NEWS desk: its own subtitle is "issues reported in
+   * the local news", and the reference sheet's table has a "Published in"
+   * column carrying real mastheads. Filing every illustrative record as
+   * "Constituency office intake" left that column with nothing to say and the
+   * row with nowhere to point. These come from the app's own portal list, so a
+   * Telangana seat shows Telangana papers and a UP seat shows UP ones.
+   *
+   * The stories stay what they were: civic service matters that name nobody.
+   * Only their provenance is filled in.
+   */
+  const papers = principal.office?.state
+    ? portalsForState(principal.office.state).filter((x) => x.kind === undefined)
+    : []
 
   /* ── illustrative caseload ─────────────────────────────────────────────── */
 
@@ -245,8 +327,11 @@ export function buildDemoContent(roster: DemoRoster, principalKey: string): Demo
     grievances.push({
       id,
       createdAt: daysAgo(age),
-      sourceUrl: '',
-      publisher: 'Constituency office intake',
+      sourceUrl: papers.length > 0 ? (papers[i % papers.length]?.indexUrl ?? '') : '',
+      publisher:
+        papers.length > 0
+          ? (papers[i % papers.length]?.label ?? 'Constituency office intake')
+          : 'Constituency office intake',
       headline: fill(t.headline),
       publishedAt: daysAgo(age),
       language: 'en',
@@ -532,5 +617,53 @@ export function buildDemoContent(roster: DemoRoster, principalKey: string): Demo
     lastCheckedAt: null,
   }))
 
-  return { grievances, issues, actions, influencers, mentions, personas }
+  /**
+   * The press cuttings, attributed to the mastheads this state actually has.
+   *
+   * The publishers come from the app's own portal list rather than being
+   * written here, so the screen shows the papers a Telangana desk would really
+   * be reading, and a seat in another state gets that state's papers instead.
+   * If the list has nothing for the state, the seed produces nothing: an empty
+   * local-news screen that says so is honest, and inventing a masthead to fill
+   * it would not be.
+   *
+   * Every cutting is filed against the PRINCIPAL, because this is the desk's
+   * own coverage. Rivals are tracked on the People screen and are deliberately
+   * left with no cuttings: writing press about somebody else's record is the
+   * line this module does not cross.
+   */
+  const personaMentions: PersonaMention[] = []
+
+  if (papers.length > 0 && places.length > 0) {
+    CUTTINGS.forEach((cut, i) => {
+      const place = places[i % places.length] ?? constituency
+      const paper = papers[i % papers.length]
+      if (!paper) return
+      const fill = (t: string) => t.replaceAll('{place}', place)
+      // Mid-morning and evening editions, so the screen's date line has a
+      // clock time on it rather than everything reading as local midnight.
+      const at = new Date(Date.now() - cut.age * 86_400_000)
+      at.setHours(i % 2 === 0 ? 9 : 18, (i * 7) % 60, 0, 0)
+      personaMentions.push({
+        id: `demo_n_${principalKey}_${i}`,
+        personaId: `demo_p_${principal.key}`,
+        persona: principal.name,
+        url: paper.indexUrl,
+        headline: fill(cut.headline),
+        publisher: paper.label,
+        publishedAt: at.toISOString(),
+        language: paper.language,
+        excerpt: fill(cut.excerpt),
+        place,
+        stance: cut.tone,
+        sentiment: TONE_SENTIMENT[cut.tone],
+        fake: null,
+        summary: fill(cut.excerpt),
+        recommendation: null,
+        seenAt: at.toISOString(),
+      })
+    })
+  }
+
+  return { grievances, issues, actions, influencers, mentions, personas, personaMentions }
 }

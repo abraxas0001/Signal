@@ -23,6 +23,7 @@ import {
   Upload,
   User,
   UserPlus,
+  UserRound,
 } from 'lucide-react'
 import { Button, Card, SignalGlyph } from '@/components/ui'
 import { EntryPitch } from '@/components/EntryPitch'
@@ -205,16 +206,16 @@ export function PassphraseField({
     <div>
       <label
         htmlFor={id}
-        className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3"
+        className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-2"
       >
         {label}
       </label>
       <div
         className={
-          'mt-1.5 flex items-stretch overflow-hidden rounded-full border bg-[var(--surface-2)] transition-colors ' +
-          (invalid
-            ? 'border-[var(--neg)]'
-            : 'border-[var(--border-interactive)] focus-within:border-[var(--accent)]')
+          // A hairline rule, not the interactive slate border: in the
+          // reference these fields are fill-first, with the edge barely there.
+          'mt-1.5 flex items-stretch overflow-hidden rounded-[14px] border bg-[var(--surface)] transition-colors ' +
+          (invalid ? 'border-[var(--neg)]' : 'border-[var(--rule)] focus-within:border-[var(--accent)]')
         }
       >
         <input
@@ -274,6 +275,11 @@ function NameField({
   autoCapitalize = 'words',
   spellCheck,
   maxLength = VAULT_PARAMS.maxName,
+  /**
+   * A leading glyph inside the field, as the reference's identity field has.
+   * Off by default so the create and restore forms are unchanged.
+   */
+  leading,
 }: {
   id: string
   label: string
@@ -286,32 +292,45 @@ function NameField({
   autoCapitalize?: 'off' | 'none' | 'words'
   spellCheck?: boolean
   maxLength?: number
+  leading?: boolean
 }) {
   return (
     <div>
       <label
         htmlFor={id}
-        className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3"
+        className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-2"
       >
         {label}
       </label>
-      <input
-        id={id}
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && onEnter) onEnter()
-        }}
-        maxLength={maxLength}
-        autoComplete={autoComplete}
-        autoCapitalize={autoCapitalize}
-        autoCorrect={autoCapitalize === 'words' ? 'on' : 'off'}
-        spellCheck={spellCheck}
-        enterKeyHint="next"
-        autoFocus={autoFocus}
-        className="mt-1.5 h-12 w-full rounded-full border border-[var(--border-interactive)] bg-[var(--surface-2)] px-4 text-[16px] outline-none transition-colors focus:border-[var(--accent)] placeholder:text-ink-3"
-      />
+      <div className="relative">
+        {leading && (
+          <UserRound
+            size={17}
+            aria-hidden
+            className="pointer-events-none absolute left-4 top-1/2 mt-[3px] -translate-y-1/2 text-ink-3"
+          />
+        )}
+        <input
+          id={id}
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && onEnter) onEnter()
+          }}
+          maxLength={maxLength}
+          autoComplete={autoComplete}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={autoCapitalize === 'words' ? 'on' : 'off'}
+          spellCheck={spellCheck}
+          enterKeyHint="next"
+          autoFocus={autoFocus}
+          className={cn(
+            'mt-1.5 h-12 w-full rounded-[14px] border border-[var(--rule)] bg-[var(--surface)] text-[16px] outline-none transition-colors focus:border-[var(--accent)] placeholder:text-ink-3',
+            leading ? 'pl-11 pr-4' : 'px-4',
+          )}
+        />
+      </div>
       {hint && <p className="mt-1.5 text-xs text-ink-3">{hint}</p>}
     </div>
   )
@@ -536,30 +555,6 @@ function CreateButton({ onClick }: { onClick: () => void }) {
     >
       <UserPlus size={16} aria-hidden />
       Create new account
-    </button>
-  )
-}
-
-/**
- * The demo, kept short.
- *
- * It was a full-weight violet slab repeated on three steps of this screen,
- * which made the loudest control on a sign-in page an advertisement. The pitch
- * beside the card now carries the "see what this is" job — its specimen opens
- * the same demo — so here it only needs to be findable.
- */
-function DemoLink({ onDemo }: { onDemo: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        haptic.tap()
-        onDemo()
-      }}
-      className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-full text-sm font-semibold text-[var(--accent-2)] transition-colors hover:bg-[var(--accent-2-soft)]"
-    >
-      <Eye size={16} aria-hidden />
-      Try the demo &mdash; no account needed
     </button>
   )
 }
@@ -841,10 +836,13 @@ export function EntryScreen({
       )}
 
       {step === 'login' && (
-        <Card level="lift">
-          <h1 className="text-xl font-bold tracking-[-0.015em]">Log in</h1>
-          <p className="mt-1 text-sm leading-relaxed text-ink-2">
-            An account on this device, or the desk ID your office issued you.
+        // The reference's card carries 44px of padding and a 28px radius, both
+        // measured off it; the product's standing 24px card padding read as
+        // cramped at this width.
+        <Card level="lift" className="lg:rounded-[32px] lg:p-11">
+          <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em]">Welcome back</h1>
+          <p className="mt-1.5 text-[14px] leading-relaxed text-ink-2">
+            Log in to continue to your Signal dashboard.
           </p>
 
           {/* Not decoration: she pressed a padlock and the app took her desk
@@ -859,21 +857,59 @@ export function EntryScreen({
             </div>
           )}
 
+          {/* Whoever this device already holds, as a dropdown that fills the
+              name field on pick. The reference's "saved on this device" row,
+              backed by the vault accounts that were always here. */}
           {accounts.length > 0 && (
-            <SavedAccounts
-              accounts={accounts}
-              chosen={identifier}
-              onPick={(picked) => {
-                setIdentifier(picked)
-                setPassword('')
-                setError(null)
-                passwordRef.current?.focus()
-              }}
-            />
+            <>
+              <div className="mt-5">
+                <label
+                  htmlFor="entry-saved"
+                  className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-2"
+                >
+                  Saved on this device
+                </label>
+                <div className="relative mt-1.5">
+                  <span className="pointer-events-none absolute left-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full bg-[var(--accent)] text-[var(--accent-fg)]">
+                    <UserRound size={17} aria-hidden />
+                  </span>
+                  <select
+                    id="entry-saved"
+                    value={accounts.some((a) => a.name === identifier) ? identifier : ''}
+                    onChange={(e) => {
+                      const picked = e.target.value
+                      if (!picked) return
+                      setIdentifier(picked)
+                      setPassword('')
+                      setError(null)
+                      passwordRef.current?.focus()
+                    }}
+                    // `[&::-ms-expand]` and appearance-none together: without
+                    // both, Chromium paints its own arrow beside the custom
+                    // chevron and the pair reads as a smudged glyph.
+                    className="h-14 w-full appearance-none rounded-[14px] border border-transparent bg-[color-mix(in_oklab,var(--accent)_9%,var(--surface))] bg-none pl-[3.4rem] pr-11 text-[16px] font-medium outline-none transition-colors focus:border-[var(--accent)] [&::-ms-expand]:hidden"
+                  >
+                    <option value="">Choose an account</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.name}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="mb-3 mt-7 flex items-center gap-3" aria-hidden>
+                <span className="h-px flex-1 bg-[var(--rule)]" />
+                <span className="text-[12px] font-medium text-ink-3">or</span>
+                <span className="h-px flex-1 bg-[var(--rule)]" />
+              </div>
+            </>
           )}
 
-          <div className="mt-5 space-y-4">
+          <div className={cn('space-y-4', accounts.length === 0 && 'mt-5')}>
             <NameField
+              leading
               id="entry-identifier"
               label="Name or desk ID"
               value={identifier}
@@ -888,20 +924,31 @@ export function EntryScreen({
               maxLength={80}
               autoFocus={identifier.length === 0}
             />
-            <PassphraseField
-              id="entry-password"
-              label="Password"
-              value={password}
-              onChange={(v) => {
-                setPassword(v)
-                if (error) setError(null)
-              }}
-              onEnter={() => void doLogin()}
-              autoComplete="current-password"
-              invalid={error !== null}
-              inputRef={passwordRef}
-              autoFocus={identifier.length > 0}
-            />
+            <div>
+              <PassphraseField
+                id="entry-password"
+                label="Password"
+                value={password}
+                onChange={(v) => {
+                  setPassword(v)
+                  if (error) setError(null)
+                }}
+                onEnter={() => void doLogin()}
+                autoComplete="current-password"
+                invalid={error !== null}
+                inputRef={passwordRef}
+                autoFocus={identifier.length > 0}
+              />
+              <div className="mt-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => goto('recover')}
+                  className="text-[13px] font-semibold text-[var(--accent)] hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            </div>
           </div>
 
           {error && (
@@ -910,22 +957,64 @@ export function EntryScreen({
             </div>
           )}
 
-          <Button className="mt-5 w-full" onClick={() => void doLogin()} disabled={busy}>
+          {/* The reference's gradient, sampled across its actual button: a
+              vivid blue that holds most of the width before turning violet at
+              the right end. An even accent-to-violet blend went muddy in the
+              middle and never reached either end's saturation. */}
+          <Button
+            className="mt-5 h-[52px] w-full border-0 text-[15px] text-[var(--accent-fg)]"
+            style={{
+              borderRadius: 14,
+              background: 'linear-gradient(90deg, #1770fe 0%, #1e57f7 52%, #5c2cfa 100%)',
+              boxShadow: '0 10px 26px -8px rgb(50 60 240 / 0.55)',
+            }}
+            onClick={() => void doLogin()}
+            disabled={busy}
+          >
             <Busy label={busy ? 'Opening' : 'Log in'} busy={busy} />
           </Button>
 
-          <QuietLink onClick={() => goto('recover')}>Forgotten password?</QuietLink>
+          {/* Where the reference puts its identity providers. Signal has no
+              OAuth yet, so the one honest door here is the demo desk. */}
+          {onDemo !== undefined && (
+            <>
+              <div className="my-4 flex items-center gap-3" aria-hidden>
+                <span className="h-px flex-1 bg-[var(--rule)]" />
+                <span className="text-[12px] font-medium text-ink-3">or</span>
+                <span className="h-px flex-1 bg-[var(--rule)]" />
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                style={{ borderRadius: 14 }}
+                onClick={() => {
+                  haptic.tap()
+                  onDemo()
+                }}
+              >
+                <Eye size={16} aria-hidden />
+                Try the demo account
+              </Button>
+            </>
+          )}
 
-          <div className="my-4 flex items-center gap-3" aria-hidden>
-            <span className="h-px flex-1 bg-[var(--rule)]" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">
-              or
-            </span>
-            <span className="h-px flex-1 bg-[var(--rule)]" />
+          <p className="mt-5 text-center text-[13.5px] text-ink-2">
+            New to Signal?{' '}
+            <button
+              type="button"
+              onClick={() => goto('create')}
+              className="font-semibold text-[var(--accent)] underline underline-offset-2"
+            >
+              Create new account
+            </button>
+          </p>
+
+          {/* No rule above it and a slate shield, not a green one: in the
+              reference this line is a quiet footnote, not a status message. */}
+          <div className="mt-6 flex items-center justify-center gap-2 text-[12.5px] text-ink-2">
+            <ShieldCheck size={15} className="shrink-0 text-ink-3" aria-hidden />
+            <span>Enterprise-grade security. Your data is private and protected.</span>
           </div>
-
-          <CreateButton onClick={() => goto('create')} />
-          {onDemo !== undefined && <DemoLink onDemo={onDemo} />}
         </Card>
       )}
 
@@ -1257,20 +1346,33 @@ export function EntryScreen({
       {/* The ambient field the stylesheet has always defined and nothing ever
           mounted. It is `position: fixed`, costs one rasterisation, and turns
           itself off on low-end devices and under reduced motion. */}
-      {variant === 'page' && (
-        <div className="field" aria-hidden>
-          <span />
-          <span />
-          <span />
-        </div>
-      )}
+      {/* The entrance paints `.entry-ground` instead of the drifting field:
+          the reference's sheet is a still, near-white one, and the two ambient
+          systems together read muddier than the target. Inside the product the
+          field still runs. */}
+      {variant === 'page' && <div className="entry-ground fixed inset-0 z-0" aria-hidden />}
 
       <div
         className={cn(
-          'relative z-[1] min-h-screen-safe',
-          variant === 'page' && 'lg:grid lg:place-items-center',
+          'relative z-[1] min-h-screen-safe overflow-x-clip',
+          variant === 'page' && 'entry-accent lg:grid lg:place-items-center',
         )}
       >
+        {/* The reference's leader-and-parliament scene, cut straight out of
+            the owner's art and bled off the page's own bottom-left corner the
+            way the reference does. Tall screens only: on a short window it
+            would climb into the feature list. */}
+        {variant === 'page' && (
+          <img
+            src="/entry/leader-scene.png"
+            alt=""
+            aria-hidden
+            draggable={false}
+            // 460px is the cutout's own natural width, so it lands at exactly
+            // the size and position it occupies in the reference.
+            className="pointer-events-none absolute bottom-0 left-0 hidden w-[28.75vw] max-w-[460px] select-none lg:[@media(min-height:44rem)]:block"
+          />
+        )}
         <m.div
           variants={listStagger}
           initial="hidden"
@@ -1278,7 +1380,19 @@ export function EntryScreen({
           className={cn(
             'mx-auto w-full px-4 py-10 safe-b',
             variant === 'page'
-              ? 'max-w-6xl lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(0,25rem)] lg:items-center lg:gap-x-14 lg:px-8 lg:py-10'
+              ? // Column widths, gap and page margins are the reference's own,
+                // measured off it at 1600x971: a 492px card, a 56px gutter, and
+                // the asymmetric margins (68 left, 120 right) that keep the card
+                // off the screen edge without centring the whole layout.
+                // items-stretch, not items-center: in the reference the pitch
+                // column fills the height with its loop band sitting near the
+                // page's bottom edge, and a centred column left it floating
+                // with dead space under it.
+                // min-h in an arbitrary value, not the hand-written
+                // .min-h-screen-safe class: Tailwind cannot build an `lg:`
+                // variant for a class it did not generate, so that one silently
+                // did nothing here.
+                'max-w-[112rem] lg:grid lg:min-h-[100dvh] lg:grid-cols-[minmax(0,1fr)_30.75rem] lg:items-stretch lg:gap-x-14 lg:pl-[4.25rem] lg:pr-[7.5rem] lg:py-11'
               : 'max-w-md',
           )}
         >
@@ -1289,20 +1403,16 @@ export function EntryScreen({
           {variant === 'page' && (
             <m.div variants={fadeUp} className="mb-7 lg:hidden">
               <div className="flex items-center gap-2.5">
-                <span
-                  className="grid size-9 place-items-center rounded-xl text-[var(--accent-fg)] shadow-[var(--e2)]"
-                  style={{
-                    background:
-                      'linear-gradient(140deg, var(--accent) 0%, color-mix(in oklab, var(--accent) 74%, var(--aurora-2)) 100%)',
-                  }}
-                >
-                  <SignalGlyph size={17} />
+                <span className="shrink-0 text-[var(--accent)]">
+                  <SignalGlyph size={38} />
                 </span>
-                <span className="hed text-lg leading-none">Signal</span>
+                <span className="min-w-0">
+                  <span className="hed block text-lg leading-none">Signal</span>
+                  <span className="mt-1 block text-[11px] font-medium text-ink-3">
+                    Media Intelligence Platform
+                  </span>
+                </span>
               </div>
-              <p className="mt-3 max-w-[38ch] text-sm leading-relaxed text-ink-2">
-                Read any public post &mdash; the verdict, the grievance, and what to say back.
-              </p>
             </m.div>
           )}
 
@@ -1310,12 +1420,17 @@ export function EntryScreen({
               On a phone this container is not a grid, so `order` does nothing
               and the DOM sequence is what ships: the control that does the
               work first, the standing text under it. */}
-          <m.div variants={fadeUp} className="min-w-0 lg:order-2">
+          {/* Top-aligned to the reference's card edge rather than centred.
+              Our card is legitimately shorter than the reference's (one
+              identity button instead of two), so centring it left both edges
+              wrong; pinning the top makes the edge the eye actually reads
+              land where the reference puts it. */}
+          <m.div variants={fadeUp} className="min-w-0 lg:order-2 lg:mt-[26px] lg:self-start">
             {card}
           </m.div>
 
           {variant === 'page' && (
-            <div className="mt-12 min-w-0 lg:order-1 lg:mt-0">
+            <div className="mt-12 min-w-0 lg:order-1 lg:mt-0 lg:flex lg:flex-col">
               <EntryPitch onDemo={onDemo} />
             </div>
           )}

@@ -115,6 +115,22 @@ export function PostHighlights({
     matched.push({ post, report, score: report.analysis.sentiment.score })
   }
 
+  /**
+   * SENTIMENT, NOT REACH — and the headings below now say so.
+   *
+   * These two lists split on `sentiment.score`: how the comments under a post
+   * read, on a -100..100 scale. They were headed "What landed best" and "What
+   * drew criticism", and "landed" is the word every reader hears as reach.
+   * So the office's most-liked post of the week could sit under criticism —
+   * correctly, because the comments were hostile — and the card looked broken:
+   * "even if a post has more likes it is showing it is performing low".
+   *
+   * The arithmetic was never wrong. One measured number, one symmetric
+   * threshold either side of it, ties broken by magnitude. What was wrong was
+   * a heading that promised performance and delivered reception. The fix is
+   * the words, not the maths — renaming the thing to what it measures beats
+   * inventing a blended "performance" score out of two units that do not add.
+   */
   const landed = matched
     .filter((h) => h.score >= 15)
     .sort((a, b) => b.score - a.score)
@@ -139,7 +155,10 @@ export function PostHighlights({
     <div className="stack-tight">
       {landed.length > 0 && (
         <div>
-          <p className="kicker text-[var(--pos)]">What landed best</p>
+          <p className="kicker text-[var(--pos)]">Best received</p>
+          <p className="mt-0.5 text-xs text-ink-3">
+            Ranked by how the comments read, not by how far the post went.
+          </p>
           {/* One card, divided rows — not five floating cards. The rows are
               an index; the depth lives behind the tap. */}
           <Card padded={false} className="mt-2">
@@ -154,7 +173,11 @@ export function PostHighlights({
 
       {criticised.length > 0 && (
         <div>
-          <p className="kicker text-[var(--neg)]">What drew criticism</p>
+          <p className="kicker text-[var(--neg)]">Worst received</p>
+          <p className="mt-0.5 text-xs text-ink-3">
+            The comments read hostile. A post can be here and still be the
+            week&rsquo;s most-liked.
+          </p>
           <Card padded={false} className="mt-2">
             <ul className="divide-y divide-[var(--rule)] py-1">
               {criticised.map((h) => (
@@ -168,8 +191,8 @@ export function PostHighlights({
       {landed.length === 0 && criticised.length === 0 && (
         <Card>
           <p className="text-sm leading-relaxed text-ink-2">
-            {matched.length} {matched.length === 1 ? 'post' : 'posts'} read. No strong reactions
-            yet.
+            {matched.length} {matched.length === 1 ? 'post' : 'posts'} read. The comments on
+            them read neither warm nor hostile.
           </p>
         </Card>
       )}

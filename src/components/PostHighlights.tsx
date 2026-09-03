@@ -112,12 +112,40 @@ function useStoredReports(): Map<string, Report> | null {
 
 type Lens = 'overall' | 'platform' | 'positive' | 'negative'
 
+/**
+ * NAME EACH LENS AFTER WHAT IT ACTUALLY RANKS.
+ *
+ * The first one was "Overall (Top 5)", and `highlightsOf` orders by
+ * `Math.abs(score)` — the STRENGTH of the reaction, in either direction, ties
+ * broken by reactions. So a savaged post outranks a mildly-liked one, and a
+ * post with plenty of likes but calm comments sinks to the bottom. Read
+ * against a tab labelled "Overall", that is a scoreboard saying the office's
+ * popular post performed badly: "even if a post has more likes it is showing
+ * it is performing low".
+ *
+ * The ordering is the right one for this screen — the posts worth a person's
+ * attention this week are the ones that moved people, and a post nobody
+ * reacted to is not news. What was wrong is a label that promised a ranking
+ * of quality and delivered a ranking of intensity. So the label changed, not
+ * the sort: blending sentiment and engagement into one "performance" number
+ * would mean adding two things measured in different units and presenting the
+ * result as a fact.
+ */
 const LENSES: { id: Lens; label: string }[] = [
-  { id: 'overall', label: 'Overall (Top 5)' },
-  { id: 'platform', label: 'By Platform' },
-  { id: 'positive', label: 'Top Positive' },
-  { id: 'negative', label: 'Top Negative' },
+  { id: 'overall', label: 'Strongest reactions' },
+  { id: 'platform', label: 'By platform' },
+  { id: 'positive', label: 'Best received' },
+  { id: 'negative', label: 'Worst received' },
 ]
+
+/** What each lens ranks by, said under the strip so the order is never a guess. */
+const LENS_NOTE: Record<Lens, string> = {
+  overall:
+    'The five posts that moved people most, warm or hostile. Ranked by how strongly the comments read, not by likes — a much-liked post with calm comments sits low here.',
+  platform: 'Every read post on this platform, strongest reaction first.',
+  positive: 'Posts whose comments read warmest first.',
+  negative: 'Posts whose comments read most hostile first.',
+}
 
 const dayOf = (iso: string | null): string =>
   iso
@@ -545,7 +573,7 @@ function Reading({
     <div className="@container">
       <div className="grid items-stretch gap-2 @md:grid-cols-2 @2xl:grid-cols-3 @4xl:grid-cols-5">
       {/* ── 1 ────────────────────────────────────────────────────────────── */}
-      <Block n={1} icon={<TrendingUp size={13} aria-hidden />} title="Overall Performance" sub="How this post landed with your audience">
+      <Block n={1} icon={<TrendingUp size={13} aria-hidden />} title="How this post read" sub="Its tone, and how its reach compares with your typical post">
         <div className="flex items-center gap-2.5">
           <DonutGauge
             value={h.scoreOutOf100}
@@ -565,8 +593,8 @@ function Reading({
             </p>
             <p className="mt-0.5 text-[10px] leading-relaxed text-ink-3">
               {h.hasComments
-                ? 'How the audience answered, out of 100.'
-                : 'Read from the post itself.'}
+                ? 'Tone of the comments, out of 100. Not a measure of reach.'
+                : 'Tone of the post’s own words, out of 100. Not a measure of reach.'}
             </p>
           </div>
         </div>
@@ -582,13 +610,13 @@ function Reading({
                 background: h.versusTypical.pct >= 0 ? 'var(--pos-soft)' : 'var(--neg-soft)',
                 color: h.versusTypical.pct >= 0 ? 'var(--pos)' : 'var(--neg)',
               }}
-              title={`Against a mean of ${h.versusTypical.baseline} reactions over the ${h.versusTypical.posts} posts this desk holds for the account.`}
+              title={`The typical (median) post on this account drew ${h.versusTypical.baseline} reactions, over the ${h.versusTypical.posts} posts this desk holds that published a figure. Half did better, half did worse.`}
             >
               <TrendingUp size={11} className="mt-0.5 shrink-0" aria-hidden />
               <span>
-                {h.versusTypical.pct >= 0 ? 'Performing ' : 'Drawing '}
                 {Math.abs(Math.round(h.versusTypical.pct))}%{' '}
-                {h.versusTypical.pct >= 0 ? 'better than' : 'below'} your average {h.platform} post
+                {h.versusTypical.pct >= 0 ? 'above' : 'below'} your typical {h.platform} post
+                {' '}({h.versusTypical.baseline} reactions)
               </span>
             </p>
           ) : (

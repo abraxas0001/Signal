@@ -49,6 +49,40 @@ export const STOPWORDS = new Set<string>([
 ])
 
 /**
+ * Words that are real words but are never a TOPIC.
+ *
+ * Kept apart from STOPWORDS on purpose. A stopword carries no subject at all;
+ * these carry plenty — a slogan, a greeting, a kinship term, a bare verdict —
+ * they simply are not what an office means when it asks "what are people
+ * talking about". The desk reported the symptom exactly: "jai, aruna aka
+ * these are not topics".
+ *
+ * Callers that want SUBJECTS pass this; callers that want to know what people
+ * are literally saying, slogans included, do not. That keeps the base list
+ * lean, which is the rule this module was written under.
+ */
+export const NON_TOPIC = new Set<string>([
+  // slogans and chants
+  'jai', 'jay', 'jaihind', 'zindabad', 'zindabaad', 'amaram', 'vandanam',
+  'vandanalu', 'namaste', 'namaskar', 'namaskaram', 'pranam', 'pranams',
+  'jaibheem', 'jaibhim', 'జై', 'జయ', 'జిందాబాద్', 'नमस्ते', 'जय',
+  // kinship and address, which Indian comment threads are built out of
+  'anna', 'akka', 'aka', 'akkaya', 'annaya', 'bhai', 'bhaiya', 'bhaiyya',
+  'didi', 'amma', 'nanna', 'baba', 'uncle', 'aunty', 'sodara', 'bro', 'bhau',
+  'అన్న', 'అక్క', 'అమ్మ', 'నాన్న', 'భాయ్',
+  // bare verdicts: a mood, not a subject
+  'good', 'great', 'nice', 'best', 'super', 'superb', 'excellent', 'awesome',
+  'bad', 'worst', 'poor', 'wrong', 'true', 'false', 'right', 'correct',
+  'please', 'thanks', 'thank', 'thankyou', 'welcome', 'congrats',
+  'congratulations', 'wish', 'wishes', 'happy', 'sorry', 'ok', 'okay', 'yes',
+  'love', 'like', 'support', 'supporting', 'proud', 'god', 'bless',
+  'బాగుంది', 'మంచి', 'చాలా', 'అవును', 'కాదు',
+  // filler that survives the function-word list
+  'sab', 'sabhi', 'log', 'logo', 'logon', 'kuch', 'koi', 'bahut', 'bohot',
+  'matlab', 'yaar', 'arey', 'are', 'haan', 'han', 'nahi', 'phir', 'lekin',
+])
+
+/**
  * The top recurring terms across a set of short texts: post titles for the
  * themes row, comment quotes for the praise and criticism keywords.
  *
@@ -75,10 +109,19 @@ export function recurringTerms(
 ): string[] | null {
   if (!texts.length) return null
 
-  const stats = new Map<string, { count: number; score: number; bigram: boolean }>()
-  const bump = (term: string, weight: number, bigram: boolean): void => {
-    const s = stats.get(term) ?? { count: 0, score: 0, bigram }
-    s.count += 1
+  /**
+   * Documents, not repeats.
+   *
+   * The rule above says "a word used once is a sentence, not a theme", but the
+   * counter used to increment on every OCCURRENCE, so one comment shouting
+   * "jai jai jai" made "jai" a theme on its own. Counting distinct texts is
+   * what the sentence always meant, and it is what stops a single loud
+   * commenter setting the desk's agenda.
+   */
+  const stats = new Map<string, { docs: Set<number>; score: number; bigram: boolean }>()
+  const bump = (term: string, weight: number, bigram: boolean, doc: number): void => {
+    const s = stats.get(term) ?? { docs: new Set<number>(), score: 0, bigram }
+    s.docs.add(doc)
     s.score += weight
     stats.set(term, s)
   }
@@ -104,21 +147,32 @@ export function recurringTerms(
         return /^[a-z0-9]+$/.test(t) ? t.length >= 3 : t.length >= 2
       })
     tokens.forEach((t, i) => {
-      bump(t, weight, false)
+      bump(t, weight, false, idx)
       const next = tokens[i + 1]
       // Bigrams outrank their halves: "road repair" says more than "road".
-      if (next) bump(`${t} ${next}`, weight * 1.6, true)
+      if (next) bump(`${t} ${next}`, weight * 1.6, true, idx)
     })
   })
 
   const picked: string[] = []
   const candidates = [...stats.entries()]
-    .filter(([, s]) => s.count >= 2)
+    .filter(([, s]) => s.docs.size >= 2)
     .sort((a, b) => b[1].score - a[1].score)
+  const spoken = new Set<string>()
   for (const [term, s] of candidates) {
     if (picked.length >= max) break
     // A unigram already inside a chosen bigram would count the same words twice.
     if (!s.bigram && picked.some((p) => p.split(' ').includes(term))) continue
+    /*
+     * Nor may two bigrams share a word. One Telugu sentence was filling the
+     * whole list with its own sliding window — "జడచర్ల పట్టణానికి", then
+     * "పట్టణానికి నేడు", then "నేడు మరొక" — three rows that are one phrase
+     * read three times. A term earns its row only if it introduces a word the
+     * list has not already spent.
+     */
+    const words = term.split(' ')
+    if (s.bigram && words.some((w) => spoken.has(w))) continue
+    for (const w of words) spoken.add(w)
     picked.push(term)
   }
   return picked

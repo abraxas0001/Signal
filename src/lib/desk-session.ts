@@ -1,3 +1,4 @@
+import { drainCollectorInbox } from '@/lib/collector-inbox'
 import { PLAIN_CODEC, STORE_KEY, invalidateStore, setCodec, setStorageKey } from '@/lib/store'
 import { isLocked, resealDefaultScope, signOut } from '@/lib/vault'
 
@@ -227,6 +228,9 @@ export async function deskSignIn(deskId: string, passphrase: string): Promise<vo
   setStorageKey(scopeOf(id))
   setCodec(PLAIN_CODEC)
   startDeskSync()
+  // Whatever the collector walked before this sign-in is waiting on the
+  // server; take it now rather than at the first 60-second tick.
+  void drainInbox()
 }
 
 export function deskSignOut(): void {
@@ -298,7 +302,43 @@ export function restoreDeskIfActive(): boolean {
   startDeskSync()
   // Refresh from the server in the background; the local copy renders now.
   void pullFresh()
+  // And take delivery of anything the office's collector walked overnight,
+  // which is the common case: the machine runs while nobody is at the desk.
+  void drainInbox()
   return true
+}
+
+/**
+ * Take delivery of whatever the office's own collector has walked.
+ *
+ * THE MISSING HALF OF THE COLLECTOR. `scraper/collector.ts` runs on a machine
+ * in the office, drives that office's signed-in browser, and POSTs each
+ * reading to `/api/collector-inbox`, where it waits. `drainCollectorInbox`
+ * pulls those readings, merges them into the tracked handles, and acks them.
+ *
+ * It was written, exported, and called from nowhere. So the collector kept
+ * walking and the inbox kept filling, and not one reading ever reached a
+ * screen — which is exactly what "the scraping was happening and then it
+ * stopped" looks like from the desk: it never stopped collecting, it stopped
+ * being collected FROM.
+ *
+ * The token is the desk session's own: `/api/collector-inbox` verifies it
+ * with `verifyToken` from desk-sync, the same issuer that minted this
+ * session, so no second credential is involved.
+ *
+ * Deliberately quiet. A merge that lands new readings fires the same refresh
+ * a server pull does, so the open desk repaints; a drain that finds nothing
+ * costs one request and says nothing at all.
+ */
+async function drainInbox(): Promise<void> {
+  const s = readDeskSession()
+  if (!s) return
+  try {
+    const result = await drainCollectorInbox(s.token)
+    if (result.merged > 0 || result.commentsReceived > 0) notifyRefresh()
+  } catch {
+    /* the collector is a convenience; a desk without one works unchanged */
+  }
 }
 
 async function pullFresh(): Promise<void> {
@@ -339,7 +379,12 @@ export function startDeskSync(): void {
   timer = setInterval(() => {
     ticks += 1
     void syncOnce()
-    if (ticks % 3 === 0) void pullFresh()
+    if (ticks % 3 === 0) {
+      void pullFresh()
+      // Same cadence as the server pull: a collector finishing a walk while
+      // the desk is open reaches the screen inside a minute.
+      void drainInbox()
+    }
   }, 20_000)
 }
 

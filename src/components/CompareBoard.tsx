@@ -234,7 +234,7 @@ export function CompareBoard({
   const rows: Row[] = [
     {
       key: 'reach',
-      label: 'Reach over platforms',
+      label: 'Followers over platforms',
       sub: 'Followers on each platform, from the latest reading. Hover a ring for the figure.',
       cell: (p) => {
         if (p.platforms.length === 0) {
@@ -252,7 +252,7 @@ export function CompareBoard({
                 color: RING_COLOR[s.platform] ?? 'var(--chart-1)',
               }))}
               centerLabel={p.totalReach == null ? '' : compact(p.totalReach)}
-              centerSub="total reach"
+              centerSub="total followers"
               className="shrink-0"
             />
             <ul className="min-w-0 flex-1 space-y-1">

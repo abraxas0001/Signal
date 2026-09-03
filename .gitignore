@@ -46,3 +46,6 @@ docs/
 # is ignored for the same reason: this is other people's words, and a scraper
 # intermediate has no business in the history.
 scraper/demo-comments.json
+
+# The collector's desk token. A bearer credential; never commit.
+.collector-session.json

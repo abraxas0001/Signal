@@ -1042,7 +1042,18 @@ function readSaved(): ScanJobState | null {
  * handles an account switch mid-run.
  */
 function hydrate(): void {
-  const key = activeStorageKey()
+  /**
+   * KEYED THE SAME WAY THE JOB IS SAVED.
+   *
+   * `persist` writes to `deskKey(JOB_KEY)`, which carries the PERSONA as well
+   * as the account; this guard compared `activeStorageKey()`, which carries
+   * only the account. Two personas on one account therefore shared a guard
+   * value: switching from A to B left `loadedFor` unchanged, so hydrate
+   * returned early and B was shown A's half-finished sync — then the next
+   * save wrote it into B's key. The guard has to be the storage identity, not
+   * a prefix of it.
+   */
+  const key = deskKey(JOB_KEY)
   if (loadedFor === key || controller) return
   loadedFor = key
   state = readSaved() ?? idle()
@@ -1124,7 +1135,7 @@ export function start(input: ScanJobInput): void {
 
   const c = new AbortController()
   controller = c
-  loadedFor = activeStorageKey()
+  loadedFor = deskKey(JOB_KEY)
 
   state = {
     status: input.kind === 'sync' ? 'scanning' : 'reading',
@@ -1189,8 +1200,10 @@ async function run(input: ScanJobInput, signal: AbortSignal): Promise<void> {
    * namespace is live at the moment of the call. So the run remembers where it
    * started and stops the moment that changes.
    */
-  const homeKey = activeStorageKey()
-  const sameDesk = (): boolean => activeStorageKey() === homeKey
+  // Same reasoning as `hydrate`: a persona switch is a different desk, and a
+  // run that kept going across one would file its stories into the wrong one.
+  const homeKey = deskKey(JOB_KEY)
+  const sameDesk = (): boolean => deskKey(JOB_KEY) === homeKey
 
   /**
    * A run the reader stopped.

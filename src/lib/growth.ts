@@ -51,7 +51,19 @@ function readings(h: TrackedHandle): FollowerReading[] {
     .sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt))
 }
 
-export function growthFor(h: TrackedHandle): HandleGrowth {
+/**
+ * @param targetDays How far back the comparison should reach, from the window
+ *   the reader has chosen. The baseline is the reading NEAREST that age which
+ *   still clears the same-morning floor, so "last 30 days" compares against a
+ *   month ago rather than always against last week.
+ *
+ *   Where no reading is that old, the oldest comparable one is used instead and
+ *   `baseline.takenAt` says which. The card prints that date rather than a
+ *   period it did not actually measure: on a desk holding four days of readings
+ *   the seven and thirty day figures are necessarily the same number, and the
+ *   honest thing is to name the day both are measured from.
+ */
+export function growthFor(h: TrackedHandle, targetDays = 7): HandleGrowth {
   const all = readings(h)
   const latest = all[all.length - 1] ?? null
 
@@ -74,22 +86,16 @@ export function growthFor(h: TrackedHandle): HandleGrowth {
     .filter((r) => latestAt - Date.parse(r.takenAt) >= (20 / 24) * DAY_MS)
   if (candidates.length === 0) return empty
 
-  // Prefer a reading six to nine days old — the closest thing to "last week"
-  // that was actually taken — and within that band the one nearest seven days.
-  const weekOld = candidates.filter((r) => {
-    const age = latestAt - Date.parse(r.takenAt)
-    return age >= 6 * DAY_MS && age <= 9 * DAY_MS
-  })
-  const baseline =
-    weekOld.length > 0
-      ? weekOld.reduce((best, r) =>
-          Math.abs(latestAt - Date.parse(r.takenAt) - 7 * DAY_MS) <
-          Math.abs(latestAt - Date.parse(best.takenAt) - 7 * DAY_MS)
-            ? r
-            : best,
-        )
-      : // Otherwise the most recent reading that clears the three-day floor.
-        candidates[candidates.length - 1]!
+  // The reading closest to the age the reader asked for. Ties and gaps both
+  // resolve to "nearest", so a desk with a sparse history still compares
+  // against its best available anchor instead of refusing.
+  const want = targetDays * DAY_MS
+  const baseline = candidates.reduce((best, r) =>
+    Math.abs(latestAt - Date.parse(r.takenAt) - want) <
+    Math.abs(latestAt - Date.parse(best.takenAt) - want)
+      ? r
+      : best,
+  )
 
   const delta = latest.followers - baseline.followers
   return {
@@ -110,11 +116,17 @@ export interface GrowthSummary {
   /** The total delta as a share of the summed baselines. */
   totalPct: number | null
   /** Per-platform deltas, only over the measured handles. */
-  byPlatform: { platform: TrackedHandle['platform']; delta: number; pct: number | null }[]
+  byPlatform: {
+    platform: TrackedHandle['platform']
+    delta: number
+    pct: number | null
+    /** ISO date the delta is measured from, so the card can name it. */
+    since: string | null
+  }[]
 }
 
-export function growthSummary(handles: TrackedHandle[]): GrowthSummary {
-  const grown = handles.map(growthFor).filter((g) => g.latest !== null)
+export function growthSummary(handles: TrackedHandle[], targetDays = 7): GrowthSummary {
+  const grown = handles.map((h) => growthFor(h, targetDays)).filter((g) => g.latest !== null)
   const measured = grown.filter((g) => g.baseline !== null)
   const single = grown.filter((g) => g.baseline === null)
 
@@ -127,12 +139,16 @@ export function growthSummary(handles: TrackedHandle[]): GrowthSummary {
 
   const byPlatform = new Map<
     TrackedHandle['platform'],
-    { delta: number; base: number }
+    { delta: number; base: number; since: string | null }
   >()
   for (const g of measured) {
-    const entry = byPlatform.get(g.platform) ?? { delta: 0, base: 0 }
+    const entry = byPlatform.get(g.platform) ?? { delta: 0, base: 0, since: null }
     entry.delta += g.delta ?? 0
     entry.base += g.baseline?.followers ?? 0
+    // The oldest baseline across this platform's handles: the date the figure
+    // beside it is actually measured from.
+    const at = g.baseline?.takenAt ?? null
+    if (at && (entry.since === null || at < entry.since)) entry.since = at
     byPlatform.set(g.platform, entry)
   }
 
@@ -146,6 +162,7 @@ export function growthSummary(handles: TrackedHandle[]): GrowthSummary {
         platform,
         delta: v.delta,
         pct: v.base > 0 ? (v.delta / v.base) * 100 : null,
+        since: v.since,
       }))
       .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)),
   }

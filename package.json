@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Signal — paste any public social media post link and get a full intelligence readout: what it says, what it means, how it landed, and what to do about it.",
+  "description": "Signal \u2014 paste any public social media post link and get a full intelligence readout: what it says, what it means, how it landed, and what to do about it.",
   "scripts": {
     "dev": "netlify dev",
     "dev:vite": "vite",
@@ -23,10 +23,11 @@
     "test:export": "tsx scripts/test-export.ts",
     "test:typography": "tsx scripts/test-typography.ts",
     "test:ssrf": "tsx scripts/test-ssrf.ts",
-    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:scoping && npm run test:own && npm run test:separation && npm run test:back && npm run test:places && npm run test:autoconfig && npm run test:matching && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:sync && npm run test:comments && npm run test:export && npm run test:extract && npm run test:news",
+    "test": "npm run typecheck && npm run test:ssrf && npm run test:schema && npm run test:scoping && npm run test:own && npm run test:separation && npm run test:personas && npm run test:back && npm run test:places && npm run test:autoconfig && npm run test:matching && npm run test:contrast && npm run test:typography && npm run test:handles && npm run test:sync && npm run test:comments && npm run test:collector && npm run test:export && npm run test:extract && npm run test:news",
     "test:scoping": "tsx scripts/test-scoping.ts",
     "test:own": "tsx scripts/test-own.ts",
     "test:separation": "tsx scripts/test-separation.ts",
+    "test:personas": "tsx scripts/test-personas.ts",
     "test:places": "tsx scripts/test-places.ts",
     "test:autoconfig": "tsx scripts/test-autoconfig.ts",
     "test:matching": "tsx scripts/test-matching.ts",
@@ -47,7 +48,9 @@
     "desk:provision": "tsx --env-file-if-exists=.env scraper/provision-desk.ts",
     "desk:push": "tsx --env-file-if-exists=.env scraper/push-desk.ts",
     "scraper:followers": "tsx --env-file-if-exists=.env scraper/refresh-followers.ts",
-    "desk:pull": "tsx --env-file-if-exists=.env scraper/pull-desk.ts"
+    "desk:pull": "tsx --env-file-if-exists=.env scraper/pull-desk.ts",
+    "collector": "tsx --env-file-if-exists=.env scraper/collector.ts",
+    "test:collector": "tsx scripts/test-collector.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

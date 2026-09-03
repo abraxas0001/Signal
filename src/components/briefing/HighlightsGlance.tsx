@@ -103,14 +103,25 @@ export function HighlightsGlance({
   }
 
   const top = highlights.slice(0, 3)
+  /**
+   * How many of these were read WITH their comments.
+   *
+   * The office reported it as "sentiment and emotions fetching data from post
+   * not comments". The model already knows the difference — `hasComments` —
+   * but the card printed the same chip either way, so a mood taken off the
+   * post's own wording looked identical to one the audience actually gave.
+   */
+  const withComments = highlights.filter((x) => x.hasComments).length
 
   return (
     <Card className="p-4 sm:p-5">
       <GlanceHead
         title="Post highlights"
         sub={`The posts that moved people most, of ${highlights.length} read in full${
-          unread > 0 ? ` · ${unread} not read yet` : ''
-        }`}
+          withComments < highlights.length
+            ? ` · ${withComments} scored from their comments`
+            : ''
+        }${unread > 0 ? ` · ${unread} not read yet` : ''}`}
         onExplore={onExplore}
       />
 
@@ -141,7 +152,24 @@ export function HighlightsGlance({
                     screen, where a rationale sits beside it. */}
                 <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
                   <PlatformBadge platform={h.platform} size={15} />
-                  <Chip tone={scoreTone(h.score)}>{h.narrative ?? h.label}</Chip>
+                  <Chip
+                    tone={scoreTone(h.score)}
+                    title={
+                      h.hasComments
+                        ? 'From the comments under this post: the audience answering'
+                        : 'From the post’s own wording. No comments were read under it, so this is its register, not a reaction.'
+                    }
+                  >
+                    {h.narrative ?? h.label}
+                  </Chip>
+                  {!h.hasComments && (
+                    <span
+                      className="text-[10.5px] font-medium text-ink-3"
+                      title="No comments were read under this post, so the mood above is the post's own register rather than the audience's answer."
+                    >
+                      post only
+                    </span>
+                  )}
                   <span className="tnum text-[11px] text-ink-3" title={h.reactionsNote}>
                     {h.measured
                       ? `${compact(h.reactions)} reactions`

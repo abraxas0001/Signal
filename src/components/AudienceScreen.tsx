@@ -255,6 +255,41 @@ function Initial({ name }: { name: string | null }) {
 
 /* ── the screen ──────────────────────────────────────────────────────────── */
 
+/**
+ * The comments on one side, for when no word recurs across them.
+ *
+ * A word has to appear in two or more comments before it is a theme rather
+ * than a turn of phrase, and an account reading quotes only a handful a side —
+ * so on most desks these panels sat empty while the desk held the very
+ * comments that explain the reading. The words are the better summary when
+ * they exist; the comments are the honest answer when they do not.
+ */
+function SideQuotes({
+  quotes,
+  tone,
+}: {
+  quotes: { text: string }[]
+  tone: 'pos' | 'neg'
+}) {
+  const skin =
+    tone === 'pos'
+      ? { fill: 'var(--pos-soft)', text: 'var(--pos)' }
+      : { fill: 'var(--neg-soft)', text: 'var(--neg)' }
+  return (
+    <ul className="space-y-1.5">
+      {quotes.slice(0, 3).map((q) => (
+        <li
+          key={q.text}
+          className="rounded-[8px] px-2 py-1.5 text-[11.5px] leading-relaxed"
+          style={{ background: skin.fill, color: skin.text }}
+        >
+          &ldquo;{q.text.length > 130 ? `${q.text.slice(0, 130)}…` : q.text}&rdquo;
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function AudienceScreen({
   onClose,
   onOpenAccounts,
@@ -512,7 +547,13 @@ export function AudienceScreen({
                   <Tile
                     label="Likes on comments"
                     value={model.commentLikes == null ? 'NA' : compact(model.commentLikes)}
-                    note={`across ${model.commentLikesOver} comments`}
+                    // The two tiles here count over DIFFERENT sets — likes over
+                    // the comments that published a like figure, names over the
+                    // comments stored whole — and side by side their unexplained
+                    // denominators read as a contradiction. Each now says which
+                    // set it counted.
+                    note={`on the ${model.commentLikesOver} comments that show a like count`}
+                    hint="How many likes other readers gave the comments themselves. Almost nobody likes a comment on a politician's post, so this is usually very small; it is printed with its denominator rather than as a share that would flatter it."
                     icon={<ThumbsUp size={17} aria-hidden />}
                     tint={{ bg: 'var(--accent-soft)', fg: 'var(--accent)' }}
                   />
@@ -522,7 +563,7 @@ export function AudienceScreen({
                   <Tile
                     label="Names seen"
                     value={compact(model.distinctAuthors)}
-                    note={`on ${model.authoredComments} of ${model.storedComments} comments`}
+                    note={`distinct names on ${model.authoredComments} named comments`}
                     hint={`Distinct names, not a count of people: one person under two names counts twice. Counted over the ${model.storedComments} comments stored whole, which is a sample of the ${model.commentsRead} counted.`}
                     icon={<Users size={17} aria-hidden />}
                     tint={{ bg: 'var(--info-soft)', fg: 'var(--info)' }}
@@ -709,41 +750,35 @@ export function AudienceScreen({
                   <div className="flex min-w-0 flex-col gap-3">
                     <div className="grid gap-3 @md:grid-cols-2">
                       <Panel
-                        title="Top praise"
-                        sub={`Words across ${positiveQuotes} praising comments.`}
+                        title="What they praised"
+                        sub={`In their own words, from ${positiveQuotes} praising comments.`}
                         icon={<ThumbsUp size={14} className="text-[var(--pos)]" aria-hidden />}
                       >
-                        {model.praise.length === 0 ? (
-                          <p className="text-[11.5px] leading-relaxed text-ink-3">
-                            {positiveQuotes === 0
-                              ? 'The readings quoted no praising comments.'
-                              : `No word appears in two of those ${positiveQuotes}.`}
-                          </p>
+                        {positiveQuotes > 0 ? (
+                          <SideQuotes
+                            tone="pos"
+                            quotes={model.quotes.filter((q) => q.side === 'positive')}
+                          />
                         ) : (
-                          <ul>
-                            {model.praise.map((t) => (
-                              <ThemeRow key={t.term} term={t.term} count={t.count} tone="pos" />
-                            ))}
-                          </ul>
+                          <p className="text-[11.5px] leading-relaxed text-ink-3">
+                            The readings quoted no praising comments.
+                          </p>
                         )}
                       </Panel>
                       <Panel
-                        title="Top complaints"
-                        sub={`Words across ${negativeQuotes} critical comments.`}
+                        title="What they objected to"
+                        sub={`In their own words, from ${negativeQuotes} critical comments.`}
                         icon={<TriangleAlert size={14} className="text-[var(--neg)]" aria-hidden />}
                       >
-                        {model.complaints.length === 0 ? (
-                          <p className="text-[11.5px] leading-relaxed text-ink-3">
-                            {negativeQuotes === 0
-                              ? `No critical comment was quoted out of the ${model.commentsRead} counted. That is a finding, not a gap.`
-                              : `No word appears in two of those ${negativeQuotes}.`}
-                          </p>
+                        {negativeQuotes > 0 ? (
+                          <SideQuotes
+                            tone="neg"
+                            quotes={model.quotes.filter((q) => q.side === 'negative')}
+                          />
                         ) : (
-                          <ul>
-                            {model.complaints.map((t) => (
-                              <ThemeRow key={t.term} term={t.term} count={t.count} tone="neg" />
-                            ))}
-                          </ul>
+                          <p className="text-[11.5px] leading-relaxed text-ink-3">
+                            {`No critical comment was quoted out of the ${model.commentsRead} counted. That is a finding, not a gap.`}
+                          </p>
                         )}
                       </Panel>
                     </div>

@@ -70,7 +70,13 @@ export function isDemoMode(): boolean {
 // both into "followers across your accounts". The cause is fixed in
 // lib/personas.ts (the demo is never persona-scoped); this bump is what clears
 // the merged list out of browsers that already have one.
-const SEED_VERSION = '22'
+// 23: a fresh dated follower reading across the whole roster (3 Sept), so
+// every account carries three readings spanning 27 Aug to 3 Sept instead of
+// two inside four days. The growth chart drew a flat single line because the
+// history was too short to have a shape, not because the arithmetic was
+// wrong. A namespace seeded before this keeps the old two readings until the
+// version moves, so this bump is what actually delivers the new data.
+const SEED_VERSION = '23'
 const SEED_KEY = 'signal.demo.seed'
 
 /**

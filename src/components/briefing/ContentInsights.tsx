@@ -198,7 +198,9 @@ function PostTable({
     { h: 'Post', why: 'The post, and how its audience answered' },
     { h: 'App', why: 'Which platform it was posted on' },
     ...(showViews ? [{ h: 'Views', why: 'View count, where the platform publishes one' }] : []),
-    { h: 'Likes', why: 'Likes plus comments plus shares, as published' },
+    // Headed for what it holds: this column is the SUM of likes, comments and
+    // shares, and under the word "Likes" a post with 546 likes read as 720.
+    { h: 'Reactions', why: 'Likes plus comments plus shares, as published' },
     { h: 'Mood', why: 'The audience reaction from the full reading of the post' },
   ]
 
@@ -346,10 +348,15 @@ export function ContentInsights({
       const ranked = [...rows].sort((a, b) => scoreOf(b) - scoreOf(a))
       // Eight a side: the section has the height for them, and a top three
       // on a desk holding a hundred posts is a sample, not a ranking.
-      const half = Math.min(8, Math.floor(ranked.length / 2))
+      // The bottom is cut from what the top did not take. Slicing both ends of
+      // the same list overlapped whenever there were fewer than sixteen posts:
+      // with ten, the top took ranks 1-8 and the bottom took 6-10, so three
+      // posts were printed as both top-performing and underperforming.
+      const top = ranked.slice(0, Math.max(1, Math.min(8, ranked.length)))
+      const rest = ranked.slice(top.length)
       return {
-        top: ranked.slice(0, Math.max(1, Math.min(8, ranked.length))),
-        bottom: half > 0 ? ranked.slice(-half).reverse() : [],
+        top,
+        bottom: rest.length > 0 ? rest.slice(-Math.min(8, rest.length)).reverse() : [],
       }
     }
 

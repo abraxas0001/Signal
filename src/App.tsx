@@ -29,6 +29,7 @@ import { WeekCompare } from '@/components/WeekCompare'
 import { PostHighlights } from '@/components/PostHighlights'
 import { AudienceScreen } from '@/components/AudienceScreen'
 import { NextPost } from '@/components/NextPost'
+import { LocalNews } from '@/components/LocalNews'
 import { Onboarding } from '@/components/Onboarding'
 import { TabBar, type Tab } from '@/components/TabBar'
 import { MoreSheet } from '@/components/MoreSheet'
@@ -451,7 +452,16 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
     applyDeviceClass()
     // theme.js has already written the attribute before first paint; read it
     // back so React's state and the DOM agree from the start.
-    const saved = localStorage.getItem('signal:theme')
+    // Guarded: on a browser with site data blocked this THROWS, and it throws
+    // inside an effect, where there is no boundary to catch it — the store
+    // already degrades to empty and renders a first frame, then this unmounted
+    // the entire app. A blocked read simply leaves the theme at its default.
+    let saved: string | null = null
+    try {
+      saved = localStorage.getItem('signal:theme')
+    } catch {
+      /* storage blocked; theme falls back to the default */
+    }
     if (saved === 'light' || saved === 'dark') setTheme(saved)
 
     // ?demo=1 renders a worked example. Useful before an API key is set up,
@@ -915,6 +925,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
               key={`grievances-${deskKey}`}
               onClose={go('dashboard')}
               focusIssueId={focusIssue}
+              onOpenNextPost={() => goTo('nextpost')}
             />
             {demoOpen && <DemoNote />}
           </>
@@ -999,6 +1010,8 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
             onOpenAccounts={() => goTo('accounts')}
           />
         )
+      case 'localnews':
+        return <LocalNews key={`localnews-${deskKey}`} onClose={go('dashboard')} />
       case 'nextpost':
         return (
           <NextPost

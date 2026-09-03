@@ -1,6 +1,6 @@
 import * as m from 'motion/react-m'
 import { useId, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { pressable, spring } from '@/lib/motion'
 
@@ -14,6 +14,8 @@ type ButtonProps = {
   disabled?: boolean
   type?: 'button' | 'submit'
   className?: string
+  /** Spread onto the element via ...rest; used for a one-off gradient fill. */
+  style?: CSSProperties
   'aria-label'?: string
   /** Hover text. Already spread onto the element by ...rest; only the type
       was missing, so every attempt to explain a button on hover was a

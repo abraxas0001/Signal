@@ -337,6 +337,18 @@ export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
 
   const followers = snapshot.followers ?? null
   const views = sum((p) => p.views)
+  /**
+   * DIVIDE BY THE POSTS THAT CARRIED THE FIGURE, NOT BY EVERY POST.
+   *
+   * `views` is the sum over the posts a platform published a view count for;
+   * dividing it by `posts.length` mixed those with the ones that published
+   * nothing. A YouTube channel with 25 stored videos where only 5 carry a
+   * count — 500,000 between them — reported "20,000 views per post" against a
+   * true 100,000: a fivefold understatement, and one that then fed the
+   * comparison boards.
+   */
+  const postsWithViews = posts.filter((p) => p.views != null).length
+  const postsWithInteractions = posts.filter((p) => p.likes != null || p.comments != null).length
 
   // Per-post interaction totals, used for the best post and for spread.
   const perPost = posts.map((p) => (p.likes ?? 0) + (p.comments ?? 0))
@@ -362,13 +374,16 @@ export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
     totalViews: views,
     totalLikes: likes,
     totalComments: comments,
-    avgEngagement: measurable ? Math.round(interactions / posts.length) : null,
+    avgEngagement:
+      measurable && postsWithInteractions > 0
+        ? Math.round(interactions / postsWithInteractions)
+        : null,
     engagementRate:
-      measurable && followers && followers > 0
-        ? Number(((interactions / posts.length / followers) * 100).toFixed(3))
+      measurable && postsWithInteractions > 0 && followers && followers > 0
+        ? Number(((interactions / postsWithInteractions / followers) * 100).toFixed(3))
         : null,
     postsPerWeek,
-    avgViews: views != null ? Math.round(views / posts.length) : null,
+    avgViews: views != null && postsWithViews > 0 ? Math.round(views / postsWithViews) : null,
     talkRatio:
       comments != null && interactions > 0
         ? Number(((comments / interactions) * 100).toFixed(1))

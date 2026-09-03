@@ -179,7 +179,10 @@ export function WeekCompare({ onClose }: { onClose: () => void }) {
               }
             />
             <HBarBoard
-              rows={week.rows.slice(0, 5).map((r) => ({
+              rows={week.rows
+                .filter((r): r is typeof r & { reactions: number } => r.reactions != null)
+                .slice(0, 5)
+                .map((r) => ({
                 label: r.name,
                 sublabel: (
                   <span className="flex items-center gap-1.5">

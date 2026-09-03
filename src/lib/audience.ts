@@ -1,7 +1,7 @@
 import type { Report } from '@shared/types'
 import type { Emotion, Topic } from '@shared/taxonomy'
 import { readStandingCache, readStandingNote, type Standing, type TrackedHandle } from '@/lib/handles'
-import { recurringTerms, termCount } from '@/lib/terms'
+import { NON_TOPIC, recurringTerms, termCount } from '@/lib/terms'
 import { cleanQuote } from '@/lib/utils'
 
 /**
@@ -45,6 +45,19 @@ export interface QuotedComment {
   /** Likes on the comment itself. Null where the platform published none. */
   likes: number | null
   publishedAt: string | null
+  /**
+   * The post this comment sits under, where we know which one it is.
+   *
+   * The office asked to be able to press a mention and land on the post, so
+   * they can see for themselves that the desk read it correctly. That is only
+   * answerable for comments taken from a POST reading, which stores the
+   * comment against its own permalink. Comments that came from an account
+   * reading were quoted out of a bulk pass over many posts and the reading
+   * does not record which one each came from, so this is null and no link is
+   * offered. An approximate link would be worse than none: it would send the
+   * office to a post that does not contain the comment they pressed.
+   */
+  postUrl: string | null
 }
 
 export interface PlatformVoice {
@@ -197,7 +210,7 @@ function themesOf(quotes: string[], max: number, extraStop: Set<string>): ThemeC
  * a "praised for" list whose first entry is the principal, which is a fact
  * about who the account belongs to and not about what anyone said.
  */
-function ownNames(handles: TrackedHandle[]): Set<string> {
+export function ownNames(handles: TrackedHandle[]): Set<string> {
   const out = new Set<string>()
   for (const h of handles) {
     for (const source of [h.displayName ?? '', h.handle]) {
@@ -280,6 +293,8 @@ export function audienceOf(
         author: null,
         likes: null,
         publishedAt: null,
+        // An account reading quotes across many posts without recording which.
+        postUrl: null,
       })
     }
     for (const text of st.praise) quoted(text, 'positive')
@@ -291,7 +306,22 @@ export function audienceOf(
   }
 
   platforms.sort((a, b) => b.commentsRead - a.commentsRead)
-  if (readings.length === 0) return { ...EMPTY, platforms }
+
+  /*
+   * NO EARLY RETURN HERE, deliberately.
+   *
+   * This used to bail with EMPTY as soon as no account-level reading existed,
+   * which threw away everything below: the comments stored against individual
+   * POST readings, their authors, their like counts, the emotions and the
+   * topics. Those are a different source with a different trigger — an office
+   * that pastes its own post URLs into Analyse accumulates them without ever
+   * running an account survey — so a desk could hold hundreds of real, read
+   * comments and be told it had none.
+   *
+   * Everything below is already written for the empty case: the split is
+   * guarded by `sum > 0`, the score returns null when nothing was scored, and
+   * the reduces over `readings` are simply zero-length.
+   */
 
   /*
    * The split is the plain sum of the counts, not a weighted mean of them.
@@ -378,6 +408,7 @@ export function audienceOf(
           author,
           likes: c.likes ?? null,
           publishedAt: c.publishedAt ?? null,
+          postUrl: report.snapshot.canonicalUrl || url,
         })
       }
     }
@@ -426,7 +457,37 @@ export function audienceOf(
     })
   }
 
-  const stop = ownNames(own)
+  /**
+   * What can never be a REASON somebody praised or criticised you.
+   *
+   * This was the desk's own names alone, so the praise list led with "jai",
+   * "akka", "happy" and "bjp" — a chant, a kinship term, a mood and a party.
+   * None of them is something a person is praised FOR, and the office said so
+   * plainly: this makes no sense. NON_TOPIC carries the slogans, the address
+   * terms and the bare verdicts; the desk's own names come on top.
+   */
+  const stop = new Set<string>([...NON_TOPIC, ...ownNames(own)])
+
+  /**
+   * Praise and complaints, with the vocabulary they SHARE removed.
+   *
+   * "bjp" was appearing in both lists at once — the office's second report.
+   * A word both camps use is not a reason either camp holds; it is simply
+   * what this account's comments are about. Cutting it from both leaves the
+   * words that actually separate the people praising from the people
+   * complaining, which is the only thing these two lists are for.
+   */
+  const sides = ((): { praise: ThemeCount[]; complaints: ThemeCount[] } => {
+    const pos = themesOf(quotes.filter((q) => q.side === 'positive').map((q) => q.text), 12, stop)
+    const neg = themesOf(quotes.filter((q) => q.side === 'negative').map((q) => q.text), 12, stop)
+    const shared = new Set(
+      pos.map((t) => t.term).filter((t) => neg.some((n) => n.term === t)),
+    )
+    return {
+      praise: pos.filter((t) => !shared.has(t.term)).slice(0, 6),
+      complaints: neg.filter((t) => !shared.has(t.term)).slice(0, 6),
+    }
+  })()
 
   /* A quote the comment reading scored and the post reading also stored is one
      comment seen twice. Where the text matches, the name and the like count
@@ -463,16 +524,7 @@ export function audienceOf(
           ),
     platforms,
     quotes,
-    praise: themesOf(
-      quotes.filter((q) => q.side === 'positive').map((q) => q.text),
-      6,
-      stop,
-    ),
-    complaints: themesOf(
-      quotes.filter((q) => q.side === 'negative').map((q) => q.text),
-      6,
-      stop,
-    ),
+    ...sides,
     topics,
     topicPosts: topicTotal,
     emotions,

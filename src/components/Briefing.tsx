@@ -6,11 +6,17 @@ import { CalendarDays, GitCompareArrows, UserRound } from 'lucide-react'
 import type { Identity } from '@shared/identity'
 import type { Report } from '@shared/types'
 import { readStore, useStore } from '@/lib/store'
-import { briefingOf } from '@/lib/briefing'
+import { briefingOf, ownPostsOf, whatLandsOf } from '@/lib/briefing'
 import { growthSummary } from '@/lib/growth'
 import { loadPostReports } from '@/lib/post-reports'
 import { useMorningScan } from '@/lib/morning-scan'
-import { ownedBySubject, listHandles, readStandingCache, reconcileOwnership } from '@/lib/handles'
+import {
+  ownedBySubject,
+  listHandles,
+  readStandingCache,
+  reconcileOwnership,
+  type Standing,
+} from '@/lib/handles'
 import { Avatar, Button, Shell } from './ui'
 import { fadeUp, listStagger } from '@/lib/motion'
 import { OverallReach } from './briefing/OverallReach'
@@ -19,6 +25,13 @@ import { TopMentions } from './briefing/TopMentions'
 import { ContentInsights } from './briefing/ContentInsights'
 import { FollowerGrowth } from './briefing/FollowerGrowth'
 import { AudienceGlance, HighlightsGlance, NextPostGlance } from './briefing/HighlightsGlance'
+import { LocalNewsGlance } from './briefing/LocalNewsGlance'
+import { WeekAgainstRivals } from './briefing/WeekAgainstRivals'
+import { PeekPanel } from './briefing/PeekPanel'
+import { PostHighlights } from './PostHighlights'
+import { AudienceScreen } from './AudienceScreen'
+import { LocalNews } from './LocalNews'
+import { CompareBoard } from './CompareBoard'
 
 /**
  * The dashboard, rebuilt to the product owner's reference design.
@@ -59,6 +72,7 @@ export type Destination =
   | 'highlights'
   | 'audience'
   | 'nextpost'
+  | 'localnews'
 
 export function Briefing({
   onNavigate,
@@ -91,6 +105,8 @@ export function Briefing({
   useMorningScan()
 
   const go = (to: Destination) => () => onNavigate(to)
+  /** The controls inside a peek are inert; these never fire. */
+  const noop = (): void => {}
 
   /**
    * Put the ownership flags right before anything reads them.
@@ -163,15 +179,29 @@ export function Briefing({
     }
   }, [])
 
+  /**
+   * The cached comment readings, keyed by handle, for the comparison peek.
+   *
+   * Read straight from the cache rather than fetched: the peek is a preview
+   * and must not start a minute-long reading run just because somebody opened
+   * the dashboard. An account with no cached reading shows as unread in the
+   * board, which is the honest state.
+   */
+  const standings = useMemo(() => {
+    const out: Record<string, Standing> = {}
+    for (const h of handles) {
+      const st = readStandingCache(h.id)
+      if (st) out[h.id] = st
+    }
+    return out
+  }, [handles])
+
   const growth = useMemo(() => growthSummary(postHandles), [postHandles])
 
-  const commentsRead = useMemo(
-    () =>
-      postHandles.reduce((sum, h) => {
-        const st = readStandingCache(h.id)
-        return sum + (st && st.source !== 'record' ? st.commentsRead : 0)
-      }, 0),
-    [postHandles],
+  /** What lands, for the comparison card's advice line. Null until read. */
+  const lands = useMemo(
+    () => (reports ? whatLandsOf(ownPostsOf(postHandles), reports) : null),
+    [postHandles, reports],
   )
 
   /**
@@ -218,7 +248,7 @@ export function Briefing({
 
         {/* ── 1 · overall reach ───────────────────────────────────────── */}
         <m.section variants={fadeUp} aria-label="Overall reach">
-          <OverallReach handles={postHandles} growth={growth} commentsRead={commentsRead} reports={reports} />
+          <OverallReach handles={postHandles} reports={reports} />
         </m.section>
 
         {/* ── 2 · sentiment, and who the comments name ────────────────── */}
@@ -228,46 +258,108 @@ export function Briefing({
               handles={postHandles}
               reports={reports}
               onOpenAccounts={go('accounts')}
+              onOpenAudience={go('audience')}
             />
             <TopMentions
               handles={handles}
               identity={b.identity}
               issues={store.issues}
-              onOpenAccounts={go('accounts')}
+              reports={reports}
+              onOpenAudience={go('audience')}
             />
           </div>
         </m.section>
 
-        {/* ── 3 · the two deep readings, in short ──────────────────────
-            Each card says the one thing worth noticing and opens the whole
-            analysis behind it. They sit after the mood and before the
-            performance tables because that is the order an office asks: how
-            do people feel, which posts caused it, then what should I do. */}
-        <m.section variants={fadeUp} aria-label="Post highlights and audience">
-          {/* These two stretch to match, unlike the row above: they are the
-              same weight of card and a 26px difference in their bottom edges
-              reads as a near-miss rather than a deliberate stagger. */}
-          <div className="grid gap-3 xl:grid-cols-2">
-            <HighlightsGlance
-              handles={postHandles}
-              reports={reports}
-              onExplore={go('highlights')}
-              onOpenReport={onOpenReport}
-            />
-            <AudienceGlance
-              handles={postHandles}
-              reports={reports}
-              onExplore={go('audience')}
-            />
-          </div>
-          {/* The third door: what to do about the two readings above. Full
-              width under them, because it is their conclusion, not a sibling. */}
-          <div className="mt-3">
-            <NextPostGlance handles={postHandles} reports={reports} onExplore={go('nextpost')} />
-          </div>
+        {/* ── 3 · how the week reads against the people you track ──────
+            The office asked for a comparison on the dashboard. This card was
+            written and never mounted, so the desk had a rivals view it could
+            not reach from its front page. It renders nothing at all when the
+            desk tracks no rivals, which is the honest state for a desk that
+            has not been given anybody to measure against. */}
+        {lands && (
+          <m.section variants={fadeUp} aria-label="Your week against theirs">
+            <WeekAgainstRivals handles={handles} lands={lands} onExplore={go('weekly')} />
+          </m.section>
+        )}
+
+        {/* ── the comparison board, at half height ─────────────────────
+            The office's words: the week-against-rivals card above is "a
+            different thing" — it says who posted what — and they also wanted
+            the comparison proper on the front page. This is that board, the
+            same one the Compare screen mounts, cut off partway down. */}
+        {handles.length > 0 && (
+          <m.section variants={fadeUp} aria-label="Comparison">
+            <PeekPanel
+              title="Compare your performance"
+              subtitle="How you stack up against the people you track"
+              action="Open comparison"
+              onOpen={go('compare')}
+              height={460}
+            >
+              <CompareBoard
+                handles={handles}
+                identity={b.identity}
+                standings={standings}
+                notes={{}}
+                reports={reports}
+                onAddCompetitor={noop}
+                onUntrack={noop}
+                onOpenPost={noop}
+              />
+            </PeekPanel>
+          </m.section>
+        )}
+
+        {/* ── 4 · the sections themselves, at half height ──────────────
+            These were "glance" cards: a hand-written precis of each screen
+            that restated two of its figures. A reader could not tell from one
+            what the section actually held, so the office asked for the real
+            section on the page, cut off partway down with the rest veiled and
+            one press to open it in full. Each takes the whole width because
+            these are wide screens; at half width they were unreadable. */}
+        <m.section variants={fadeUp} aria-label="Post highlights">
+          <PeekPanel
+            title="Post highlights"
+            subtitle="Which posts landed, and what they had in common"
+            action="Open post highlights"
+            onOpen={go('highlights')}
+            trim={72}
+          >
+            <PostHighlights onClose={noop} onOpenReport={onOpenReport} onRead={onRead} />
+          </PeekPanel>
         </m.section>
 
-        {/* ── 4 · content insights ────────────────────────────────────── */}
+        <m.section variants={fadeUp} aria-label="What people are saying">
+          <PeekPanel
+            title="What people are saying"
+            subtitle="The comments under your posts, in their own words"
+            action="Open what people are saying"
+            onOpen={go('audience')}
+            trim={72}
+          >
+            <AudienceScreen onClose={noop} onOpenAccounts={noop} />
+          </PeekPanel>
+        </m.section>
+
+        {/* The third door: what to do about the two readings above. */}
+        <m.section variants={fadeUp} aria-label="What to post next">
+          <NextPostGlance handles={postHandles} reports={reports} onExplore={go('nextpost')} />
+        </m.section>
+
+        {/* ── 5 · what the papers carried ─────────────────────────────── */}
+        <m.section variants={fadeUp} aria-label="Local news mentions">
+          <PeekPanel
+            title="Local news mentions"
+            subtitle="What the papers and portals printed about you"
+            action="Open local news"
+            onOpen={go('localnews')}
+            trim={100}
+          >
+            <LocalNews />
+          </PeekPanel>
+        </m.section>
+
+        {/* ── 5 · content insights ────────────────────────────────────── */}
         <m.section variants={fadeUp} aria-label="Content insights">
           <ContentInsights
             handles={postHandles}

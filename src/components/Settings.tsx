@@ -49,6 +49,7 @@ const TOOLS: { id: Tab; blurb: string }[] = [
   { id: 'actions', blurb: 'Work the desk has raised and what is still open.' },
   { id: 'history', blurb: 'Every report this device has run, ready to reopen.' },
   { id: 'personas', blurb: 'What the papers are saying about named people.' },
+  { id: 'localnews', blurb: 'Every local story the desk has read, counted by source, place and stance.' },
 ]
 
 export function Settings({

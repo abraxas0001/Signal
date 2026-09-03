@@ -263,11 +263,40 @@ export function removePersona(key: string): void {
   if (key === PRIMARY) return
   writeList(listPersonas().filter((p) => p.key !== key))
   const suffix = `::p-${key}`
+  /**
+   * ONLY THIS ACCOUNT'S COPY OF THIS DESK.
+   *
+   * `k.endsWith('::p-modi')` was the whole test, and it matches every account
+   * that happens to watch the same politician:
+   *
+   *   signal.handles.v1::p-modi            the default account's Modi desk
+   *   signal.handles.v1::acc9f2::p-modi    somebody else's Modi desk
+   *   signal.handles.v1::demo::p-modi      the example desk's
+   *
+   * So one person on a shared office phone pressing "stop watching Modi"
+   * silently deleted every other account's Modi desk with it — months of
+   * follower readings, permanently, with nothing on screen to say so. That is
+   * precisely the cross-account leak `scopedKey` exists to prevent, walked
+   * back in through the delete path.
+   *
+   * The account's own scope is `scopedKey('')`: empty on the default account,
+   * `::acc9f2` on any other. A key belongs to this account only if, once the
+   * persona suffix is stripped, what remains carries THIS account's scope and
+   * no other — which for the default account means no scope segment at all.
+   */
+  const acct = scopedKey('')
+  const ours = (k: string): boolean => {
+    if (!k.endsWith(suffix)) return false
+    const rest = k.slice(0, -suffix.length)
+    if (acct === '') return !rest.includes('::')
+    if (!rest.endsWith(acct)) return false
+    return !rest.slice(0, -acct.length).includes('::')
+  }
   try {
     const doomed: string[] = []
     for (let i = 0; i < localStorage.length; i += 1) {
       const k = localStorage.key(i)
-      if (k && k.endsWith(suffix)) doomed.push(k)
+      if (k && ours(k)) doomed.push(k)
     }
     for (const k of doomed) localStorage.removeItem(k)
   } catch {

@@ -50,6 +50,7 @@ export type Tab =
   | 'highlights'
   | 'audience'
   | 'nextpost'
+  | 'localnews'
   | 'studio'
   | 'settings'
 
@@ -86,6 +87,9 @@ export const NAV = {
   highlights: { id: 'highlights', label: 'Post highlights', Icon: Sparkles },
   audience: { id: 'audience', label: 'What people are saying', Icon: MessagesSquare },
   nextpost: { id: 'nextpost', label: 'What to post next', Icon: Lightbulb },
+  // The papers, counted. Reached from the dashboard's news card and from
+  // Settings' tools list, like the other long-form reads.
+  localnews: { id: 'localnews', label: 'Local news mentions', Icon: Newspaper },
 } as const satisfies Record<Tab, NavItem>
 
 /**
@@ -138,6 +142,7 @@ export const UNLISTED = [
   'highlights',
   'audience',
   'nextpost',
+  'localnews',
 ] as const
 
 /**

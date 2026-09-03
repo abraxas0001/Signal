@@ -84,3 +84,28 @@ export function noViewsReason(platform: string): string {
 export function noReactionsReason(platform: string): string {
   return `Reactions not published by ${platform}.`
 }
+
+/**
+ * An explanation behind a mark, rather than a sentence on the card.
+ *
+ * The owner's rule, in their words: things should be clear without prose, and
+ * where an explanation is genuinely needed it belongs behind an i button and
+ * not in the layout. So anything that would otherwise be a caveat paragraph
+ * rides here, one press or hover from the figure it qualifies.
+ */
+export function InfoMark({ note, className }: { note: string; className?: string }) {
+  return (
+    <button
+      type="button"
+      title={note}
+      aria-label={note}
+      className={cn(
+        'inline-grid size-[18px] shrink-0 cursor-help place-items-center rounded-full text-ink-3',
+        'transition-colors hover:bg-[var(--surface-3)] hover:text-ink-2',
+        className,
+      )}
+    >
+      <Info size={13} aria-hidden />
+    </button>
+  )
+}

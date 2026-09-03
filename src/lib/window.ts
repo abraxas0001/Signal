@@ -12,8 +12,8 @@
 export type WindowId = 'week' | 'month' | 'all'
 
 export const WINDOWS: { id: WindowId; label: string }[] = [
-  { id: 'week', label: 'Last week' },
-  { id: 'month', label: 'Last month' },
+  { id: 'week', label: 'Last 7 days' },
+  { id: 'month', label: 'Last 30 days' },
   { id: 'all', label: 'All time' },
 ]
 

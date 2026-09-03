@@ -218,14 +218,35 @@
   --aurora-2: #eae0ff;
   --aurora-3: #d7f1fe;
 
-  /* Diverging scale for sentiment. Deliberately NOT the --pos/--neg status
-     colours: status is reserved, and a naive green/red pair separates by only
-     dE 6.5 under deuteranopia. Teal/red measures dE 13.4 (light) and 10.7
-     (dark), verified with the palette validator. Position and a visible text
-     label still carry the value - colour is only ever reinforcement. */
-  --chart-neg: #dc2626;
-  --chart-mid: #64748b;
-  --chart-pos: #0d9488;
+  /* Sentiment: positive / neutral / negative, the owner's traffic light.
+     
+     This was teal/slate/red on the reasoning that a naive green/red pair
+     separates by only dE 6.5 under deuteranopia. That reasoning only ever
+     checked the green-red pair. Run over ALL pairs, the teal/slate/red set
+     failed three of the validator's checks: the slate midpoint sits below the
+     chroma floor (0.041, "reads gray"), and slate against teal measures dE 5.3
+     deutan and 11.0 for NORMAL vision - under 15, which is the threshold for
+     "hard to tell apart even with full colour vision". A neutral share of 83%
+     drawn in that slate reads as empty track rather than as the largest
+     category on the card, which is the opposite of what it means.
+     
+     Re-stepped on the amber and re-validated 2026-09-03, --pairs all, against
+     this surface: lightness band, chroma floor, CVD dE 8.4 deutan and
+     normal-vision dE 18.8 all PASS. Contrast against the surface WARNs
+     (green 2.32, amber 2.38), which the validator allows only where the value
+     is also carried in text: every place these are drawn prints the figure and
+     its label beside the mark, and the donut repeats it in the middle. Colour
+     is reinforcement here, never the only encoding. */
+  /* Re-stepped for graphical contrast: the previous green (#3abe7a, 2.38:1)
+     and amber (#d99a16, 2.45:1) both sat under the 3.0:1 a non-text mark needs
+     against the light surface, so a sentiment meter was a shape you could see
+     only if you already knew it was there. Darkened until both clear 3.0 while
+     KEEPING the separation that mattered: ΔE 53.9 for normal vision and 21.2
+     under a deuteranope simulation, so the three still read apart for the
+     roughly one man in twelve who cannot split red from green. */
+  --chart-neg: #e5484d;
+  --chart-mid: #b8801a;
+  --chart-pos: #2e9e63;
 
   /* Light elevation: tight contact + a wide, slightly blue ambient. The blue
      cast in the big shadows is what makes white cards read as floating on a
@@ -306,9 +327,12 @@
     --aurora-2: #241b44;
     --aurora-3: #0e2a3d;
 
-    --chart-neg: #f87171;
-    --chart-mid: #6b7285;
-    --chart-pos: #2dd4bf;
+    /* Dark steps chosen against the dark card, not flipped from the light
+       ones: validated --pairs all on #141927, CVD dE 10.6 deutan,
+       normal-vision 19.1, contrast all >= 3:1. */
+    --chart-neg: #fb7185;
+    --chart-mid: #fbbf24;
+    --chart-pos: #5de89b;
 
     /* Shadows are invisible on near-black. Elevation becomes border +
        inner top highlight + a surface step. */
@@ -363,9 +387,9 @@
   --aurora-1: #16233d;
   --aurora-2: #241b44;
   --aurora-3: #0e2a3d;
-  --chart-neg: #f87171;
-  --chart-mid: #6b7285;
-  --chart-pos: #2dd4bf;
+  --chart-neg: #fb7185;
+  --chart-mid: #fbbf24;
+  --chart-pos: #5de89b;
   --e1: 0 0 0 1px var(--border), inset 0 1px 0 rgb(255 255 255 / 0.04);
   --e2: 0 0 0 1px var(--border), inset 0 1px 0 rgb(255 255 255 / 0.06), 0 8px 24px rgb(0 0 0 / 0.5);
   --e3: 0 0 0 1px var(--border-strong), inset 0 1px 0 rgb(255 255 255 / 0.08), 0 20px 48px rgb(0 0 0 / 0.65);
@@ -571,6 +595,74 @@ p {
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+   The entrance's own ground.
+
+   Measured off the owner's reference rather than guessed: the sign-in page
+   sits on a near-white sheet (#faf9fe) with a violet cast in the top-right
+   corner and a stronger blue one bottom-right, and the app's standing ground
+   (--bg #eef2f9, a good deal darker and bluer) read as murky beside it. This
+   is scoped to the entrance because the rest of the product is a working desk
+   that wants its warmer ground; only the front door is this pale.
+
+   Painted opaque, so it also covers the drifting `.field` blobs — the
+   reference is a still sheet, and two ambient systems fighting was most of
+   what made ours look muddier than the target.
+   --------------------------------------------------------------------------- */
+/**
+ * The entrance's accent is the reference's, not the product's.
+ *
+ * Sampled off the owner's reference: its headline phrase, links and glyphs sit
+ * at roughly #5257fa, a vivid indigo, where the product's standing accent is
+ * #2563eb, a plainer azure. Scoped to the front door because that is what was
+ * asked for; rolling indigo through the whole product is a separate call the
+ * owner should make deliberately, not a side effect of matching one screen.
+ */
+.entry-accent {
+  --accent: #4f52f5;
+  --accent-soft: #eceafe;
+  --accent-2: #7c3aed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .entry-accent {
+    --accent: #8f93ff;
+    --accent-soft: #1e2050;
+  }
+}
+
+[data-theme='dark'] .entry-accent {
+  --accent: #8f93ff;
+  --accent-soft: #1e2050;
+}
+
+.entry-ground {
+  background-color: #faf9fe;
+  background-image:
+    radial-gradient(58% 46% at 100% 0%, rgb(198 178 255 / 0.42) 0%, transparent 62%),
+    radial-gradient(62% 52% at 100% 100%, rgb(150 187 255 / 0.5) 0%, transparent 66%),
+    radial-gradient(46% 40% at 0% 0%, rgb(205 197 255 / 0.24) 0%, transparent 66%),
+    radial-gradient(50% 42% at 6% 100%, rgb(178 176 255 / 0.28) 0%, transparent 68%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .entry-ground {
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(58% 46% at 100% 0%, color-mix(in oklab, var(--aurora-2) 60%, transparent) 0%, transparent 62%),
+      radial-gradient(62% 52% at 100% 100%, color-mix(in oklab, var(--aurora-1) 55%, transparent) 0%, transparent 66%);
+  }
+}
+
+[data-theme='dark'] .entry-ground {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(58% 46% at 100% 0%, color-mix(in oklab, var(--aurora-2) 60%, transparent) 0%, transparent 62%),
+    radial-gradient(62% 52% at 100% 100%, color-mix(in oklab, var(--aurora-1) 55%, transparent) 0%, transparent 66%);
 }
 
 .field span {
@@ -1717,4 +1809,44 @@ h3,
 }
 p {
   text-wrap: pretty;
+}
+
+/* ===========================================================================
+   Peek panels
+
+   A dashboard section shown at half height with the rest veiled. The veil is
+   a blur that thickens downward over a fade to the card colour, so the cut
+   reads as "there is more of this" rather than as content that failed to
+   load. `mask-image` gives the blur its gradient: backdrop-filter cannot be
+   interpolated, so the LAYER is masked instead of the filter being ramped.
+   =========================================================================== */
+
+.peek-veil {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in oklab, var(--surface) 55%, transparent) 45%,
+    var(--surface) 92%
+  );
+  backdrop-filter: blur(2.5px);
+  -webkit-backdrop-filter: blur(2.5px);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 55%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 55%);
+}
+
+/* The mounted screen brings its own page padding and, on some, its own back
+   bar. Inside a peek the panel supplies the heading, so the section starts
+   flush and the duplicate chrome is pulled out of view. */
+.peek-body > * {
+  margin-top: 0 !important;
+}
+.peek-body {
+  padding-inline: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peek-veil {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }

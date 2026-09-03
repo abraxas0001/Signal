@@ -214,9 +214,26 @@ export function highlightsOf(
      * it by infinity.
      */
     const measuredPosts = posts.filter(hasReactions)
+    /**
+     * THE MEDIAN, NOT THE MEAN.
+     *
+     * "Your average post" was the arithmetic mean, and on an account with one
+     * post that went far — which is most political accounts — the mean sits
+     * well above anything the account typically does. A perfectly ordinary
+     * post then reported "drawing 89% below your average", which is true of
+     * the mean and useless as a judgement: the desk read it as the post having
+     * failed when it had done what its posts normally do.
+     *
+     * The median is what "a typical post" means in plain English: half do
+     * better, half do worse, and one runaway cannot move it.
+     */
+    const sortedReactions = measuredPosts.map(reactionsOf).sort((x, y) => x - y)
+    const mid = Math.floor(sortedReactions.length / 2)
     const baseline =
-      measuredPosts.length >= 3
-        ? measuredPosts.reduce((sum, q) => sum + reactionsOf(q), 0) / measuredPosts.length
+      sortedReactions.length >= 3
+        ? sortedReactions.length % 2 === 1
+          ? sortedReactions[mid]!
+          : (sortedReactions[mid - 1]! + sortedReactions[mid]!) / 2
         : null
 
     for (const p of posts) {

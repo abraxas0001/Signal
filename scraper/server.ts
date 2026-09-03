@@ -19,11 +19,11 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { newPage, makePacer, goto, closeContext } from './browser'
+import { closeContext } from './browser'
 import { adapters } from './adapters'
+import { runPosts as walkPosts, runComments as walkComments } from './orchestrate'
 import {
   isPlatform,
-  type AdapterContext,
   type Platform,
   type ProviderRequest,
   type ScrapedComment,
@@ -83,53 +83,13 @@ function enqueue<T>(job: () => Promise<T>): Promise<T> {
 
 /* ── the work ────────────────────────────────────────────────────────────── */
 
-async function runPosts(platform: Platform, handle: string, limit: number) {
-  const adapter = adapters[platform]
-  const page = await newPage(true)
-  const ctx: AdapterContext = { page, log, pace: makePacer(platform), limit }
-
-  try {
-    await ctx.pace()
-    await goto(page, adapter.profileUrl(handle))
-
-    if (await adapter.isLoginWall(ctx)) {
-      return {
-        ok: false as const,
-        reason: `${platform} showed a login wall. Run \`npm run scraper:login\` and sign in.`,
-        needsLogin: true,
-      }
-    }
-    return await adapter.posts(ctx, handle)
-  } finally {
-    await page.close().catch(() => {})
-  }
-}
-
-async function runComments(platform: Platform, url: string, limit: number) {
-  const adapter = adapters[platform]
-  if (!adapter.comments) {
-    // Answered honestly: this adapter does not do comments, so the app should
-    // fall through to its own public reader rather than treat this as an
-    // outage. An empty 200 is the contract's way of saying that.
-    return { ok: true as const, items: [] as ScrapedComment[], note: 'no comment adapter' }
-  }
-  const page = await newPage(true)
-  const ctx: AdapterContext = { page, log, pace: makePacer(platform), limit }
-  try {
-    await ctx.pace()
-    await goto(page, url)
-    if (await adapter.isLoginWall(ctx)) {
-      return {
-        ok: false as const,
-        reason: `${platform} showed a login wall.`,
-        needsLogin: true,
-      }
-    }
-    return await adapter.comments(ctx, url)
-  } finally {
-    await page.close().catch(() => {})
-  }
-}
+/* The walks themselves live in orchestrate.ts now, shared with the
+   collector. This file keeps what is HTTP's own: the queue, the cache and
+   the wire shapes. */
+const runPosts = (platform: Platform, handle: string, limit: number) =>
+  walkPosts(platform, handle, limit, log)
+const runComments = (platform: Platform, url: string, limit: number) =>
+  walkComments(platform, url, limit, log)
 
 /* ── http ────────────────────────────────────────────────────────────────── */
 

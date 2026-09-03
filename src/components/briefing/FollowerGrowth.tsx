@@ -3,8 +3,9 @@ import { ArrowRight, Sparkles } from 'lucide-react'
 import { Card } from '../ui'
 import { DeltaChip, LineChart, seriesColor, type LineSeries } from '@/components/kit'
 import type { GrowthSummary } from '@/lib/growth'
+import { latestFollowersOf } from '@/lib/briefing'
 import type { TrackedHandle } from '@/lib/handles'
-import { windowStart, type WindowId } from '@/lib/window'
+import { windowLabel, windowStart, type WindowId } from '@/lib/window'
 import { NoData, WindowPicker } from './controls'
 import { cn, compact, full } from '@/lib/utils'
 
@@ -46,13 +47,19 @@ interface History {
  * within the window. A day a platform was not read is a gap in its line,
  * never an interpolated point.
  */
-function historyOf(handles: TrackedHandle[], start: string | null): History | null {
+function historyOf(
+  handles: TrackedHandle[],
+  start: string | null,
+  /** Exclusive upper bound, so a previous window really is previous. */
+  end: string | null = null,
+): History | null {
   const dayKey = (iso: string): string => iso.slice(0, 10)
   const days = new Set<string>()
   for (const h of handles) {
     for (const s of h.snapshots) {
       if (s.followers == null || !s.takenAt) continue
       if (start && s.takenAt < start) continue
+      if (end && s.takenAt >= end) continue
       days.add(dayKey(s.takenAt))
     }
   }
@@ -78,7 +85,11 @@ function historyOf(handles: TrackedHandle[], start: string | null): History | nu
       return read ? sum : null
     })
     const present = values.filter((v): v is number => v != null)
-    if (present.length > 0) span.set(platform, { first: present[0]!, last: present.at(-1)! })
+    // Two readings or none. With one, `first` and `last` were the SAME
+    // reading, so the card reported a change of zero for an account nobody
+    // had measured twice — indistinguishable from an account that genuinely
+    // held flat. This is the gate `drawable` below already applies.
+    if (present.length >= 2) span.set(platform, { first: present[0]!, last: present.at(-1)! })
     return { name: platform, color: seriesColor(PLATFORM_ORDER.indexOf(platform)), values }
   })
 
@@ -137,6 +148,7 @@ export function FollowerGrowth({
    */
   const [metric, setMetric] = useState<'followers' | 'percent'>('followers')
 
+
   /* Anchored to the newest READING — this section is about readings, not
      posts, and a desk read daily should be able to ask for just the week. */
   const anchor = useMemo(() => {
@@ -147,13 +159,62 @@ export function FollowerGrowth({
     return newest
   }, [ownHandles])
   const start = windowStart(anchor, window)
+  const windowDays = window === 'week' ? 7 : 30
 
   const history = useMemo(() => historyOf(ownHandles, start), [ownHandles, start])
+
+  /**
+   * Where the SELECTED window starts, as an IST day. Compared against the
+   * desk's oldest reading to tell the difference between "this is the change
+   * over 30 days" and "this is every reading we have, which is fewer".
+   */
+  const windowFrom = windowStart(anchor, window)
+
+  /**
+   * The same span of days directly before this one, so the card can say what
+   * changed against it.
+   *
+   * The office asked for a comparison and the reference sheet puts it here:
+   * this period beside the one before, and the rate between them. A change
+   * needs two readings inside EACH window, so where the previous window holds
+   * fewer than that there is nothing to compare and the cells say so rather
+   * than showing a rise measured from a guess.
+   */
+  const previous = useMemo(() => {
+    if (start === null || anchor === null) return null
+    const span = Date.parse(anchor) - Date.parse(start)
+    if (!Number.isFinite(span) || span <= 0) return null
+    const prevStart = new Date(Date.parse(start) - span).toISOString()
+    const prior = historyOf(ownHandles, prevStart, start)
+    if (!prior) return null
+    const spansPrev = [...prior.span.values()]
+    if (spansPrev.length === 0) return null
+    return spansPrev.reduce((a, x) => a + (x.last - x.first), 0)
+  }, [ownHandles, start, anchor])
 
   /* The figures, over exactly the readings the chart shows. */
   const spans = history ? [...history.span.values()] : []
   const firstTotal = spans.reduce((a, s) => a + s.first, 0)
   const lastTotal = spans.reduce((a, s) => a + s.last, 0)
+
+  /**
+   * The follower TOTAL is a level, not a change, so it needs one reading and
+   * not two.
+   *
+   * `lastTotal` above sums only the platforms with two or more readings inside
+   * the window, because that is what a CHANGE needs. Using it for the level
+   * printed two different lies: on a desk read only once it summed nothing and
+   * rendered a measured "0" beside a live chart, and on a desk where one
+   * account had been read twice and another once it silently dropped the
+   * second account from a figure captioned "across your accounts".
+   *
+   * This counts the latest reading of every own account, and says how many
+   * accounts that actually rests on.
+   */
+  const nowReadings = ownHandles
+    .map((h) => latestFollowersOf(h))
+    .filter((f): f is number => f != null)
+  const followersNow = nowReadings.length > 0 ? nowReadings.reduce((a, f) => a + f, 0) : null
   const delta = lastTotal - firstTotal
   const pct = firstTotal > 0 ? Math.round(((delta / firstTotal) * 100) * 10) / 10 : null
   const measurable = history !== null && history.labels.length >= 2
@@ -188,24 +249,64 @@ export function FollowerGrowth({
       ) : (
         <NoData reason="Only one reading falls inside this window; a change needs two." />
       ),
-      delta: measurable ? pct : null,
-      note: measurable ? `since ${dayOf(history.firstDay)}` : undefined,
+      // The change against the SAME span before it — the comparison the
+      // reference sheet puts here, and the one the office asked for.
+      delta:
+        measurable && previous != null && previous !== 0
+          ? Math.round(((delta - previous) / Math.abs(previous)) * 1000) / 10
+          : null,
+      note:
+        measurable && previous != null && previous !== 0
+          ? `vs ${previous > 0 ? '+' : ''}${full(previous)} the ${windowDays} days before`
+          : measurable
+            ? /**
+               * Say when the window is WIDER than the record.
+               *
+               * The desk's oldest follower reading is 27 Aug. Ask for 30 days
+               * and the baseline is still 27 Aug, because there is no earlier
+               * reading to stand on — so "Last 7 days" and "Last 30 days"
+               * print the same figure, and the card gave no hint why. The
+               * office read that as a filter that does nothing.
+               *
+               * The range caption above DOES move (27 Aug vs 4 Aug), so the
+               * control is visibly working; what was missing was the reason
+               * the number underneath it does not. Naming the limit turns a
+               * dead-looking control into a statement about the record.
+               *
+               * "in this window", not "this desk holds": on a 7-day window the
+               * earliest reading in range can be 28 Aug while the desk also
+               * holds a 27 Aug one that the window excludes. Calling that the
+               * oldest the desk has would be false.
+               */
+              windowFrom !== null && history.firstDay > windowFrom.slice(0, 10)
+              ? `since ${dayOf(history.firstDay)} — the earliest reading in this window`
+              : `since ${dayOf(history.firstDay)}`
+            : undefined,
     },
     {
       label: 'Followers now',
-      value: compact(lastTotal),
+      value:
+        followersNow == null ? (
+          <NoData reason="No account on this desk has a follower reading yet." />
+        ) : (
+          compact(followersNow)
+        ),
       delta: null,
-      note: 'across your accounts',
+      note:
+        followersNow == null
+          ? undefined
+          : `across ${nowReadings.length} of your ${ownHandles.length} account${ownHandles.length === 1 ? '' : 's'}`,
     },
     {
-      label: 'Followers before',
-      value: measurable ? (
-        compact(firstTotal)
-      ) : (
-        <NoData reason="Only one reading falls inside this window." />
-      ),
+      label: `New followers, previous ${windowDays} days`,
+      value:
+        previous != null ? (
+          `${previous > 0 ? '+' : ''}${full(previous)}`
+        ) : (
+          <NoData reason="The window before this one holds fewer than two readings, so there is no change to compare against." />
+        ),
       delta: null,
-      note: measurable ? `on ${dayOf(history.firstDay)}` : undefined,
+      note: previous != null ? 'the same span, one window back' : undefined,
     },
     {
       label: 'Growth rate',
@@ -225,7 +326,9 @@ export function FollowerGrowth({
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
           <h2 className="text-[17px] font-bold tracking-[-0.015em]">Follower growth</h2>
-          <p className="mt-0.5 text-xs text-ink-3">Track your growth rate</p>
+          <p className="mt-0.5 text-xs text-ink-3">
+            Track your growth rate · {windowLabel(anchor, window)}
+          </p>
         </div>
         <WindowPicker value={window} onChange={setWindow} options={['week', 'month']} />
       </div>

@@ -414,6 +414,9 @@ export function LineChart({
   area = true,
   formatValue = compact,
   legend = true,
+  tickCount = 4,
+  markers = 'solid',
+  domain,
   className,
 }: {
   labels: string[]
@@ -421,6 +424,12 @@ export function LineChart({
   height?: number
   area?: boolean
   formatValue?: (n: number | null | undefined) => string
+  /** Gridline intervals; the axis draws one more label than this. */
+  tickCount?: number
+  /** Hollow rings read lighter on a chart that is mostly line. */
+  markers?: 'solid' | 'hollow'
+  /** Pins the y-axis, for shares that are always read against 0-100. */
+  domain?: [number, number]
   /** Off when the host draws its own legend — e.g. a clickable one. */
   legend?: boolean
   className?: string
@@ -455,19 +464,23 @@ export function LineChart({
   const rawMax = allValues.length ? Math.max(...allValues) : 1
   const rawMin = allValues.length ? Math.min(...allValues) : 0
   const pad = (rawMax - rawMin || Math.abs(rawMax) || 1) * 0.12
-  const maxV = rawMax + pad
+  const maxV = domain ? domain[1] : rawMax + pad
   // Never dip below zero for a series that is entirely non-negative: a count
   // cannot be negative, and an axis that implies it can is misleading.
-  const minV = rawMin >= 0 ? Math.max(0, rawMin - pad) : rawMin - pad
+  const minV = domain
+    ? domain[0]
+    : rawMin >= 0
+      ? Math.max(0, rawMin - pad)
+      : rawMin - pad
   const span = maxV - minV || 1
 
   const x = (i: number) => PAD.l + (labels.length < 2 ? innerW / 2 : (i / (labels.length - 1)) * innerW)
   const y = (v: number) => PAD.t + innerH - ((v - minV) / span) * innerH
 
   const ticks = useMemo(() => {
-    const n = 4
+    const n = Math.max(1, tickCount)
     return Array.from({ length: n + 1 }, (_, i) => minV + (span / n) * i)
-  }, [minV, span])
+  }, [minV, span, tickCount])
 
   const pointsFor = (s: LineSeries) =>
     s.values.map((v, i) => (v == null ? null : { x: x(i), y: y(v), v, i })).filter((p): p is { x: number; y: number; v: number; i: number } => p != null)
@@ -550,9 +563,9 @@ export function LineChart({
                   key={p.i}
                   cx={p.x}
                   cy={p.y}
-                  r={hoverI === p.i ? 5 : 3}
-                  fill={s.color}
-                  stroke="var(--surface)"
+                  r={hoverI === p.i ? 5 : markers === 'hollow' ? 4 : 3}
+                  fill={markers === 'hollow' ? 'var(--surface)' : s.color}
+                  stroke={markers === 'hollow' ? s.color : 'var(--surface)'}
                   strokeWidth="2"
                   opacity={pts.length > 24 && hoverI !== p.i ? 0 : 1}
                 />
@@ -706,6 +719,7 @@ export function DonutBreakdown({
   thickness = 20,
   centerLabel,
   centerSub,
+  centerLabelClass,
   className,
 }: {
   segments: DonutSegment[]
@@ -713,6 +727,8 @@ export function DonutBreakdown({
   thickness?: number
   centerLabel?: string
   centerSub?: string
+  /** Overrides the centre figure's type, for cards that set it larger. */
+  centerLabelClass?: string
   className?: string
 }) {
   const { ref, show, hide, overlay } = useTip()
@@ -746,7 +762,7 @@ export function DonutBreakdown({
               fill="none"
               stroke={a.color}
               strokeWidth={thickness}
-              strokeLinecap="round"
+              strokeLinecap="butt"
               strokeDasharray={`${len} ${c - len}`}
               strokeDashoffset={-a.start * c}
               transform={`rotate(-90 ${size / 2} ${size / 2})`}
@@ -764,7 +780,9 @@ export function DonutBreakdown({
       {(centerLabel || centerSub) && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
           <div>
-            {centerLabel && <p className="tnum text-xl font-bold leading-none">{centerLabel}</p>}
+            {centerLabel && (
+              <p className={cn('tnum text-xl font-bold leading-none', centerLabelClass)}>{centerLabel}</p>
+            )}
             {centerSub && <p className="mt-0.5 text-[10.5px] text-ink-3">{centerSub}</p>}
           </div>
         </div>

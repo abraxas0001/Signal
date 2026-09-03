@@ -17,7 +17,8 @@ import { fetchWithTimeout } from '@/lib/net'
 export interface WeekPost {
   platform: TrackedHandle['platform']
   title: string
-  reactions: number
+  /** Null where the platform published no like, comment or share figure. */
+  reactions: number | null
   views: number | null
 }
 
@@ -28,7 +29,17 @@ export interface PersonWeek {
   /** The free-text label on the tracked handles — usually the party tag. */
   label: string | null
   posts: number
-  reactions: number
+  /**
+   * Reactions over the posts that actually published a figure.
+   *
+   * Null when NONE of the week's posts did. YouTube publishes a view count and
+   * no likes or comments, so a rival tracked only there was previously scored
+   * at zero reactions and drawn as an empty bar — a verdict about their week
+   * rather than about what YouTube discloses.
+   */
+  reactions: number | null
+  /** How many of `posts` carried a reaction figure, so a mean has a denominator. */
+  postsWithReactions: number
   platforms: TrackedHandle['platform'][]
   /** Their week's posts, biggest first, capped for the prompt. */
   top: WeekPost[]
@@ -70,7 +81,8 @@ export function weekOf(handles: TrackedHandle[]): WeekModel | null {
         avatarUrl: h.avatarUrl,
         label: h.label,
         posts: 0,
-        reactions: 0,
+        reactions: null,
+        postsWithReactions: 0,
         platforms: [],
         top: [],
       } as PersonWeek)
@@ -78,9 +90,15 @@ export function weekOf(handles: TrackedHandle[]): WeekModel | null {
       if (!p.publishedAt) continue
       const t = Date.parse(p.publishedAt)
       if (!Number.isFinite(t) || t < end - WEEK_MS || t > end) continue
-      const reactions = (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0)
+      // A post the platform published nothing for is not a post with no
+      // reactions. Only figures that were actually disclosed are summed.
+      const published = p.likes != null || p.comments != null || p.shares != null
+      const reactions = published ? (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0) : null
       entry.posts += 1
-      entry.reactions += reactions
+      if (reactions != null) {
+        entry.reactions = (entry.reactions ?? 0) + reactions
+        entry.postsWithReactions += 1
+      }
       if (!entry.platforms.includes(h.platform)) entry.platforms.push(h.platform)
       entry.top.push({
         platform: h.platform,
@@ -96,8 +114,8 @@ export function weekOf(handles: TrackedHandle[]): WeekModel | null {
 
   const rows = [...byPerson.values()]
     .filter((p) => p.posts > 0)
-    .sort((a, b) => b.reactions - a.reactions)
-  for (const r of rows) r.top = r.top.sort((a, b) => b.reactions - a.reactions).slice(0, 8)
+    .sort((a, b) => (b.reactions ?? -1) - (a.reactions ?? -1))
+  for (const r of rows) r.top = r.top.sort((a, b) => (b.reactions ?? -1) - (a.reactions ?? -1)).slice(0, 8)
   if (rows.length < 2 || !rows.some((r) => r.own)) return null
 
   const day = (t: number): string =>
