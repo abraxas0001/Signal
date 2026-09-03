@@ -37,6 +37,7 @@ import { ContentStudio } from '@/components/ContentStudio'
 import { SideNav } from '@/components/SideNav'
 import { emptyStore, isDemoScope, isDeskScope, readStore, subscribe, useStore, update, writeStore } from '@/lib/store'
 import { reconcileOwnership } from '@/lib/handles'
+import { PRIMARY, activePersona } from '@/lib/personas'
 import { currentNavState, restoredTab, useNavHistory } from '@/lib/nav-history'
 import { isUnlisted } from '@/lib/nav'
 import { cn } from '@/lib/utils'
@@ -174,6 +175,22 @@ export default function App() {
    * decides whether the numbers are right.
    */
   useEffect(() => {
+    /**
+     * ONLY ON THE PRIMARY DESK.
+     *
+     * `readStore()` is ACCOUNT-scoped and `listHandles()` is DESK-scoped, so on
+     * a persona desk this compared that persona's accounts against the
+     * PRIMARY's identity record — and wrote the answer to disk. Open a Modi
+     * desk and every one of Modi's accounts was judged against Rahul Gandhi's
+     * recorded handles, matched none of them, and was demoted to `own: false`
+     * permanently. Every total on that desk then reads empty, and re-marking
+     * them by hand is the only way back.
+     *
+     * A persona carries a name and a role but no handle record, so there is
+     * nothing to reconcile against and the honest move is not to guess. The
+     * primary desk is the only one whose identity describes its own accounts.
+     */
+    if (activePersona() !== PRIMARY) return
     reconcileOwnership(readStore().identity)
   }, [deskKey, store.identity])
   /**

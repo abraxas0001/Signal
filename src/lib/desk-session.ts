@@ -1,4 +1,5 @@
 import { drainCollectorInbox } from '@/lib/collector-inbox'
+import { PRIMARY, activePersona } from '@/lib/personas'
 import { PLAIN_CODEC, STORE_KEY, invalidateStore, setCodec, setStorageKey } from '@/lib/store'
 import { isLocked, resealDefaultScope, signOut } from '@/lib/vault'
 
@@ -333,6 +334,21 @@ export function restoreDeskIfActive(): boolean {
 async function drainInbox(): Promise<void> {
   const s = readDeskSession()
   if (!s) return
+  /**
+   * ONLY WHILE THE PRIMARY DESK IS OPEN.
+   *
+   * The drain matches each delivered reading to a tracked handle and acks
+   * whatever it cannot match, on the reasoning that the desk no longer follows
+   * that account. But `listHandles()` is DESK-scoped: with a persona open, the
+   * primary's handles are not in the map at all, so every reading the
+   * collector had walked for the primary looked untracked and was acked —
+   * deleted from the server mailbox, unread, permanently.
+   *
+   * The collector is provisioned per desk id and knows nothing about personas,
+   * which are a local layer this office added on top. So its post reaches the
+   * desk it was collected for, and nowhere else.
+   */
+  if (activePersona() !== PRIMARY) return
   try {
     const result = await drainCollectorInbox(s.token)
     if (result.merged > 0 || result.commentsReceived > 0) notifyRefresh()
