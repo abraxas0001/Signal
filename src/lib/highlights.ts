@@ -1,5 +1,6 @@
 import type { Report } from '@shared/types'
 import type { TrackedHandle, TrackedPost } from '@/lib/handles'
+import { isPlatformAltText } from '@/lib/utils'
 
 /**
  * "Post highlights": the office's own posts that drew the strongest reaction,
@@ -88,11 +89,24 @@ export interface Highlight {
   report: Report
 }
 
-const reactionsOf = (p: TrackedPost): number =>
-  (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0)
+/**
+ * READING FIRST, LIKE EVERY OTHER FIGURE ON THIS SCREEN.
+ *
+ * These read the collector's listing alone while the cards beside them print
+ * `figure()`, which prefers the post's own reading — so one row said "915
+ * reactions" under a card reading 797 likes + 24 comments + 30 shares, and
+ * three more rows disagreed with their own cards. Two numbers for one post on
+ * one row is worse than either number alone.
+ */
+const reactionsOf = (p: TrackedPost, report: Report | null): number =>
+  (figure(p, report, 'likes') ?? 0) +
+  (figure(p, report, 'comments') ?? 0) +
+  (figure(p, report, 'shares') ?? 0)
 
-const hasReactions = (p: TrackedPost): boolean =>
-  p.likes != null || p.comments != null || p.shares != null
+const hasReactions = (p: TrackedPost, report: Report | null): boolean =>
+  figure(p, report, 'likes') != null ||
+  figure(p, report, 'comments') != null ||
+  figure(p, report, 'shares') != null
 
 /**
  * The figure the platform published, preferring the stored reading's own
@@ -108,9 +122,11 @@ const hasReactions = (p: TrackedPost): boolean =>
  */
 const figure = (
   post: TrackedPost,
-  report: Report,
+  /* Nullable: the baseline walks every post on the account, including ones
+     with no stored reading, and must fall back to the collector for those. */
+  report: Report | null,
   key: 'likes' | 'comments' | 'shares' | 'views',
-): number | null => report.snapshot.engagement[key]?.value ?? post[key] ?? null
+): number | null => report?.snapshot.engagement[key]?.value ?? post[key] ?? null
 
 /**
  * Interactions against the audience that could have seen them.
@@ -151,11 +167,13 @@ function engagementOf(
 }
 
 /** Which of the three figures the total is actually made of. */
-function reactionsNoteOf(p: TrackedPost): string {
+function reactionsNoteOf(p: TrackedPost, report: Report | null): string {
+  /* Named over the SAME merged figures the row prints, so the note can never
+     itemise a different total than the one beside it. */
   const parts: [string, number | null | undefined][] = [
-    ['likes', p.likes],
-    ['comments', p.comments],
-    ['shares', p.shares],
+    ['likes', figure(p, report, 'likes')],
+    ['comments', figure(p, report, 'comments')],
+    ['shares', figure(p, report, 'shares')],
   ]
   const had = parts.filter(([, v]) => v != null).map(([k, v]) => `${k} ${v}`)
   const missing = parts.filter(([, v]) => v == null).map(([k]) => k)
@@ -182,6 +200,65 @@ const stillOf = (report: Report): string | null => {
     (m) => m.kind === 'video' && /\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(m.url),
   )
   return other?.url ?? null
+}
+
+/** Where the collector cuts a caption, and the platforms it cuts. */
+const CAPTION_CUT = 140
+const CUT_PLATFORMS = new Set(['Facebook', 'Instagram', 'LinkedIn', 'YouTube'])
+
+/**
+ * A stored caption, with the collector's cut shown as a cut.
+ *
+ * Four adapters store `text.slice(0, 140)` (scraper/adapters/facebook.ts:746
+ * and its siblings in instagram.ts, linkedin.ts and youtube.ts), so 286
+ * captions on this roster are exactly 140 characters long and end mid-word.
+ * One of D. K. Aruna's reads "…బసవతారకం క్యాన్సర్ ఆసుపత్రి నిపుణులైన వైద్య
+ * బృందం చేత జడ్చర్ల నియోజక", severed inside "నియోజకవర్గం", and every screen
+ * that prints it presents those 140 characters as the whole of what the
+ * office wrote. The words cannot be recovered here; that they were cut can be
+ * said, and an ellipsis is the difference between a caption and the first 140
+ * characters of one.
+ *
+ * Twitter/X is not in the set: no adapter cuts it below the platform's own
+ * 280, so a tweet that runs to exactly 140 is complete, and one on this
+ * roster is. Nothing is appended to a caption that already ends in an
+ * ellipsis of its own.
+ */
+export function captionOf(title: string | null | undefined, platform: string): string {
+  const raw = title ?? ''
+  const shown = raw.trim()
+  if (!shown || raw.length !== CAPTION_CUT || !CUT_PLATFORMS.has(platform)) return shown
+  return /(?:…|\.\.\.)$/.test(shown) ? shown : `${shown}…`
+}
+
+/**
+ * THE SAME KEYWORD WRITTEN TWO WAYS IS ONE KEYWORD.
+ *
+ * The chip row is built from the post's own hashtags plus the tags the reading
+ * assigned, and those two sources disagree on shape rather than on substance:
+ * the caption carries `#FreeHealthCamp` and `#Mahabubnagar`, the reading files
+ * `free-health-camp` and `mahabubnagar`. `new Set()` over the raw strings saw
+ * four distinct values in each pair, so ten chips on this desk's top post were
+ * six words, four of them printed twice in two casings.
+ *
+ * The comparison case-folds and drops every separator, which is the only
+ * difference between the two forms. The DISPLAY keeps the first form seen —
+ * the office's own hashtag, since the post's own tags are listed first — so
+ * nothing is rewritten, only the second spelling of an already-listed word is
+ * dropped.
+ */
+export function dedupeTags(tags: readonly (string | null | undefined)[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of tags) {
+    const shown = (raw ?? '').trim().replace(/^#+/, '').trim()
+    if (!shown) continue
+    const key = shown.toLowerCase().replace(/[\s._\-/\\]+/g, '')
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(shown)
+  }
+  return out
 }
 
 /**
@@ -213,7 +290,7 @@ export function highlightsOf(
      * produce a baseline of nought and a comparison saying every post beats
      * it by infinity.
      */
-    const measuredPosts = posts.filter(hasReactions)
+    const measuredPosts = posts.filter((p) => hasReactions(p, reports.get(p.url) ?? null))
     /**
      * THE MEDIAN, NOT THE MEAN.
      *
@@ -227,7 +304,9 @@ export function highlightsOf(
      * The median is what "a typical post" means in plain English: half do
      * better, half do worse, and one runaway cannot move it.
      */
-    const sortedReactions = measuredPosts.map(reactionsOf).sort((x, y) => x - y)
+    const sortedReactions = measuredPosts
+      .map((p) => reactionsOf(p, reports.get(p.url) ?? null))
+      .sort((x, y) => x - y)
     const mid = Math.floor(sortedReactions.length / 2)
     const baseline =
       sortedReactions.length >= 3
@@ -244,14 +323,23 @@ export function highlightsOf(
         continue
       }
       const score = analysis.sentiment.score
-      const mine = reactionsOf(p)
+      const mine = reactionsOf(p, report)
       const followers =
         report.snapshot.author.followers?.value ?? snapshot?.followers ?? null
 
       out.push({
         url: p.url,
         platform: h.platform,
-        title: p.title?.trim() || analysis.headline || p.url,
+        /* The reading's headline beats the platform's alt text: one says
+           what the post is about, the other describes the picture that is
+           already on screen beside it. The last resort is words, not the
+           permalink: a post whose caption and headline are both empty has no
+           title, and printing its address in the title slot says nothing and
+           looks like a caption. Content insights had the same last resort and
+           printed a bare facebook.com/reel/… address as a post title. */
+        title: isPlatformAltText(p.title)
+          ? analysis.headline?.trim() || captionOf(p.title, h.platform) || 'Untitled post'
+          : captionOf(p.title, h.platform) || analysis.headline?.trim() || 'Untitled post',
         thumbnailUrl: p.thumbnailUrl ?? stillOf(report),
         publishedAt: p.publishedAt ?? report.snapshot.publishedAt ?? null,
         likes: figure(p, report, 'likes'),
@@ -259,7 +347,7 @@ export function highlightsOf(
         shares: figure(p, report, 'shares'),
         views: figure(p, report, 'views'),
         versusTypical:
-          baseline != null && baseline > 0 && hasReactions(p)
+          baseline != null && baseline > 0 && hasReactions(p, report)
             ? {
                 pct: ((mine - baseline) / baseline) * 100,
                 baseline: Math.round(baseline),
@@ -269,13 +357,13 @@ export function highlightsOf(
         versusNote:
           baseline == null || baseline <= 0
             ? 'No baseline to compare against.'
-            : hasReactions(p)
+            : hasReactions(p, report)
               ? null
               : 'Not published for this post.',
         engagement: engagementOf(p, report, followers, snapshot?.takenAt ?? null),
-        reactions: reactionsOf(p),
-        measured: hasReactions(p),
-        reactionsNote: reactionsNoteOf(p),
+        reactions: reactionsOf(p, report),
+        measured: hasReactions(p, report),
+        reactionsNote: reactionsNoteOf(p, report),
         readAt: snapshot?.takenAt ?? null,
         hasComments: (report.snapshot.comments?.length ?? 0) > 0,
         score,
@@ -301,10 +389,28 @@ export function highlightsOf(
 /** The strongest few, for the dashboard's compact card. */
 export const topHighlights = (all: Highlight[], n: number): Highlight[] => all.slice(0, n)
 
-/** Warmly received first. */
+/**
+ * RECEPTION IS A THING THE AUDIENCE DID, SO ONLY POSTS WITH AN AUDIENCE
+ * REPLY ARE IN THESE TWO RANKINGS.
+ *
+ * Both used to filter on the score alone. On a post nobody commented on that
+ * score was read from the post's OWN words, so "Worst received" put
+ * https://www.youtube.com/watch?v=FWEVHaubanE third of five at −80 over a
+ * video with no comments, on a stored rationale that opens "judging from the
+ * post itself, which uses accusatory language"; and 21 of the 56 rows in
+ * "Best received" were the same mistake in the warm direction. `hasComments`
+ * was already on every highlight and nothing consulted it here.
+ *
+ * The filter, not a chip: a lens whose name is a claim about how people
+ * received a post cannot list posts no one received. The unfiltered ranking
+ * of every read post still exists, under "By platform", where the cards say
+ * on their face which posts have no comments behind their score.
+ *
+ * Warmly received first, over the posts that have comments to be received in.
+ */
 export const bestReceived = (all: Highlight[]): Highlight[] =>
-  [...all].filter((h) => h.score > 0).sort((a, b) => b.score - a.score)
+  [...all].filter((h) => h.hasComments && h.score > 0).sort((a, b) => b.score - a.score)
 
-/** Worst received first. */
+/** Worst received first, on the same terms. */
 export const worstReceived = (all: Highlight[]): Highlight[] =>
-  [...all].filter((h) => h.score < 0).sort((a, b) => a.score - b.score)
+  [...all].filter((h) => h.hasComments && h.score < 0).sort((a, b) => a.score - b.score)

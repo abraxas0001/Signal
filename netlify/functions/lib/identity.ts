@@ -336,7 +336,7 @@ async function ask(
     // `complete` speaks the OpenAI-shaped chat API. An Anthropic key reaches the
     // model through the SDK path in analyse.ts and has no equivalent here.
     if (!provider.baseUrl) {
-      lastError = `${provider.label} is configured, but profile reading only calls OpenAI-compatible providers. Set GROQ_API_KEY or GEMINI_API_KEY as well.`
+      lastError = `${provider.label} is configured, but profile reading only calls OpenAI-compatible providers. Set GROQ_API_KEY or OPENAI_API_KEY as well.`
       continue
     }
     try {

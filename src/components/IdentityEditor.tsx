@@ -140,6 +140,12 @@ function EditableRow({
             }
           }}
           placeholder={placeholder}
+          // The field name is drawn in the span to the left, but nothing tied
+          // it to this input, so a reader fell back to the placeholder: six of
+          // the nine rows are placeheld "Not known" and all six announced
+          // identically. Naming the input after its row is what tells someone
+          // whether they are about to overwrite the party or the district.
+          aria-label={label}
           className="min-h-11 min-w-0 flex-1 rounded-[10px] border border-[var(--accent)] bg-[var(--surface)] px-3 py-1 text-[15px] shadow-[var(--e1)] outline-none"
         />
       ) : (

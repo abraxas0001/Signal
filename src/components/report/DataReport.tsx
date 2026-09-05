@@ -1,4 +1,5 @@
 import * as m from 'motion/react-m'
+import { BackBar } from './BackBar'
 import { useMemo, type ReactNode } from 'react'
 import NumberFlow from '@number-flow/react'
 import { CommentsPanel } from './CommentsPanel'
@@ -43,10 +44,13 @@ import { fadeUp, listStagger } from '@/lib/motion'
 export function DataReport({
   report,
   onReset,
+  backLabel,
   onEditMetric,
 }: {
   report: Report
   onReset: () => void
+  /** Names the destination on the back control, where the caller knows it. */
+  backLabel?: string | null
   onEditMetric?: () => void
 }) {
   const { snapshot } = report
@@ -88,6 +92,8 @@ export function DataReport({
       initial="hidden"
       animate="show"
     >
+      <BackBar label={backLabel} onBack={onReset} />
+
       {/* The run returned figures but no interpretation. Say why, once, at the
           top — otherwise the empty analysis reads as a broken report. */}
       {report.meta.incomplete && (
@@ -184,7 +190,7 @@ export function DataReport({
             />
             <MetricStat
               bare
-              label="Views"
+              label="Total impressions"
               metric={eng.views}
               icon={<Eye size={18} />}
               tint="teal"

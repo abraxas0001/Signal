@@ -46,6 +46,32 @@ export const STOPWORDS = new Set<string>([
   'ఇది', 'అది', 'ఉంది', 'ఉన్న', 'నుంచి', 'నుండి', 'వద్ద', 'గారు', 'మీద',
   'కూడా', 'ఇక', 'మన', 'నా', 'మీ', 'వారి', 'తన', 'మా', 'మేము', 'నేను', 'మీరు',
   'వారు', 'అతను', 'ఆమె', 'నీ', 'నాకు', 'మాకు',
+  /*
+   * Telugu verbs and quantifiers the news scan surfaced as "keywords".
+   *
+   * The first real scan of a Telugu news week ranked చేశారు ("did"), ఆయన
+   * ("he"), and మాజీ ("former") as what the coverage is about, because the
+   * list above held Telugu PRONOUNS but not the everyday verbs and role
+   * words every third headline uses. Same rule as the English half: a word
+   * that could appear in a story about anything carries no subject.
+   */
+  'చేశారు', 'చేసిన', 'చేస్తున్న', 'చేయాలని', 'అన్నారు', 'తెలిపారు',
+  'పేర్కొన్నారు', 'వెల్లడించారు', 'జరిగిన', 'జరిగింది', 'పలువురు', 'పలు',
+  'మాజీ', 'నేడు', 'రేపు', 'నిన్న', 'ఇవాళ', 'మంది', 'వేల', 'లక్షల', 'కోట్ల',
+  'ఆయన', 'ఈయన', 'వీరు', 'ఎవరు', 'అందరూ',
+  'రూపాయల', 'శాతం',
+  /*
+   * Month names, in every spelling the mastheads use. "Aug" ranked as a
+   * keyword with 28 mentions, which is a statement about how datelines are
+   * written, not about what anyone said.
+   */
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+  'september', 'october', 'november', 'december', 'jan', 'feb', 'mar', 'apr',
+  'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec',
+  'జనవరి', 'ఫిబ్రవరి', 'మార్చి', 'ఏప్రిల్', 'మే', 'జూన్', 'జూలై', 'ఆగస్టు',
+  'సెప్టెంబర్', 'అక్టోబర్', 'నవంబర్', 'డిసెంబర్',
+  'जनवरी', 'फरवरी', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुलाई', 'अगस्त',
+  'सितंबर', 'अक्टूबर', 'नवंबर', 'दिसंबर',
 ])
 
 /**

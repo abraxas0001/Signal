@@ -925,6 +925,45 @@ function readInstagramComments(
   return { comments, hasMore: connection.page_info?.has_next_page === true }
 }
 
+/**
+ * The play count Instagram states on a reel, read out of the embed payload.
+ *
+ * WHY THIS IS THE ONLY PLACE IT CAN COME FROM, measured rather than assumed.
+ * Instagram's own web app does NOT publish this figure any more. Read while
+ * logged in, the user-timeline GraphQL query returns `view_count: null` on all
+ * 148 posts of this roster's accounts, carries no `play_count` field at all,
+ * and reports `like_and_view_counts_disabled: false` — so the silence is not an
+ * account setting. The reel's own page is silent twice over: null in its
+ * payloads and no "N views" text in the rendered DOM. That held on four
+ * separate accounts, including a Modi reel carrying 134,799 likes.
+ *
+ * The `/embed/captioned/` document is the exception, and it is the legacy
+ * surface: it still ships the old `shortcode_media` GraphQL object, and that
+ * object still states `video_view_count`. Measured on this roster: 7,970 on a
+ * reel whose logged-in page said null, 1,352 and 4,767 on two more, and null on
+ * an image post, which is correct — a photograph has no plays.
+ *
+ * THE FIGURE IS FREE. `extractInstagram` already fetches this exact document
+ * for the like and comment counts, so nothing here costs a request, and no
+ * logged-in session is touched.
+ *
+ * The number appears EXACTLY ONCE in the document, so unlike Facebook's reel
+ * pages — where two dozen neighbouring reels each carry their own counts and
+ * the extractor has to anchor on the right feedback node — there is no
+ * neighbour to confuse it with. The count is nested inside a JSON string, so
+ * the quotes reach us backslash-escaped — `\\"video_view_count\\":7970` rather
+ * than `"video_view_count":7970`. Matching the run of quotes and backslashes as
+ * a character class accepts either spelling without the extractor having to
+ * care how many layers of escaping Instagram used this week, and anything that
+ * is not a run of digits yields null rather than a guess.
+ */
+function readEmbedViews(html: string): number | null {
+  const raw = /video_view_count[\\"]*:\s*(\d+)/.exec(html)?.[1]
+  if (raw == null) return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
 async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<ExtractResult> {
   const attempts: ExtractResult['attempts'] = []
   const shortcode = id.id
@@ -955,6 +994,8 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
 
   let likes: number | null = null
   let comments: number | null = null
+  /** Reels only. An image post has no plays, and null says so rather than 0. */
+  let views: number | null = null
   let username: string | null = null
   let caption: string | null = null
 
@@ -968,6 +1009,7 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
   if (embed.ok && embed.body) {
     likes = parseCount(/([\d,]+)\s+likes/i.exec(embed.body)?.[1] ?? null)
     comments = parseCount(/View all ([\d,]+) comments/i.exec(embed.body)?.[1] ?? null)
+    views = readEmbedViews(embed.body)
     username = readEmbedUsername(embed.body)
     const capMatch = /<div class="Caption">([\s\S]*?)<\/div>/.exec(embed.body)?.[1]
     if (capMatch) {
@@ -991,7 +1033,9 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
   attempts.push({
     strategy: 'instagram:embed-captioned',
     ok: embedOk,
-    note: embedOk ? `likes=${likes ?? '—'} comments=${comments ?? '—'}` : `HTTP ${embed.status}, no fields`,
+    note: embedOk
+      ? `likes=${likes ?? '—'} comments=${comments ?? '—'} views=${views ?? '—'}`
+      : `HTTP ${embed.status}, no fields`,
   })
 
   // 2. The post page via a crawler UA — the only source of the publish date.
@@ -1118,7 +1162,13 @@ async function extractInstagram(id: UrlIdentity, _ctx: ExtractContext): Promise<
         likes: metric(likes, 'page-scrape'),
         comments: metric(comments, 'page-scrape'),
         shares: { value: null, source: 'unavailable' },
-        views: { value: null, source: 'unavailable' },
+        /**
+         * Reels carry a play count; image posts genuinely do not, and
+         * `metric` turns that null into 'unavailable' rather than a zero.
+         * The dashboard sums whichever posts carry one and says how many of
+         * how many that was, so a partial window stays readable as partial.
+         */
+        views: metric(views, 'page-scrape'),
         engagementRate: null,
       },
       media: image ? [{ kind: 'image', url: image, thumbnailUrl: image }] : [],

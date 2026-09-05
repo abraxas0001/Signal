@@ -33,6 +33,7 @@ import {
   PLAIN_CODEC,
   readStore,
   setCodec,
+  update,
   setStorageKey,
   STORE_KEY,
 } from '@/lib/store'
@@ -76,8 +77,27 @@ export function isDemoMode(): boolean {
 // history was too short to have a shape, not because the arithmetic was
 // wrong. A namespace seeded before this keeps the old two readings until the
 // version moves, so this bump is what actually delivers the new data.
-const SEED_VERSION = '23'
+// 24: YouTube posts now carry like counts. The `videos.xml` feed — the only
+// keyless route that ever published them — answers 404 for every channel now,
+// so both readers fell through to routes that give views and no likes, and
+// YouTube engagement was permanently NA. The like count is stated on each
+// watch page, which the scraper already opens for the exact publish date, so
+// it costs nothing extra: 25 of 25 videos now carry one.
+const SEED_VERSION = '24'
 const SEED_KEY = 'signal.demo.seed'
+
+/**
+ * The stamp a seeded desk carries: the build's seed version AND the dataset's
+ * own generatedAt.
+ *
+ * The version alone had to be bumped by hand for any data change to reach a
+ * desk that was already seeded, and nobody bumps a constant after running a
+ * scraper: the office re-scraped the accounts, opened the demo, and read
+ * last week's numbers under this week's date. The scrape already writes the
+ * moment it ran into the file, so the file itself now names the seed.
+ */
+const seedStamp = (roster: { generatedAt: string }): string =>
+  `${SEED_VERSION}:${roster.generatedAt}`
 
 /**
  * Open the demo desk.
@@ -138,7 +158,7 @@ export async function enterDemoMode(): Promise<boolean> {
    */
   let stamped = false
   try {
-    stamped = localStorage.getItem(SEED_KEY) === SEED_VERSION
+    stamped = localStorage.getItem(SEED_KEY) === seedStamp(roster)
   } catch {
     /* unreadable storage: treat as unseeded and rebuild */
   }
@@ -150,7 +170,7 @@ export async function enterDemoMode(): Promise<boolean> {
       applyPrincipal(roster, key)
       saveChoice(key)
       try {
-        localStorage.setItem(SEED_KEY, SEED_VERSION)
+        localStorage.setItem(SEED_KEY, seedStamp(roster))
       } catch {
         /* the desk still opens; it will simply be rebuilt on the next visit */
       }
@@ -209,16 +229,51 @@ export async function reseedDemoIfStale(): Promise<boolean> {
   } catch {
     /* unreadable storage: leave the namespace as it is */
   }
-  if (stamped === SEED_VERSION) return false
 
+  // The roster has to be read before the stamp can be judged, because the
+  // stamp now carries the dataset's generatedAt: a fresh scrape IS a new
+  // seed, with no constant to remember to bump.
   const roster = await loadDemoRoster()
   if (!roster) return false
+  if (stamped === seedStamp(roster)) return false
+
   const key = readChoice() ?? roster.pairings[0]?.principal
   if (!key) return false
+
+  /**
+   * WORK DONE ON THIS DESK SURVIVES THE RESEED.
+   *
+   * applyPrincipal spreads a fresh copy of the example content over the
+   * store, which is right on first entry and catastrophic on a desk somebody
+   * has actually used: an office that ran a real news scan here held 145
+   * scanned stories, and an automatic reseed would have replaced them with
+   * the twelve example cuttings without so much as a message. Everything the
+   * example seeder writes carries a `demo_` id; everything a real scan or a
+   * real filing writes does not. So the reseed refreshes the example rows
+   * and the scraped accounts, and every row of real work is put back exactly
+   * as it was.
+   */
+  const before = readStore()
   applyPrincipal(roster, key)
+  const keepWork = <T extends { id: string }>(prev: T[], seeded: T[]): T[] => {
+    const real = prev.filter((x) => !String(x.id).startsWith('demo_'))
+    if (real.length === 0) return seeded
+    const ids = new Set(real.map((x) => x.id))
+    return [...real, ...seeded.filter((x) => !ids.has(x.id))]
+  }
+  update((next) => ({
+    ...next,
+    personaMentions: keepWork(before.personaMentions, next.personaMentions),
+    grievances: keepWork(before.grievances, next.grievances),
+    issues: keepWork(before.issues, next.issues),
+    mentions: keepWork(before.mentions, next.mentions),
+    actions: keepWork(before.actions, next.actions),
+    personas: keepWork(before.personas, next.personas),
+  }))
+
   saveChoice(key)
   try {
-    localStorage.setItem(SEED_KEY, SEED_VERSION)
+    localStorage.setItem(SEED_KEY, seedStamp(roster))
   } catch {
     /* it reseeds again next visit, which is correct */
   }

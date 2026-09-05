@@ -4,15 +4,18 @@ import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
 import {
   ArrowLeft,
+  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
   Copy,
+  Download,
   ExternalLink,
   Filter,
   Hash,
   Inbox,
+  Info,
   Layers,
   LoaderCircle,
   MapPin,
@@ -28,7 +31,7 @@ import {
   X,
 } from 'lucide-react'
 import type { FakeSignal, GrievanceRecord, IssueCluster } from '@shared/grievance'
-import { CONSTITUENCIES, bySeverityThenRecency } from '@shared/grievance'
+import { bySeverityThenRecency } from '@shared/grievance'
 import { partyAbbreviation, type Identity } from '@shared/identity'
 import { placeVariants, resolvePlace } from '@shared/places'
 import { planTerms } from '@/lib/autoconfig'
@@ -41,9 +44,13 @@ import {
   shiftDay,
   todayDeskDay,
 } from '@/lib/desk-day'
-import { downloadGrievanceCsv, downloadGrievanceWorkbook } from '@/lib/grievance-export'
-import { ExportButton } from '@/components/ExportButton'
-import { Mascot } from './Mascot'
+import { downloadGrievanceCsv } from '@/lib/grievance-export'
+/* THE MASCOT IS OFF THIS HEADER. The reference sets the desk's name as plain
+   bold type with nothing beside it, and a robot next to "Grievance desk" was
+   the loudest thing on a screen whose subject is other people's complaints.
+   The scan's state — the one thing the mascot carried — is reported by
+   ScanProgress, directly under the control that starts it. */
+import { WINDOWS, inWindow, presentAnchor, windowStart, type WindowId } from '@/lib/window'
 import type {
   ActionPriority,
   ConfidenceTier,
@@ -52,7 +59,7 @@ import type {
   Severity,
   Topic,
 } from '@shared/taxonomy'
-import { SENTIMENT_SCORE, SEVERITIES, SEVERITY_RANK, TOPICS } from '@shared/taxonomy'
+import { SENTIMENT_SCORE, SEVERITIES, SEVERITY_RANK } from '@shared/taxonomy'
 import { Button, Card, Chip, PageHeader, selectClass, type ChipTone } from './ui'
 import { CardHead } from '@/components/kit'
 /**
@@ -263,13 +270,6 @@ const normaliseTag = (tag: string): string => tag.replace(/^#+/, '').toLowerCase
 const dateLabel = (record: GrievanceRecord): string =>
   record.publishedAt ? absoluteDate(record.publishedAt) : 'No date given'
 
-const constituencyOrder = (name: string): number => {
-  const at = CONSTITUENCIES.findIndex((c) => c === name)
-  return at === -1 ? CONSTITUENCIES.length : at
-}
-
-const topicOrder = (topic: Topic): number => TOPICS.findIndex((t) => t === topic)
-
 /* ═══════════════════════════════════════════════════════════════════════════
    Filtering the issues
 
@@ -301,58 +301,6 @@ const NO_ISSUE_FILTERS: IssueFilters = {
   flagged: false,
 }
 
-/**
- * What the search box looks in.
- *
- * Issue-level text only — title, summary, seat, the places named. Deliberately
- * NOT the text of every backing record: searching those would match an issue on
- * a word that appears in one story out of forty, and the reader would have no
- * way to see why it matched.
- */
-const issueHaystack = (issue: IssueCluster): string =>
-  [issue.title, issue.summary, issue.constituency ?? '', issue.places.join(' ')]
-    .join(' ')
-    .toLowerCase()
-
-/**
- * Suspicion levels that count as flagged.
- *
- * 'Unsure' is excluded on purpose: it is the reader declining to call it, not a
- * finding. Treating it as a flag would fill the filter with everything nobody
- * was certain about, which is most things.
- */
-const FLAGGED_SUSPICION: readonly FakeSuspicion[] = ['Likely', 'Yes']
-
-/**
- * Does this issue match?
- *
- * `byId` is needed because the flag lives on the RECORD, not the issue —
- * `IssueCluster` carries no fake assessment, so the only path is through its
- * backing records. That join is why this takes a lookup rather than being a
- * pure function of the issue.
- */
-function issueMatches(
-  issue: IssueCluster,
-  filters: IssueFilters,
-  byId: Map<string, GrievanceRecord>,
-): boolean {
-  if (filters.severities.length > 0 && !filters.severities.includes(issue.severity)) return false
-  if (filters.category && issue.category !== filters.category) return false
-
-  const query = filters.text.trim().toLowerCase()
-  if (query && !issueHaystack(issue).includes(query)) return false
-
-  if (filters.flagged) {
-    const anyFlagged = issue.recordIds.some((id) => {
-      const record = byId.get(id)
-      return record !== undefined && FLAGGED_SUSPICION.includes(record.fake.suspicion)
-    })
-    if (!anyFlagged) return false
-  }
-
-  return true
-}
-
 /*
   Deliberately excluded, each for a reason:
 
@@ -370,23 +318,6 @@ function issueMatches(
 /** Issues arrive ranked by the server; an unranked one sorts last, not first. */
 const issueRank = (issue: IssueCluster): number =>
   issue.rank > 0 ? issue.rank : Number.MAX_SAFE_INTEGER
-
-const haystack = (r: GrievanceRecord): string =>
-  [
-    r.headline,
-    r.summary,
-    r.excerpt,
-    r.topic,
-    r.subtopic ?? '',
-    r.publisher ?? '',
-    r.constituency ?? '',
-    r.places.join(' '),
-    r.namedPersons.map((p) => p.name).join(' '),
-    r.hashtags.join(' '),
-    r.sourceUrl,
-  ]
-    .join(' ')
-    .toLowerCase()
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Screen
@@ -579,6 +510,141 @@ function RelevanceChip({ verdict }: { verdict: Verdict }) {
   )
 }
 
+/**
+ * The info mark that carries a header's detail.
+ *
+ * The reference puts one beside the desk's subtitle, and this desk has
+ * something real to put in it: the day's tally, which used to BE the subtitle
+ * and pushed the sentence saying what the screen is off the header entirely.
+ *
+ * It opens on a press as well as answering a hover, because `title` alone is
+ * nothing on a touch screen and this desk is read on a phone. The note lands
+ * inline, in the sentence it belongs to, rather than in a floating layer that
+ * would have to be positioned, dismissed and kept on screen.
+ */
+/**
+ * The reference's numbered marker, on the top edge of the card it names.
+ *
+ * IT IS A CAPTION, SO IT IS DRAWN AS ONE. This was a strip of two spans above
+ * the pair of cards: no role, no tabindex, no handler, one painted as a
+ * selected tab and the other as a disabled one. Nothing was ever switchable —
+ * both cards render at once — so the strip advertised a control that did not
+ * exist, and its "disabled" half told the reader the second card was
+ * unavailable while that card sat open beside it. Both markers are identical
+ * now, neither reads as pressed, and each one sits over the card it actually
+ * names rather than both sitting over the first.
+ */
+function StepMark({ n, label }: { n: number; label: string }) {
+  return (
+    <span className="inline-flex h-10 max-w-full items-center gap-2 rounded-t-[10px] border border-b-0 border-[var(--border)] bg-[var(--surface)] px-4 text-[13px] font-semibold text-ink">
+      <span className="tnum grid size-[21px] shrink-0 place-items-center rounded-full bg-[var(--accent)] text-[11px] text-[var(--accent-fg)]">
+        {n}
+      </span>
+      <span className="truncate">{label}</span>
+    </span>
+  )
+}
+
+function InfoMark({ note }: { note: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={note}
+        aria-label={note}
+        aria-expanded={open}
+        className={cn(
+          'ml-1 inline-grid size-[18px] translate-y-[3px] place-items-center rounded-full transition-colors',
+          open ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-ink-3 hover:text-ink',
+        )}
+      >
+        <Info size={14} aria-hidden />
+      </button>
+      {open && <span className="text-ink-3"> {note}</span>}
+    </>
+  )
+}
+
+/**
+ * "Export report" — the reference's header control, on this desk's own data.
+ *
+ * It writes the sheet through `downloadGrievanceCsv`, the export this desk
+ * already owns, rather than a second one written for a button. CSV rather than
+ * the workbook because this desk is mostly read on a phone, where a .xlsx
+ * needs an app that is often not installed.
+ *
+ * What it exports is every record inside the header's WINDOW. That is not
+ * always what the table shows: the table's own dropdowns — topic, source,
+ * severity, place — live inside IssuesTable and never reach here, so a
+ * filtered table can read "Nothing matches all of those filters" while this
+ * button still writes the whole window. The file is the right thing to
+ * produce; the button's hover says which set it is, so the two cannot be
+ * read as the same. The
+ * button says what it produces on hover, and says so when it fails: an export
+ * that throws silently is the failure this app has already had once.
+ */
+function ExportReport({ records, windowName }: { records: GrievanceRecord[]; windowName: string }) {
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const clear = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (clear.current) clearTimeout(clear.current)
+    },
+    [],
+  )
+
+  const empty = records.length === 0
+  const rows = `${records.length} ${pluralise(records.length, 'record')}`
+
+  const press = (): void => {
+    setError(null)
+    try {
+      downloadGrievanceCsv(records, windowName)
+      setSaved(true)
+      clear.current = setTimeout(() => setSaved(false), 2400)
+    } catch (cause) {
+      setSaved(false)
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  /*
+   * THE HINT NAMES WHAT THE FILE HOLDS, WHICH IS THE WINDOW, NOT THE TABLE.
+   *
+   * It said "the N on screen", and it is not: the table's own dropdowns —
+   * topic, source, severity, place — live inside IssuesTable and never reach
+   * here, so filtering to Health + Eenadu could leave the table reading
+   * "Nothing matches all of those filters" while this button still wrote
+   * every record in the window. The file is right; the sentence was wrong.
+   *
+   * The empty hint had the same fault in reverse: on an empty desk at All
+   * time it blamed the window ("no record falls inside all time") for a desk
+   * that simply holds nothing.
+   */
+  const hint = empty
+    ? windowName.toLowerCase() === 'all time'
+      ? 'Nothing to export: this desk holds no records yet.'
+      : `Nothing to export: no record on this desk falls inside ${windowName.toLowerCase()}.`
+    : error
+      ? `Could not build the file: ${error}`
+      : `Download every record inside ${windowName.toLowerCase()} as a CSV file — the window, not the table's filters`
+
+  return (
+    <Button size="sm" variant="outline" onClick={press} disabled={empty} title={hint} aria-label={hint}>
+      {saved ? <Check size={15} className="text-[var(--pos)]" /> : <Download size={15} />}
+      {error ? 'Could not save' : saved ? 'Saved' : 'Export report'}
+      {error && (
+        <span role="alert" className="sr-only">
+          {hint}
+        </span>
+      )}
+    </Button>
+  )
+}
+
 export function Grievances({
   onClose,
   mode = 'issues',
@@ -706,15 +772,34 @@ export function Grievances({
     [allRecords, onDesk, showSetAside],
   )
 
-  /** What the rule set aside, counted, so the filter is never silent. */
-  const setAside = useMemo(
-    () => countVerdicts(allRecords.map(verdictOf)),
-    [allRecords, verdictOf],
-  )
-
   /** The desk day being looked at. Declared here because the issue list
       below is scoped to it, not only the record list further down. */
   const [day, setDay] = useState(() => todayDeskDay())
+
+  /**
+   * How far back the screen reaches — the header's window.
+   *
+   * The reference carries one and it has to be real: a picker that changes
+   * nothing is worse than no picker, because it tells the office a cut was
+   * applied when none was. So it cuts BOTH cards. The issues table is handed
+   * only the records inside it, and the suggestion column is handed the set of
+   * issues that still have a record inside it.
+   *
+   * The app's own window vocabulary, from src/lib/window.ts, rather than a
+   * fifth one invented here — the same four labels the dashboard offers, so
+   * "Last 7 days" means the same thing on both screens.
+   *
+   * Thirty days rather than the reference's seven. The reference is a mockup
+   * and its default is part of its invented content; ours has to be a default
+   * that shows this desk what it holds. A desk whose last scan ran eight days
+   * ago would open on an empty table under a working pager, and read as broken.
+   */
+  const [windowId, setWindowId] = useState<WindowId>('month')
+  const windowFrom = useMemo(() => windowStart(presentAnchor(), windowId), [windowId])
+  const windowName = useMemo(
+    () => WINDOWS.find((w) => w.id === windowId)?.label ?? 'All time',
+    [windowId],
+  )
 
   const issues = useMemo(
     () =>
@@ -729,17 +814,7 @@ export function Grievances({
   const byId = useMemo(() => new Map(allRecords.map((r) => [r.id, r])), [allRecords])
 
   /**
-   * The issue filters.
-   *
-   * Component state rather than the store: this is a view somebody sets while
-   * looking for something, not a preference they want back tomorrow. Persisting
-   * it would mean an office opens the app to a filtered list it does not
-   * remember setting, and concludes the desk has gone quiet.
-   */
-  const [issueFilters, setIssueFilters] = useState<IssueFilters>(NO_ISSUE_FILTERS)
-
-  /**
-   * Issues on the day being looked at, then the filters.
+   * Issues on the day being looked at.
    *
    * These were not day-scoped at all, and the comment above issueRank said so
    * as though it were a decision. It was not survivable: the day stepper sits
@@ -769,35 +844,6 @@ export function Grievances({
     [issues, byId, day, onDesk, showSetAside],
   )
 
-  const visibleIssues = useMemo(
-    () => dayIssues.filter((issue) => issueMatches(issue, issueFilters, byId)),
-    [dayIssues, issueFilters, byId],
-  )
-
-  /**
-   * Only the categories actually present.
-   *
-   * TOPICS carries twenty-odd values and a desk sees four or five of them. A
-   * dropdown listing "Electricity" when no issue is about electricity is a
-   * control that promises a result and delivers an empty list.
-   */
-  const issueCategories = useMemo(() => {
-    const present = new Set(issues.map((i) => i.category))
-    return [...present].sort((a, b) => topicOrder(a) - topicOrder(b))
-  }, [issues])
-
-   /** Whether the flag filter would ever do anything on this desk. */
-  const anyFlagged = useMemo(
-    () =>
-      issues.some((issue) =>
-        issue.recordIds.some((id) => {
-          const record = byId.get(id)
-          return record !== undefined && FLAGGED_SUSPICION.includes(record.fake.suspicion)
-        }),
-      ),
-    [issues, byId],
-  )
-
   /**
    * The day the desk is reading, and the records filed on it.
    *
@@ -812,75 +858,67 @@ export function Grievances({
   const dayRecords = useMemo(() => recordsOnDay(records, day), [records, day])
 
   /**
-    * What an export would contain.
-    *
-    * This was `dayRecords` in both views, and in the issues view that is the
-    * wrong set twice over. An issue is a cluster of records filed across
-    * several days, so exporting "today" gave an office a file that did not
-    * contain the issue they were looking at — and on a morning when the scan
-    * had filed nothing yet, `dayRecords` was empty, the button was `disabled`,
-    * and pressing it did nothing whatsoever. That is the button that was
-    * reported broken.
-    *
-    * So: export what is on screen. In the issues view that means the records
-    * behind the issues that survived the filters — set a filter, and the sheet
-    * narrows with the list. In the records view it stays the day being read.
-    */
-   const exportRecords = useMemo(() => {
-     if (mode === 'records') return dayRecords
-     const wanted = new Set(visibleIssues.flatMap((i) => i.recordIds))
-     // Ordered by the issue list rather than by filing date, so the sheet reads
-     // in the same order as the screen it came from.
-     return [...wanted].map((id) => byId.get(id)).filter((r): r is GrievanceRecord => r !== undefined)
-   }, [mode, dayRecords, visibleIssues, byId])
-  const otherDays = useMemo(
-    () => groupByDay(records).filter((b) => b.day !== day).length,
-    [records, day],
+   * The records the header's window leaves standing — what the table lists.
+   *
+   * Dated by the same rule the day buckets use: the publication date when the
+   * story carries one, the filing date when it does not. A record with neither
+   * falls outside every window but "All time", which is the honest answer —
+   * nothing can place an undated story inside seven days.
+   */
+  const deskRecords = useMemo(
+    () => records.filter((r) => inWindow(r.publishedAt ?? r.createdAt, windowFrom)),
+    [records, windowFrom],
   )
 
-  const options = useMemo(() => {
-    const constituencies = new Set<string>()
-    const topics = new Set<Topic>()
-    const persons = new Set<string>()
-    const tags = new Set<string>()
-
-    for (const r of dayRecords) {
-      if (r.constituency) constituencies.add(r.constituency)
-      topics.add(r.topic)
-      for (const p of r.namedPersons) persons.add(p.name)
-      for (const h of r.hashtags) tags.add(normaliseTag(h))
+  /**
+   * The issues with at least one record inside the window.
+   *
+   * An issue whose backing this device no longer holds is kept rather than
+   * dropped, exactly as `dayIssues` keeps it: clearing old records must not
+   * silently delete an issue from every view at once.
+   */
+  const windowIssueIds = useMemo(() => {
+    if (windowFrom === null) return null
+    /*
+     * NO CLUSTERS MEANS NO ID CUT, AND THAT IS NOT A SHORTCUT.
+     *
+     * This set is built from `store.issues`, and the panel it feeds drops
+     * every grievance row whose id is not in it. But when the desk holds no
+     * clusters, `issuesFor` does not rank clusters at all — it tallies the
+     * RECORDS by topic and mints ids of its own ("topic-Water"), which can
+     * never appear here. Handing it a set built from an empty `store.issues`
+     * therefore deleted the entire grievance half of "What should I talk
+     * about?" on any desk whose clustering has not run, silently, under a
+     * window control that was doing its job everywhere else.
+     *
+     * Null is the honest answer: it says "this caller has no id-based cut to
+     * apply". The window is not lost by returning it, because the tallied
+     * path windows itself — it skips every record older than `since`, which
+     * is the same instant this set was built from.
+     */
+    if (issues.length === 0) return null
+    const kept = new Set<string>()
+    for (const issue of issues) {
+      const held = issue.recordIds
+        .map((id) => byId.get(id))
+        .filter((r): r is GrievanceRecord => r !== undefined)
+      if (held.length === 0 || held.some((r) => inWindow(r.publishedAt ?? r.createdAt, windowFrom))) {
+        kept.add(issue.id)
+      }
     }
+    return kept
+  }, [issues, byId, windowFrom])
 
-    return {
-      // The office's own segments first, in the order they think of them; any
-      // constituency a story dragged in follows, alphabetically.
-      constituencies: [...constituencies].sort(
-        (a, b) => constituencyOrder(a) - constituencyOrder(b) || a.localeCompare(b),
-      ),
-      topics: [...topics].sort((a, b) => topicOrder(a) - topicOrder(b)),
-      persons: [...persons].sort((a, b) => a.localeCompare(b)),
-      tags: [...tags].sort((a, b) => a.localeCompare(b)),
-    }
-  }, [dayRecords])
+  /* THE EXPORT MEMO IS GONE, AND SO ARE ITS NEIGHBOURS.
 
-  const visible = useMemo(() => {
-    const query = filters.text.trim().toLowerCase()
-    return dayRecords.filter((r) => {
-      if (filters.constituency && r.constituency !== filters.constituency) return false
-      if (filters.topic && r.topic !== filters.topic) return false
-      if (filters.severity && r.severity !== filters.severity) return false
-      if (filters.person && !r.namedPersons.some((p) => p.name === filters.person)) return false
-      if (filters.hashtag && !r.hashtags.some((h) => normaliseTag(h) === filters.hashtag))
-        return false
-      if (query && !haystack(r).includes(query)) return false
-      return true
-    })
-  }, [dayRecords, filters])
-
-  const activeFilters = useMemo(
-    () => Object.values(filters).filter((v) => v !== '').length,
-    [filters],
-  )
+     `exportRecords`, `otherDays`, `issueCategories`, `anyFlagged`, `options`,
+     `visible`, `activeFilters`, `setAside` and `visibleIssues` were each read
+     by exactly one thing — the day stepper, the record-view filter bar, the
+     old export button — and every one of those was deleted from the render.
+     The hooks were still declared and still recomputing on every store change,
+     which is a cost paid for nothing and, worse, nine names that read as live
+     state to anyone opening this file. The export the header ships is
+     ExportReport, and it takes `deskRecords` directly. */
 
   const selected = useMemo(
     () => records.find((r) => r.id === selectedId) ?? null,
@@ -888,6 +926,60 @@ export function Grievances({
   )
 
   const parsed = useMemo(() => parseDraft(draft), [draft])
+
+  /**
+   * The sentence behind the header's info mark.
+   *
+   * TWO THINGS IT USED TO GET WRONG, both of them the same kind of wrong.
+   *
+   * It said "the list below covers …" unconditionally. Opening a record
+   * unmounts BOTH cards — the table and the suggestions — so the note was
+   * describing a list that was not on the screen, to a reader looking at one
+   * record's reading. It now says what is actually below it.
+   *
+   * And its denominator was `records`, which is `allRecords` with the
+   * relevance check already applied. "5 of the 8 records this desk holds" was
+   * therefore counted against a number that is not what the desk holds: three
+   * more were filed and then set aside as not about this desk's subject, and
+   * the reader had no way to know they existed. The denominator is now every
+   * record on the desk, and the cut that shrinks it is named rather than
+   * quietly folded in.
+   */
+  const deskNote = useMemo(() => {
+    /*
+     * ONE POPULATION PER SENTENCE.
+     *
+     * This counted the WINDOWED, relevance-checked records against the desk's
+     * UNFILTERED total, so at All time it read "5 of the 8 records this desk
+     * holds are inside all time" — a sentence that contradicts itself, since
+     * every record a desk holds is inside all time. Both halves now come from
+     * the same population: the records on this desk, after the relevance
+     * check, which is what the two cards below are built from.
+     *
+     * THE SET-ASIDE CLAUSE IS GONE, NOT REWORDED. It said the records the
+     * relevance check dropped were "on neither card", and that is false —
+     * their issues do appear on the suggestions card. A sentence that cannot
+     * be made true from what the screen shows is better absent than softened.
+     */
+    const onDesk = records.length
+    const dated = isToday(day) ? 'today' : formatDeskDay(day)
+    const covers = `${deskRecords.length} of the ${onDesk} ${pluralise(onDesk, 'record')} on this desk ${deskRecords.length === 1 ? 'is' : 'are'} inside ${windowName.toLowerCase()}.`
+    if (selectedId !== null) {
+      return `One record’s full reading is open below; the issue table and the suggestions are closed while it is. ${covers}`
+    }
+    const day_ = dayRecords.length
+      ? `${dayRecords.length} ${pluralise(dayRecords.length, 'record')} and ${dayIssues.length} ${pluralise(dayIssues.length, 'issue')} are dated ${dated}.`
+      : `Nothing is dated ${dated}.`
+    return `${day_} The two cards below cover ${windowName.toLowerCase()}: ${covers}`
+  }, [
+    records.length,
+    deskRecords.length,
+    dayRecords.length,
+    dayIssues.length,
+    day,
+    windowName,
+    selectedId,
+  ])
 
   /**
    * Scan the chosen mastheads, then hand what it found to the link box.
@@ -1182,22 +1274,41 @@ export function Grievances({
     >
       <m.div variants={fadeUp}>
         <PageHeader
-          lead={
-            <Mascot
-              state={running ? 'thinking' : dayRecords.length ? 'idle' : 'empty'}
-              size={40}
-              className="mt-1 shrink-0"
-            />
+          /*
+           * THE TITLE IS SET INLINE, AND IT HAS TO BE.
+           *
+           * PageHeader's h1 carries `.display`, which is unlayered author CSS
+           * assigning the serif at weight 400, and index.css also styles `h1`
+           * on the element at weight 600. Unlayered rules beat every Tailwind
+           * utility, so `font-bold` or `font-sans` on this heading does
+           * nothing at all — measured on the running screen, the title
+           * reported Instrument Serif 400 with the classes applied. A style on
+           * a CHILD is the one thing that wins without !important, because the
+           * element rules do not reach it.
+           *
+           * Bold sans is the reference's, and it is right for this screen: the
+           * serif is the app's hero voice, and a page about other people's
+           * complaints is not the place for a voice.
+           */
+          title={
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.85rem' }}>
+              Grievance desk
+            </span>
           }
-          title="Grievance desk"
           subtitle={
-            /* Both numbers are scoped to the day on screen. The old pairing
-               put the day's records beside the archive's issue total, so the
-               header said "3 records · 8 issues" over a list of three and the
-               other five were nowhere a reader could find. */
-            dayRecords.length
-              ? `${dayRecords.length} ${pluralise(dayRecords.length, 'record')} · ${dayIssues.length} ${pluralise(dayIssues.length, 'issue')} on this day`
-              : 'Paste the morning’s news links.'
+            /*
+             * THE SUBTITLE SAYS WHAT THE SCREEN IS. It used to spend itself on
+             * a tally — "3 records · 3 issues on this day" — which is a real
+             * count and the wrong thing to put in the one line that has to
+             * tell a first-time reader what they are looking at. The tally
+             * moved into the info mark beside it, where it also answers the
+             * question the reader actually has once the table is on screen:
+             * why the table's total is larger than the day's.
+             */
+            <>
+              Track, understand and respond to issues reported in the local news.
+              <InfoMark note={deskNote} />
+            </>
           }
           actions={
             <>
@@ -1207,19 +1318,93 @@ export function Grievances({
               {!embedded && (
                 <Button
                   variant="ghost"
+                  size="sm"
                   onClick={() => setEditing((v) => !v)}
                   aria-label={editing ? 'Close the desk settings' : 'Edit the desk'}
                   title={editing ? 'Close the desk settings' : 'Edit the desk'}
                   aria-pressed={editing}
-                  // Square. The default md padding is px-6, which framed a
-                  // 16px icon in a 64px-wide box and left it adrift beside
-                  // the button next to it.
-                  className={cn('size-12 px-0', editing && 'bg-[var(--accent-soft)] text-[var(--accent)]')}
+                  // Square. The default padding is px-4, which framed a 16px
+                  // icon in a wide box and left it adrift beside the control
+                  // next to it.
+                  className={cn('size-11 px-0', editing && 'bg-[var(--accent-soft)] text-[var(--accent)]')}
                 >
                   <Pencil size={16} aria-hidden />
                 </Button>
               )}
-              <Button variant="ghost" onClick={onClose}>
+
+              {/* THE WINDOW. Sized inline, because index.css styles `select`
+                  on the element and unlayered — `font-size: max(16px, ...)`
+                  as an iOS anti-zoom rule and a 2.25rem end padding for the
+                  chevron it paints. Both beat every utility, so a class-set
+                  size here would silently render at 17px, which is what
+                  already cost this screen one round on the filter row. */}
+              <label className="relative inline-flex shrink-0 items-center" title="How far back this screen reaches">
+                <span className="sr-only">Window</span>
+                <select
+                  value={windowId}
+                  onChange={(e) => setWindowId(e.target.value as WindowId)}
+                  style={{ fontSize: 13, paddingInlineEnd: 30 }}
+                  className="h-11 appearance-none rounded-[10px] border border-[var(--border-strong)] bg-[var(--surface)] pl-8 font-medium text-ink outline-none transition-colors hover:border-[var(--border-interactive)] focus:border-[var(--accent)]"
+                >
+                  {WINDOWS.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.label}
+                    </option>
+                  ))}
+                </select>
+                {/* After the select in the DOM so it paints over the control's
+                    own background rather than under it. */}
+                <CalendarDays
+                  size={14}
+                  aria-hidden
+                  className="pointer-events-none absolute left-3 text-ink-3"
+                />
+              </label>
+
+              {/*
+                THE DESK'S READ CONTROL, BACK ON THE HEADER.
+
+                This screen has exactly one way to fetch the day's news, and a
+                rebuild of the action set dropped it: without this button the
+                desk can read nothing at all from here, and the only remaining
+                path was to wait for the 07:30 job. It runs the same job that
+                job runs — scan, sift, read, group — so there is no second code
+                path to drift from it.
+
+                The button reports only which stage is running; what was found,
+                what failed and why is ScanProgress's job, directly below.
+              */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={syncToday}
+                disabled={scanning || running || !scanReady}
+                title={
+                  scanReady
+                    ? 'Look for today’s news now, without waiting for the 07:30 scan'
+                    : 'Choose which papers this desk reads first, behind the pencil.'
+                }
+              >
+                <RefreshCw
+                  size={15}
+                  className={
+                    scanning || running ? 'animate-spin motion-reduce:animate-none' : undefined
+                  }
+                />
+                {job.status === 'scanning'
+                  ? 'Reading the papers…'
+                  : job.status === 'reading'
+                    ? 'Reading the stories…'
+                    : scanning
+                      ? 'Looking…'
+                      : 'Sync today'}
+              </Button>
+
+              <ExportReport records={deskRecords} windowName={windowName} />
+
+              {/* Back stays. It is the only way off this screen, and the
+                  office has asked for it twice. */}
+              <Button variant="ghost" size="sm" onClick={onClose}>
                 Back
               </Button>
             </>
@@ -1258,44 +1443,29 @@ export function Grievances({
           The words were always here, behind the pencil; a reader looking at a
           list of issues asks "what did you search for to get this?" and that
           answer should not be two clicks away. Removing a chip writes straight
-          through to the same watch-term list the settings drawer edits. */}
-      {!embedded && (
-        <m.div variants={fadeUp} className="mt-4">
-          {/* The reference's numbered tab strip, sitting on the top edge of
-              the cards below it. Both panels render at once from xl, so these
-              read as step markers rather than a switch. */}
-          <div className="flex flex-wrap gap-1.5">
-            {[
-              { n: 1, label: 'List of issues' },
-              { n: 2, label: 'What should I talk about?' },
-            ].map((t, i) => (
-              <span
-                key={t.n}
-                className={cn(
-                  'inline-flex h-10 items-center gap-2 rounded-t-[10px] border border-b-0 px-4 text-[13px] font-semibold',
-                  i === 0
-                    ? 'border-[var(--border)] bg-[var(--surface)] text-[var(--accent)]'
-                    : 'border-[var(--rule)] bg-[var(--surface-2)] text-ink-2',
-                )}
-              >
-                <span
-                  className={cn(
-                    'tnum grid size-[21px] place-items-center rounded-full text-[11px]',
-                    i === 0
-                      ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
-                      : 'bg-[var(--surface-3)] text-ink-2',
-                  )}
-                >
-                  {t.n}
-                </span>
-                {t.label}
-              </span>
-            ))}
-          </div>
+          through to the same watch-term list the settings drawer edits.
 
-          {/* Card A beside Card B, in the reference's 695:621. */}
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,695fr)_minmax(0,621fr)] xl:items-start">
-            <Card className="p-4 sm:p-5">
+          Hidden while a record's reading is open: "AI analysis" opens a PAGE,
+          not a panel underneath. Printed below the table it left the desk
+          scrolling past the list it had just been reading to find the answer,
+          and both were on screen claiming the same attention. */}
+      {!embedded && !selected && (
+        <m.div variants={fadeUp} className="mt-4">
+          {/* Card A beside Card B, each under its own numbered marker.
+
+              THE SPLIT IS 760:600, NOT THE REFERENCE'S 695:621. The reference
+              is a drawing on its own canvas; here the left card carries a
+              five-column table and the right one carries a single stack. At
+              1440 the reference's ratio left that table 552px, of which the
+              severity, publisher and date columns took 284 to fit their own
+              content — so the headline column, the widest in the reference,
+              rendered at 155px and clamped every headline on the desk. The
+              suggestion column loses about twenty pixels of a one-column list
+              to buy them back. Measured at 1440, 1600 and 1920. */}
+          <div className="grid gap-x-3 gap-y-4 xl:grid-cols-[minmax(0,760fr)_minmax(0,600fr)] xl:items-start">
+            <div className="min-w-0">
+            <StepMark n={1} label="List of issues" />
+            <Card className="rounded-tl-none p-4 sm:p-5">
               <KeywordsPanel
                 terms={deskConfig.tags}
                 sources={deskConfig.portals.length + deskConfig.customUrls.length}
@@ -1305,168 +1475,51 @@ export function Grievances({
                 onManage={() => setEditing(true)}
               />
               <div className="mt-4">
-                <IssuesTable records={records} onOpen={(r) => openRecord(r.id)} />
+                <IssuesTable
+                  records={deskRecords}
+                  onOpen={(r) => openRecord(r.id)}
+                  /* The window is the header's, so the sentence that explains
+                     an empty table has to name it. Without this the table said
+                     "nothing has been filed on this desk yet" over a desk with
+                     eight records in it, none of them inside the window. */
+                  emptyNote={
+                    records.length > 0
+                      ? `No record on this desk falls inside ${windowName.toLowerCase()}. Widen the window at the top of the screen.`
+                      : undefined
+                  }
+                />
               </div>
             </Card>
+            </div>
 
-            <Card className="p-4 sm:p-5">
-              <TalkAbout since={0} onDraft={() => onOpenNextPost?.()} />
+            <div className="min-w-0">
+            <StepMark n={2} label="What should I talk about?" />
+            <Card className="rounded-tl-none p-4 sm:p-5">
+              <TalkAbout
+                /* The window, in both the shapes this panel needs it: a
+                   timestamp for the news openings, which `openingsOf` does
+                   window itself, and the surviving issue ids for the grievance
+                   openings, which it does not. */
+                since={windowFrom ? Date.parse(windowFrom) : 0}
+                issueIds={windowIssueIds}
+                /* Why this half is empty, in the caller's words — the same
+                   contract the table beside it has. A desk whose every record
+                   is older than the window loses every card in this panel, and
+                   from inside the panel that is indistinguishable from a desk
+                   with nothing on it. */
+                emptyNote={
+                  deskRecords.length === 0 && allRecords.length > 0
+                    ? `No record on this desk falls inside ${windowName.toLowerCase()}, so there is nothing here to rank. The desk holds ${allRecords.length} ${pluralise(allRecords.length, 'record')} in all — widen the window at the top of the screen to reach ${allRecords.length === 1 ? 'it' : 'them'}.`
+                    : undefined
+                }
+                onDraft={() => onOpenNextPost?.()}
+              />
             </Card>
+            </div>
           </div>
         </m.div>
       )}
 
-      {/* The day being read.
-          A grievance desk is a daily instrument — the office works today's news
-          and yesterday's should not be in the way. Everything filed is kept and
-          reachable by stepping back a day; only the day on screen changes.
-
-          A flat .panel, not the floating shadowed pill it was: this row is a
-          toolbar, and dressed as a lifted card it competed with the record
-          cards below for first read. The stepper is grouped so it wraps as one
-          unit at 390px, with the action cluster taking its own right-aligned
-          row underneath instead of shuffling control by control. */}
-      <m.div
-        variants={fadeUp}
-        className="panel mt-4 flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2"
-      >
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <button
-            onClick={() => setDay(shiftDay(day, -1))}
-            aria-label="Previous day"
-            className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)]"
-          >
-            <ChevronLeft size={16} />
-          </button>
-
-          <span className="text-sm font-semibold">
-            {isToday(day) ? 'Today' : formatDeskDay(day)}
-          </span>
-          {isToday(day) && (
-            <span className="kicker">
-              {formatDeskDay(day)}
-            </span>
-          )}
-
-          <button
-            onClick={() => setDay(shiftDay(day, 1))}
-            disabled={isToday(day)}
-            aria-label="Next day"
-            className="grid size-11 place-items-center rounded-full text-ink-2 hover:bg-[var(--surface-2)] disabled:opacity-35"
-          >
-            <ChevronRight size={16} />
-          </button>
-
-          {!isToday(day) && (
-            <Button size="sm" variant="ghost" onClick={() => setDay(todayDeskDay())}>
-              Back to today
-            </Button>
-          )}
-        </div>
-
-        {/* Drops to its own full-width row on phones. Right-aligned wrapping
-            stranded Export alone on a second line under Sync and Clear, which
-            read as a mistake; across the full width the three actions sit in
-            one even row instead. */}
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2 max-sm:ml-0 max-sm:w-full max-sm:flex-nowrap max-sm:justify-between max-sm:[&_button]:px-3">
-          {/*
-            Fetch today now, rather than waiting for the morning.
-
-            The desk fills itself at 07:30 and there was no way to ask it
-            again. An office that arrives to a story breaking at eleven had to
-            either paste links by hand or wait until tomorrow, which is the
-            opposite of what a monitoring desk is for.
-
-            It runs the same scan the morning job runs, so nothing here is a
-            second code path that can drift from it. The 07:30 run is
-            unaffected and still happens.
-
-            Only on today. Pressing it while looking at last Tuesday would
-            file this morning's news under a day the office is not looking at,
-            which reads as the button having done nothing.
-
-            The button no longer carries the report of what happened. It said
-            "Looking\u2026" and then "Reading\u2026" for three minutes and nothing else,
-            which is the complaint that produced ScanProgress: the panel below
-            says which stage is running, how many stories are read against how
-            many were found, and what each failure was.
-          */}
-          {isToday(day) && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={syncToday}
-              disabled={scanning || running || !scanReady}
-              title={
-                scanReady
-                  ? 'Look for today\u2019s news now, without waiting for the 07:30 scan'
-                  : 'Choose which papers to read first, under Sources.'
-              }
-            >
-              <RefreshCw
-                size={14}
-                className={scanning || running ? 'animate-spin motion-reduce:animate-none' : undefined}
-              />
-              {job.status === 'scanning'
-                ? 'Reading the papers\u2026'
-                : job.status === 'reading'
-                  ? 'Reading the stories\u2026'
-                  : scanning
-                    ? 'Looking\u2026'
-                    : 'Sync today'}
-            </Button>
-          )}
-          {otherDays > 0 && (
-            <span className="kicker hidden sm:inline">
-              {otherDays} earlier {pluralise(otherDays, 'day')} kept
-            </span>
-          )}
-          {/* Clearing the day, not the archive.
-              An office testing the desk needs to empty it and try again, and
-              deleting only what is on screen means a bad morning's scan can be
-              thrown away without losing the records filed last week. */}
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={dayRecords.length === 0}
-            onClick={() => {
-              const ids = new Set(dayRecords.map((r) => r.id))
-              if (
-                !window.confirm(
-                  `Delete ${dayRecords.length} ${pluralise(dayRecords.length, 'record')} filed on ${formatDeskDay(day)}? Records from other days are kept. This cannot be undone.`,
-                )
-              ) {
-                return
-              }
-              update((s) => ({
-                ...s,
-                grievances: s.grievances.filter((r) => !ids.has(r.id)),
-                // An issue whose every record just went is no longer an issue.
-                issues: s.issues
-                  .map((i) => ({ ...i, recordIds: i.recordIds.filter((x) => !ids.has(x)) }))
-                  .filter((i) => i.recordIds.length > 0),
-              }))
-              setSelectedId(null)
-            }}
-          >
-            <Trash2 size={14} />
-            Clear
-          </Button>
-          {/* Excel first — it is the banded sheet with the fake-check tab,
-              which is what this office actually files. CSV beside it, because
-              that is the format the button used to claim and never produced. */}
-          <ExportButton
-            count={exportRecords.length}
-            noun="record"
-            run={(format) => {
-              const label = mode === 'records' ? day : 'issues'
-              return format === 'csv'
-                ? downloadGrievanceCsv(exportRecords, label)
-                : downloadGrievanceWorkbook(exportRecords, label)
-            }}
-          />
-        </div>
-      </m.div>
 
       {/* What the sync is doing, directly under the button that starts it.
 
@@ -1490,224 +1543,22 @@ export function Grievances({
           was a re-count of the list directly below, and the office called the
           screenful it cost a waste of space. The records and issues start
           right under the controls instead. */}
-      {tab === 'records' ? (
-        <div
-          role="tabpanel"
-          id="desk-panel-records"
-          aria-labelledby="desk-tab-records"
-          className="mt-4"
-        >
-          {/* One column, and a record replaces the list rather than sitting
-              beside it.
+      {/* THE DAY VIEW IS GONE, AND SO IS THE ISSUE LIST BENEATH IT.
+          The two cards above — the records table and "What should I talk
+          about?" — already carry every record and every ranked issue this
+          screen held, with the reading on them. Underneath sat a second copy:
+          a day stepper, another search box, another severity filter and a
+          stack of issue cards restating the same records. The office read the
+          duplicate and said it plainly: "coming below this is not required we
+          can get things from above part itself."
 
-              This was a two-pane split on desktop. It read as confusing and it
-              scrolled badly, because the panes were independently scrollable and
-              a sticky detail column next to a long list gives two scrollbars
-              that disagree about where you are. A list you drill into has one
-              place to look and one place to scroll, and it behaves the same on a
-              phone as on a laptop, which is the whole reason the office can be
-              taught it once. */}
-          <div className={cn('min-w-0 space-y-4', selected && 'hidden')}>
-            {/* The scan's outcome is printed beside the Scan button, in both the
-                collapsed strip and the expanded steps. It was also a card of its
-                own up here, which meant a successful scan reported itself twice
-                on one screen.
-
-                The desk-config values and writes the panel used to be handed
-                one prop at a time all live in useDeskProfile now, which the
-                panel calls itself — Settings renders the same configuration
-                through the same hook, so there is exactly one set of profile
-                writes to get wrong. */}
-            {intakeOpen ? (
-              <IntakePanel
-                draft={draft}
-                onDraft={setDraft}
-                links={parsed.links}
-                unusable={parsed.unusable}
-                running={running}
-                canHide={dayRecords.length > 0}
-                onHide={() => setIntakeOpen(false)}
-                onRead={() => readLinks(parsed.links.map((l) => l.url))}
-                onRetryFailed={() => readLinks(failedLinks.map((l) => l.url))}
-                failedCount={failedLinks.length}
-              />
-            ) : (
-              <Button variant="outline" className="w-full" onClick={() => setIntakeOpen(true)}>
-                <Plus size={16} />
-                Add news links
-              </Button>
-            )}
-
-            {dayRecords.length > 0 && (
-              <FilterBar
-                filters={filters}
-                onChange={setFilters}
-                options={options}
-                active={activeFilters}
-                shown={visible.length}
-                total={dayRecords.length}
-              />
-            )}
-
-            {dayRecords.length === 0 ? (
-              <EmptyDesk />
-            ) : visible.length === 0 ? (
-              <Card>
-                <CardHead
-                  icon={<Filter size={16} />}
-                  title="Nothing matches all of those filters"
-                  sub="Every filter has to be true at once"
-                  tint="blue"
-                />
-                <p className="text-sm text-ink-3">Drop one, or clear them all.</p>
-                <Button variant="outline" className="mt-3" onClick={() => setFilters(NO_FILTERS)}>
-                  Clear filters
-                </Button>
-              </Card>
-            ) : (
-              <m.ul
-                className="space-y-2"
-                variants={listStaggerFast}
-                initial={reduced ? false : 'hidden'}
-                animate="show"
-              >
-                {visible.map((record) => (
-                  <m.li key={record.id} variants={listItem}>
-                    <RecordRow
-                      record={record}
-                      active={record.id === selectedId}
-                      onOpen={() => openRecord(record.id)}
-                      relevance={verdictOf(record)}
-                    />
-                  </m.li>
-                ))}
-              </m.ul>
-            )}
-            <SetAside
-              counts={setAside}
-              revealed={showSetAside}
-              onToggle={() => setShowSetAside((v) => !v)}
-            />
-          </div>
-
-          <div
-            className={cn(
-              'min-w-0',
-              selected ? 'block' : 'hidden',
-            )}
-          >
-            {/* Nothing stands in for an unopened record any more. The empty
-                "Pick a record" panel existed only to stop the right-hand column
-                collapsing, and with the split gone it was half a screen of
-                desktop spent saying nothing. */}
-            {selected && <RecordDetail record={selected} onBack={() => setSelectedId(null)} />}
-          </div>
-        </div>
-      ) : (
-        <div
-          role="tabpanel"
-          id="desk-panel-issues"
-          aria-labelledby="desk-tab-issues"
-          className="mt-4"
-        >
-          {issues.length > 0 && (
-            <IssueFilterBar
-              filters={issueFilters}
-              onChange={setIssueFilters}
-              categories={issueCategories}
-              showFlagged={anyFlagged}
-              /* Day-scoped, like the list it sits over. Against the archive
-                 total the label read "8 issues" above three cards. */
-              shown={visibleIssues.length}
-              total={dayIssues.length}
-            />
-          )}
-
-          {issues.length === 0 ? (
-            <Card>
-              <CardHead
-                icon={<Layers size={16} />}
-                title="No issues yet"
-                sub="Issues appear once enough links have been read"
-                tint="violet"
-              />
-            </Card>
-          ) : dayIssues.length === 0 ? (
-            /* The desk has issues, just none live on this day. Distinct from
-               both cards below: "no issues yet" would deny the archive, and
-               the filter card would blame controls the reader never touched. */
-            <Card>
-              <CardHead
-                icon={<Layers size={16} />}
-                title="Nothing live on this day"
-                sub={`${issues.length} ${pluralise(issues.length, 'issue')} on the days either side`}
-                tint="violet"
-              />
-            </Card>
-          ) : visibleIssues.length === 0 ? (
-            /* A filter combination that matches nothing is a completely
-               different situation from a desk with no issues, and saying "no
-               issues yet" here would tell an office its week was quiet when it
-               has thirty issues and a typo in the search box. */
-            <Card>
-              {/* A short static title with the count on the quiet line beneath:
-                  the old single-line heading carried the number inside it and
-                  truncated on a 375px screen at exactly the words that mattered. */}
-              <CardHead
-                icon={<Filter size={16} />}
-                title="Nothing matches these filters"
-                sub={`All ${dayIssues.length} ${pluralise(dayIssues.length, 'issue')} on this day are hidden by them`}
-                tint="blue"
-              />
-              <p className="text-sm text-ink-3">Loosen one, or clear them and start again.</p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-3"
-                onClick={() => setIssueFilters(NO_ISSUE_FILTERS)}
-              >
-                <X size={14} />
-                Clear filters
-              </Button>
-            </Card>
-          ) : (
-            <m.ul
-              className="space-y-3 lg:grid lg:grid-cols-2 lg:gap-3 lg:space-y-0"
-              variants={listStaggerFast}
-              initial={reduced ? false : 'hidden'}
-              animate="show"
-            >
-              {visibleIssues.map((issue, at) => (
-                <m.li
-                  key={issue.id}
-                  variants={listItem}
-                  ref={issue.id === focusIssueId ? focusRef : undefined}
-                  className={
-                    issue.id === focusIssueId
-                      ? 'rounded-[var(--radius-lg)] ring-2 ring-[var(--accent)] ring-offset-4 ring-offset-[var(--bg)]'
-                      : undefined
-                  }
-                >
-                  <IssueCard
-                    issue={issue}
-                    position={at + 1}
-                    records={issue.recordIds.flatMap((id) => {
-                      const record = byId.get(id)
-                      return record ? [record] : []
-                    })}
-                    onOpenRecord={openRecord}
-                    person={person}
-                  />
-                </m.li>
-              ))}
-            </m.ul>
-          )}
-          <SetAside
-            counts={setAside}
-            revealed={showSetAside}
-            onToggle={() => setShowSetAside((v) => !v)}
-          />
-        </div>
+          What is kept is the READING of a single record, which the table's own
+          "AI analysis" button opens. That was the one thing down here the
+          cards above could not show. */}
+      {selected && (
+        <m.div variants={fadeUp} className="mt-4">
+          <RecordDetail record={selected} onBack={() => setSelectedId(null)} />
+        </m.div>
       )}
     </m.div>
   )
@@ -2301,7 +2152,10 @@ function RecordDetail({ record, onBack }: { record: GrievanceRecord; onBack: () 
     <div className="space-y-4">
       <button
         onClick={onBack}
-        className="inline-flex min-h-11 items-center gap-1.5 text-sm text-ink-2 lg:hidden"
+        /* The record renders BELOW the table at every width, not beside it,
+           so `lg:hidden` left desktop readers with no visible way to close
+           what they had opened. */
+        className="inline-flex min-h-11 items-center gap-1.5 text-sm text-ink-2"
       >
         <ArrowLeft size={16} />
         All records

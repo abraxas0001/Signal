@@ -63,10 +63,20 @@ function TabButton({
   badge?: number
   onClick: () => void
 }) {
+  // The badge string is computed once and used for both the name and the mark,
+  // the way SideNav does it, so the two can never disagree about the cutoff.
+  const badgeText = badge != null && badge > 0 ? (badge > 99 ? '99+' : String(badge)) : null
+
   return (
     <button
       onClick={onClick}
-      aria-label={label}
+      // The badge is a bare number drawn on the icon, so it is folded into the
+      // accessible name rather than left to be announced on its own. Without
+      // this a reader with seven unacknowledged influencer mentions heard
+      // "Influencers, button" and the count was simply gone. No unit is added:
+      // the caller decides what it is counting and this component does not get
+      // to guess.
+      aria-label={badgeText ? `${label}, ${badgeText}` : label}
       aria-current={active ? 'page' : undefined}
       className={cn(
         // 48px of height on a control a thumb hits while walking — the bar is
@@ -79,9 +89,14 @@ function TabButton({
     >
       <span className="relative">
         <Icon size={20} strokeWidth={active ? 2.4 : 1.9} />
-        {badge != null && badge > 0 && (
-          <span className="absolute -right-2 -top-1.5 grid min-w-4 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold leading-4 text-[var(--accent-fg)]">
-            {badge > 99 ? '99+' : badge}
+        {badgeText && (
+          // Hidden from the reader because the number is already in the
+          // button's name above; announcing it here too would say it twice.
+          <span
+            aria-hidden
+            className="absolute -right-2 -top-1.5 grid min-w-4 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold leading-4 text-[var(--accent-fg)]"
+          >
+            {badgeText}
           </span>
         )}
       </span>

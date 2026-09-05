@@ -11,7 +11,9 @@
  * `/@handle` alone is a curated page whose first rows are pinned trailers and
  * playlists, and reading that returns a shelf rather than a feed.
  *
- * VIEWS ONLY. The listing shows a view count and a relative age, and no likes
+ * The LISTING shows a view count and a relative age and no likes; the like
+ * count comes from each video's watch page in `factsFor`, which this adapter
+ * already opens for the exact publish date
  * or comments at all — those live on each video's own page and would cost a
  * navigation each. They stay null, which is the truth about what was read.
  *
@@ -30,6 +32,7 @@ import {
   type ProfileInfo,
   type ScrapedComment,
   type ScrapedPost,
+  cutCaption,
 } from '../types'
 import { autoScroll } from '../browser'
 
@@ -44,6 +47,29 @@ function harvest(): RawVideo[] {
   const out: RawVideo[] = []
   const seen = new Set<string>()
 
+  /**
+   * The running time YouTube appends to the title anchor's aria-label.
+   *
+   * The label is written for a screen reader, so it says the title AND how
+   * long the video is: "… ఫోకస్ 3 minutes, 21 seconds". Stored verbatim, that
+   * duration became part of the video's name on every surface that prints one,
+   * and two of those print the name inside quotation marks as a thing somebody
+   * said: the local news mentions and the influencer voices blockquote. Every
+   * one of the 675 YouTube titles this desk holds carries it.
+   *
+   * This lives inside `harvest` for the same reason the rest of it does:
+   * `page.evaluate` ships this function's SOURCE to the browser, where nothing
+   * in this module's scope exists.
+   *
+   * Only ever applied to the aria-label, never to a real title. A video
+   * genuinely called "Dal in 10 minutes" ends in the same shape, and the
+   * heading below is the source that cannot carry a duration in the first
+   * place, so there is no reason to run a pattern over it that could eat its
+   * last three words.
+   */
+  const DURATION_TAIL =
+    /\s+\d+\s+(?:hours?|minutes?|seconds?)(?:,\s*\d+\s+(?:hours?|minutes?|seconds?))*\s*$/i
+
   for (const el of Array.from(
     document.querySelectorAll('ytd-rich-item-renderer, ytd-grid-video-renderer'),
   )) {
@@ -51,9 +77,12 @@ function harvest(): RawVideo[] {
      * The titled anchor, not the first one.
      *
      * Each card carries TWO links to the same video: the thumbnail, whose text
-     * is the duration ("2:48"), and the heading, which holds the real title in
-     * an aria-label. Taking the first anchor recorded every video on the
-     * channel as being called something like "4:58".
+     * is the duration ("2:48"), and the heading, which carries an aria-label.
+     * Taking the first anchor recorded every video on the channel as being
+     * called something like "4:58".
+     *
+     * The label is only how the heading anchor is TOLD APART here. What gets
+     * stored as the title is read further down, and not from this attribute.
      */
     const link = Array.from(el.querySelectorAll('a[href*="/watch?v="]')).find(
       (a) => (a.getAttribute('aria-label') ?? '').length > 0,
@@ -68,12 +97,38 @@ function harvest(): RawVideo[] {
       .map((s) => (s.textContent ?? '').trim())
       .filter((t) => t.length > 0 && t.length < 30)
 
+    /**
+     * The heading's OWN text is the title; the aria-label is a fallback.
+     *
+     * The anchor is still found by its aria-label, for the reason above, but
+     * that label is the wrong thing to store: it is the accessible
+     * description, and it ends in the duration. The heading element the anchor
+     * wraps, or is, holds the title alone, in whatever language YouTube
+     * rendered it, with no chrome to strip and nothing to guess at.
+     *
+     * The label is kept behind it because the heading is filled by a later
+     * hydration pass than the anchor, and an empty heading on a card that is
+     * still settling would otherwise store null for a video that has a name.
+     * On that path the duration is removed, which is the one place a pattern
+     * is needed at all.
+     *
+     * Whitespace is collapsed because the heading's text node is indented
+     * markup: without it a stored title carries the newlines and padding of
+     * YouTube's template rather than the words.
+     */
+    const heading =
+      link?.closest('#video-title') ??
+      link?.querySelector('#video-title') ??
+      el.querySelector('#video-title, h3')
+    const headingText = (heading?.textContent ?? '').replace(/\s+/g, ' ').trim()
+    const labelText = (link?.getAttribute('aria-label') ?? '')
+      .replace(DURATION_TAIL, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
     out.push({
       href,
-      title:
-        link?.getAttribute('aria-label') ??
-        el.querySelector('#video-title, h3')?.textContent?.trim() ??
-        null,
+      title: headingText || labelText || null,
       views: bits.find((t) => /view/i.test(t)) ?? null,
       age: bits.find((t) => /ago$/i.test(t)) ?? null,
     })
@@ -102,13 +157,34 @@ function normaliseHandle(handle: string): string {
  * regions. Anything neither source dates stays null, which the app renders as
  * "Date not published" rather than as a guess.
  */
-async function datesFor(
+/** What one watch page or feed entry can tell us about a video. */
+interface VideoFacts {
+  publishedAt?: string
+  /** Null is never written here: an absent like count simply stays absent. */
+  likes?: number
+}
+
+/**
+ * Dates AND like counts, from the pages this pass already opens.
+ *
+ * It used to return dates alone, and the listing set `likes: null` with the
+ * comment "VIEWS ONLY … and no likes" — true of the CHANNEL listing, and not
+ * true of the watch page, which states `"likeCount":"31"` outright. Since the
+ * channel feed now answers 404 for every channel, every video already falls
+ * through to a watch-page fetch below, so the like count costs nothing extra:
+ * the page is being downloaded either way and was being read for one fact
+ * when it carries two.
+ */
+async function factsFor(
   page: AdapterContext['page'],
   ids: string[],
   log: AdapterContext['log'],
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
+): Promise<Map<string, VideoFacts>> {
+  const out = new Map<string, VideoFacts>()
   if (ids.length === 0) return out
+  const put = (id: string, f: VideoFacts): void => {
+    out.set(id, { ...out.get(id), ...f })
+  }
 
   // 1. The channel feed: one request, the newest ~15 videos, exact.
   try {
@@ -124,8 +200,12 @@ async function datesFor(
       const entries = xml.split('<entry>').slice(1)
       for (const entry of entries) {
         const id = entry.match(/<yt:videoId>([\w-]+)<\/yt:videoId>/)?.[1]
+        if (!id) continue
         const at = entry.match(/<published>([^<]+)<\/published>/)?.[1]
-        if (id && at) out.set(id, new Date(at).toISOString())
+        if (at) put(id, { publishedAt: new Date(at).toISOString() })
+        // MediaRSS carries the like count when the feed answers at all.
+        const likes = entry.match(/<media:starRating[^>]+count="(\d+)"/)?.[1]
+        if (likes) put(id, { likes: Number(likes) })
       }
     }
   } catch (err) {
@@ -133,22 +213,30 @@ async function datesFor(
   }
 
   // 2. The watch page, for whatever the feed did not cover.
-  const missing = ids.filter((id) => !out.has(id))
+  // Anything the feed did not fully answer — which, while the feed 404s, is
+  // every video and every like count.
+  const missing = ids.filter((id) => {
+    const f = out.get(id)
+    return !f || f.publishedAt === undefined || f.likes === undefined
+  })
   for (const id of missing) {
     try {
-      const at = await page.evaluate(async (vid: string) => {
+      const got = await page.evaluate(async (vid: string) => {
         const res = await fetch(`https://www.youtube.com/watch?v=${vid}`)
         if (!res.ok) return null
         const html = await res.text()
-        return (
-          html.match(/itemprop="datePublished"\s+content="([^"]+)"/)?.[1] ??
-          html.match(/"datePublished":"([^"]+)"/)?.[1] ??
-          null
-        )
+        return {
+          at:
+            html.match(/itemprop="datePublished"\s+content="([^"]+)"/)?.[1] ??
+            html.match(/"datePublished":"([^"]+)"/)?.[1] ??
+            null,
+          likes: html.match(/"likeCount"\s*:\s*"?(\d+)/)?.[1] ?? null,
+        }
       }, id)
-      if (at) out.set(id, new Date(at).toISOString())
+      if (got?.at) put(id, { publishedAt: new Date(got.at).toISOString() })
+      if (got?.likes) put(id, { likes: Number(got.likes) })
     } catch {
-      /* one undated video is a gap, not a failed read */
+      /* one unreadable video is a gap, not a failed read */
     }
   }
 
@@ -238,7 +326,7 @@ export const youtube: PlatformAdapter = {
         found.set(url, {
           url,
           id,
-          title: r.title?.slice(0, 140) ?? null,
+          title: cutCaption(r.title),
           // Filled in below from YouTube's own exact timestamps. The listing
           // itself only offers "1 hour ago", and converting a relative age
           // would invent precision — so the date comes from the channel feed
@@ -263,16 +351,23 @@ export const youtube: PlatformAdapter = {
 
     /* The dates, from YouTube's own statements, before anything is returned. */
     const items = [...found.values()]
-    const dates = await datesFor(page, items.map((i) => i.id).filter((i): i is string => Boolean(i)), log)
+    const facts = await factsFor(page, items.map((i) => i.id).filter((i): i is string => Boolean(i)), log)
     let dated = 0
+    let liked = 0
     for (const item of items) {
-      const at = item.id ? dates.get(item.id) : undefined
-      if (at) {
-        item.publishedAt = at
+      const f = item.id ? facts.get(item.id) : undefined
+      if (f?.publishedAt) {
+        item.publishedAt = f.publishedAt
         dated++
       }
+      // Left null when the page did not state one. A zero here would be a
+      // measurement, and "the page did not say" is not zero likes.
+      if (f?.likes != null) {
+        item.likes = f.likes
+        liked++
+      }
     }
-    log(`YouTube: dated ${dated} of ${items.length} videos`)
+    log(`YouTube: dated ${dated} of ${items.length} videos, ${liked} with a like count`)
 
     if (found.size === 0) {
       return {

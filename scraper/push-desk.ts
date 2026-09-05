@@ -56,7 +56,17 @@ function unionById(base: unknown, feed: unknown): WithId[] {
   const a = Array.isArray(base) ? (base as WithId[]) : []
   const b = Array.isArray(feed) ? (feed as WithId[]) : []
   const seen = new Set(a.map((x) => x?.id).filter(Boolean))
-  return [...a, ...b.filter((x) => x?.id && !seen.has(x.id))]
+  /*
+   * EXAMPLE ROWS STAY ON THE EXAMPLE DESK. The feed is hydrated through the
+   * demo path, and that path seeds worked examples alongside the scraped
+   * readings: grievances and issues whose headlines were WRITTEN, not
+   * reported, and merely attributed to real mastheads. On the example desk
+   * they are labelled as examples; unioned into a member's real desk they
+   * would sit beside genuinely scanned stories with nothing telling the
+   * office which record a newspaper actually printed. Every seeded example
+   * carries a `demo_` id precisely so this line can hold them back.
+   */
+  return [...a, ...b.filter((x) => x?.id && !seen.has(x.id) && !String(x.id).startsWith('demo_'))]
 }
 
 /* ── hydrate via the app itself ──────────────────────────────────────────── */

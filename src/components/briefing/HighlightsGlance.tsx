@@ -416,7 +416,12 @@ export function NextPostGlance({
   }
 
   const top = model.themes.slice(0, 3)
-  const most = top[0]?.posts ?? 1
+  /* The LARGEST of the rows drawn, not the first of them. These rows are
+     ordered by score, so the leader is routinely not the biggest: a 16-post
+     theme under a 9-post leader computed 178% of its track, clipped to full
+     width, and drew exactly the same bar as the 9 — two different numbers,
+     one length. */
+  const most = Math.max(1, ...top.map((t) => t.posts))
 
   return (
     <Card className="@container p-4">

@@ -173,12 +173,72 @@ async function youtubeUploadsViaInnerTube(channelId: string): Promise<HandlePost
       title: decodeJsonString(title),
       publishedAt: relativeToIso(age),
       views,
-      // InnerTube's channel listing carries no like count; the feed did.
+      // Filled in below from the watch pages, for as many as the budget reaches.
       likes: null,
       comments: null,
     })
   }
   return posts
+}
+
+/**
+ * How many watch pages one read may fetch, and how long it may spend.
+ *
+ * A watch page is about 1.3MB. Thirty of them is forty megabytes and thirty
+ * round trips inside a function that has to answer in seconds, so this is
+ * bounded rather than complete — and the ones it reaches are the NEWEST,
+ * which are the posts a desk is actually looking at this week.
+ */
+const LIKE_PAGES = 8
+const LIKE_BUDGET_MS = 12_000
+const LIKE_CONCURRENCY = 4
+
+/**
+ * Put like counts on YouTube posts, from the watch pages.
+ *
+ * WHY THIS EXISTS. `videos.xml` used to carry views AND likes through the
+ * MediaRSS extension, and it is the only keyless route that ever did. It now
+ * answers 404 for every channel tried — measured on two, one of them with
+ * 10.9M subscribers — so every read falls through to InnerTube's channel
+ * listing, which publishes views and no likes at all. The desk therefore
+ * showed "Engagement NA" on YouTube for ever, and an office reasonably read
+ * that as the desk failing rather than the route being gone.
+ *
+ * The watch page still states it: `"likeCount":"31"` beside `"viewCount":"667"`.
+ *
+ * PARTIAL ON PURPOSE, AND HONEST ABOUT IT. Posts beyond the budget keep
+ * `likes: null` — which the rest of the product already treats as "not
+ * published" rather than zero, so a partly-enriched account sums only the
+ * figures it actually has and reports how many posts those were. Writing 0
+ * for an unread page would be the one thing that must not happen here.
+ */
+async function addYouTubeLikes(posts: HandlePost[]): Promise<void> {
+  const deadline = Date.now() + LIKE_BUDGET_MS
+  const targets = posts.slice(0, LIKE_PAGES)
+
+  const one = async (post: HandlePost): Promise<void> => {
+    if (Date.now() > deadline) return
+    const id = /[?&]v=([\w-]{11})/.exec(post.url)?.[1]
+    if (!id) return
+    try {
+      const page = await fetchText(`https://www.youtube.com/watch?v=${id}`, {
+        agent: 'browser',
+        timeout: 8000,
+      })
+      if (!page.ok) return
+      const likes = /"likeCount"\s*:\s*"?(\d+)/.exec(page.body)?.[1]
+      if (likes) post.likes = Number(likes)
+    } catch {
+      /* one unreadable page leaves that post's likes null, which is the truth */
+    }
+  }
+
+  // A few at a time: YouTube throttles a burst, and a throttled read returns
+  // a page with no counts on it — which would look like a post with no likes.
+  for (let i = 0; i < targets.length; i += LIKE_CONCURRENCY) {
+    if (Date.now() > deadline) break
+    await Promise.all(targets.slice(i, i + LIKE_CONCURRENCY).map(one))
+  }
 }
 
 /**
@@ -385,6 +445,9 @@ async function readYouTube(handle: string): Promise<HandleSummary> {
     try {
       const alt = await youtubeUploadsViaInnerTube(channelId)
       if (alt.length) {
+        // InnerTube's listing carries no likes. The watch pages do, so the
+        // newest few are read for them — see `addYouTubeLikes`.
+        await addYouTubeLikes(alt)
         posts.push(...alt)
         viaFallback = true
       }
@@ -411,7 +474,12 @@ async function readYouTube(handle: string): Promise<HandleSummary> {
       note: !posts.length
         ? 'The channel feed returned no recent uploads.'
         : viaFallback
-          ? `${posts.length} recent uploads. YouTube's feed was empty from here, so these came from its browse API, which publishes view counts but no likes, so engagement cannot be worked out for this channel.`
+          ? (() => {
+              const withLikes = posts.filter((p) => p.likes != null).length
+              return withLikes === 0
+                ? `${posts.length} recent uploads. YouTube's feed answered 404, so these came from its browse API, which publishes view counts and no likes; the watch pages were not readable either, so engagement cannot be worked out for this channel.`
+                : `${posts.length} recent uploads. YouTube's feed answered 404, so these came from its browse API, which publishes no likes — the like counts on the newest ${withLikes} were read from their watch pages. The rest carry views only, and are left unmeasured rather than counted as zero.`
+            })()
           : `${posts.length} recent uploads from the channel feed, with views and likes.`,
     },
   }

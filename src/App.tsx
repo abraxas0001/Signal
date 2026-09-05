@@ -26,7 +26,7 @@ import { Persona } from '@/components/Persona'
 import { Actions } from '@/components/Actions'
 import { Settings } from '@/components/Settings'
 import { WeekCompare } from '@/components/WeekCompare'
-import { PostHighlights } from '@/components/PostHighlights'
+import { PostHighlights, type Lens as HighlightLens } from '@/components/PostHighlights'
 import { AudienceScreen } from '@/components/AudienceScreen'
 import { NextPost } from '@/components/NextPost'
 import { LocalNews } from '@/components/LocalNews'
@@ -38,14 +38,22 @@ import { SideNav } from '@/components/SideNav'
 import { emptyStore, isDemoScope, isDeskScope, readStore, subscribe, useStore, update, writeStore } from '@/lib/store'
 import { reconcileOwnership } from '@/lib/handles'
 import { PRIMARY, activePersona } from '@/lib/personas'
-import { currentNavState, restoredTab, useNavHistory } from '@/lib/nav-history'
-import { isUnlisted } from '@/lib/nav'
+import {
+  captureScroll,
+  currentNavState,
+  navDepth,
+  restoreScroll,
+  restoredTab,
+  useNavHistory,
+} from '@/lib/nav-history'
+import { NAV, isUnlisted } from '@/lib/nav'
 import { cn } from '@/lib/utils'
 import { EntryScreen, useVaultState } from '@/components/Lock'
 import { activeAccount, signOut } from '@/lib/vault'
 import { lockDesk, onDeskRefresh, readDeskSession } from '@/lib/desk-session'
 import { Avatar, Button, Card, Shell, SignalGlyph } from '@/components/ui'
 import { applyDeviceClass, ease, haptic, pageIn } from '@/lib/motion'
+import type { WindowId } from '@/lib/window'
 
 /**
  * Two states, not three.
@@ -70,6 +78,11 @@ export default function App() {
   // Seeded from the history entry, which survives a reload: F5 on Compare
   // must come back to Compare, not walk the reader home.
   const [tab, setTab] = useState<Tab>(() => restoredTab() ?? 'dashboard')
+  /* Read through a ref inside callbacks that must not re-create on every tab
+     change: openStoredReport is handed to four screens as a prop, and making
+     it depend on `tab` would remount their trees on every navigation. */
+  const tabRef = useRef(tab)
+  tabRef.current = tab
   /**
    * Whether the current screen is one the bottom bar has no slot for.
    *
@@ -90,6 +103,15 @@ export default function App() {
    * seed is cleared once the studio has been left so a stale draft does not
    * greet somebody opening the studio cold a week later.
    */
+  /**
+   * The lens the highlights screen should OPEN on, when the reader asked for
+   * one — "View all top posts" means Best received, "View all underperforming
+   * posts" means Worst received. Null when they simply opened the screen.
+   */
+  const [lensRequest, setLensRequest] = useState<{
+    lens: HighlightLens
+    win: WindowId | null
+  } | null>(null)
   const [studioSeed, setStudioSeed] = useState<string | null>(null)
 
   const [demo, setDemo] = useState<Report | null>(null)
@@ -561,9 +583,12 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
     (url: string) => {
       const req: AnalyseRequest = { url }
       setLastRequest(req)
-      setCameFrom(null)
-      // The history panel starts runs from whichever screen is open, so this
-      // cannot assume the analyse tab is already the one showing.
+      /* The history sheet starts runs from whichever screen is open, so this
+         cannot assume the reader was on the analyse tab — and nulling the
+         origin stranded them on the paste box when the run finished. */
+      const startedOn = tabRef.current
+      setCameFrom((prev) => (startedOn === 'analyse' ? prev : startedOn))
+      // Move the tab too: the analyse screen is shown by tab alone.
       setTab('analyse')
       void run(req)
     },
@@ -591,18 +616,40 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
    * dashboard's content tables use this for posts read in full, so a reading
    * costs its model calls exactly once, ever.
    */
-  const openStoredReport = useCallback((report: Report) => {
-    setDemo(report)
-    setTab('analyse')
-    window.scrollTo({ top: 0 })
-  }, [])
+  const openStoredReport = useCallback(
+    (report: Report) => {
+      setDemo(report)
+      /* WHERE BACK GOES. This set no origin at all, so closing a stored
+         reading fell through to the paste box — a report opened from Post
+         highlights sent the reader somewhere they had never been. The tab
+         they were on IS the step back. */
+      /* Captured HERE, not inside the updater. React defers the updater to
+         the next render, by which point `tabRef.current` has already been
+         reassigned to 'analyse' by the setTab below — so reading the ref
+         inside it always saw the destination instead of the origin, and the
+         back control fell through to the paste box every time. */
+      const from = tabRef.current
+      captureScroll()
+      setCameFrom((prev) => (from === 'analyse' ? prev : from))
+      setTab('analyse')
+      window.scrollTo({ top: 0 })
+    },
+    [],
+  )
 
   const readPost = useCallback(
-    (postUrl: string, from: 'influencers' | 'dashboard') => {
+    (postUrl: string) => {
       const req: AnalyseRequest = { url: postUrl }
       setLastRequest(req)
       setDemo(null)
-      setCameFrom(from)
+      /* The origin is where the reader IS, not a literal at the call site.
+         All four callers passed 'dashboard' while three of them are Post
+         highlights, Compare and Accounts, so back walked those readers to a
+         screen they had not come from. Captured here, before setTab moves it,
+         for the same reason openStoredReport does. */
+      const from = tabRef.current
+      captureScroll()
+      setCameFrom((prev) => (from === 'analyse' ? prev : from))
       // Move the tab, not just the state. The analyse screen is shown by tab
       // alone now, so a run started from another screen has to bring the tab
       // with it — otherwise it would run invisibly behind the list.
@@ -628,7 +675,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
    * Which screen sent us into an analysis, so the way out leads back to it.
    * Null means the paste box, which is the home this app already returns to.
    */
-  const [cameFrom, setCameFrom] = useState<'influencers' | 'dashboard' | null>(null)
+  const [cameFrom, setCameFrom] = useState<Tab | null>(null)
 
   /**
    * Close the report and go back where the reader came from.
@@ -644,8 +691,30 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
     setDemo(null)
     setRescueOpen(false)
     setCameFrom(null)
-    if (back) setTab(back)
     haptic.tap()
+
+    /**
+     * A BACK CONTROL HAS TO ACTUALLY GO BACK.
+     *
+     * This called `setTab(back)` and scrolled to the top, which is a FORWARD
+     * navigation wearing a back arrow. Three things went wrong at once: the
+     * history stack grew on the way out, so the browser's own back button
+     * then returned to the report the reader had just closed; the reader's
+     * place on the screen underneath was thrown away; and the destination was
+     * whatever `cameFrom` had been set to rather than where the reader
+     * actually was.
+     *
+     * Stepping through history fixes all three, because the entry underneath
+     * IS the screen they came from, stamped with the position they left it
+     * at. `setTab` stays as the fallback for the case where no entry of ours
+     * is underneath — a report opened directly from a link, where there is
+     * genuinely nothing to step back to.
+     */
+    if (navDepth() > 0) {
+      window.history.back()
+      return
+    }
+    if (back) setTab(back)
     window.scrollTo({ top: 0 })
   }, [cameFrom, reset])
 
@@ -676,6 +745,12 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
    */
   const goTo = useCallback(
     (next: Tab) => {
+      /* WHERE THE READER WAS, RECORDED BEFORE ANYTHING MOVES. This has to be
+         the first statement in the function: the `window.scrollTo` at the end
+         of it runs synchronously, so anything reading the position later —
+         including an effect — reads zero. With this, pressing back from the
+         screen we are about to open returns to this exact place. */
+      captureScroll()
       // The stamp happens here rather than inside a setTab updater. An updater
       // runs during React's render pass, and writing to the store from there
       // notifies its subscribers mid-render — React reports it as "cannot
@@ -711,6 +786,34 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
   )
 
   /**
+   * THE BACK CONTROL EVERY SCREEN'S HEADER ACTUALLY NEEDS.
+   *
+   * Twelve screens carry a visible "Back" button and all twelve were wired to
+   * `go('dashboard')` — which is `goTo`, which is a FORWARD navigation. Three
+   * consequences the office felt as one bug:
+   *
+   *   - it always landed on the dashboard, even for a reader who had reached
+   *     the screen from Accounts or Compare, so back was really "go home";
+   *   - it landed at the TOP of the dashboard, because forward navigation
+   *     resets the scroll, which is what "it leads me to section 1" means;
+   *   - the history stack GREW on the way out, so the browser's own back
+   *     button then returned to the screen the button had just closed.
+   *
+   * Stepping through history fixes all three at once. The entry underneath is
+   * by definition the place the reader came from, and it carries the position
+   * they left it at. `goTo('dashboard')` remains the fallback for a reader
+   * whose first page in the tab is this screen — a shared link, a refresh —
+   * where there is genuinely nothing underneath to step back to.
+   */
+  const goBack = useCallback(() => {
+    if (navDepth() > 0) {
+      window.history.back()
+      return
+    }
+    goTo('dashboard')
+  }, [goTo])
+
+  /**
    * Give the browser's back button something to go back to.
    *
    * Screen changes were React state alone, so the history stack never grew and
@@ -725,13 +828,45 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
    */
   useNavHistory(
     { tab, overlay: historyOpen ? 'history' : moreOpen ? 'more' : null },
-    useCallback((point) => {
+    useCallback((point, scrollY, docHeight) => {
       setTab(point.tab)
       setHistoryOpen(point.overlay === 'history')
       setMoreOpen(point.overlay === 'more')
-      window.scrollTo({ top: 0 })
+      /* BACK RETURNS TO THE PLACE, NOT THE TOP. This scrolled to zero, so a
+         reader who opened a post from the platform tables most of the way
+         down the dashboard came back to the masthead. The entry knows where
+         they were; `restoreScroll` re-applies it across the frames the
+         returning screen takes to lay its charts and tables out. */
+      restoreScroll(scrollY, docHeight)
     }, []),
   )
+
+  /**
+   * A lens request expires the moment the reader leaves the screen it was for.
+   *
+   * Clearing it inside `goTo` would not be enough: `goTo` is not the only
+   * thing that moves the tab. The history callback above sets it directly, as
+   * do the deep links and the demo opener — so a reader who followed "View
+   * all top posts", pressed back, and later opened Post highlights from the
+   * rail would have found it still filtered to Best received, with nothing on
+   * screen explaining why. Watching the tab itself covers every route.
+   *
+   * Safe to run while the screen is still exiting: the lens is read once, at
+   * mount, so clearing it cannot disturb what is on screen.
+   */
+  useEffect(() => {
+    /*
+     * A REPORT IS A DETOUR, NOT A DEPARTURE.
+     *
+     * This cleared on any tab but 'highlights', and opening a post from the
+     * highlights screen moves the tab to 'analyse' — so reading one post and
+     * pressing back returned to the screen on its DEFAULT lens, throwing away
+     * the Best/Worst received list the reader had asked for and was halfway
+     * down. The analyse screen is reached FROM a list and returns to it, so
+     * it does not count as leaving.
+     */
+    if (tab !== 'highlights' && tab !== 'analyse') setLensRequest(null)
+  }, [tab])
 
   const toggleTheme = () => {
     setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
@@ -845,6 +980,10 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
    */
   const showAnalyse = tab === 'analyse'
 
+  /* What the report's back control names. NAV holds the label every other
+     surface uses for the same screen, so the two can never disagree. */
+  const backLabel = cameFrom ? (NAV[cameFrom]?.label ?? null) : null
+
   const screen = () => {
     if (showAnalyse) {
       if (demo && state.status === 'idle') {
@@ -852,8 +991,15 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
           <m.div key="demo" variants={pageIn} initial="hidden" animate="show" exit="exit">
             <ReportView
               report={demo}
+              backLabel={backLabel}
+              /* A STORED READING CLOSES THE SAME WAY A FRESH ONE DOES.
+                 This branch only cleared `demo` and left the tab on 'analyse',
+                 so pressing back on a report opened from the dashboard's
+                 tables dropped the reader on the paste box — a screen they had
+                 never been to. closeReport returns them to the screen that
+                 opened it, which is what every other exit here already does. */
               onReset={() => {
-                setDemo(null)
+                closeReport()
                 window.history.replaceState(currentNavState(), '', window.location.pathname)
               }}
             />
@@ -872,7 +1018,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
               }}
               // Only once there is a desk behind it. Before setup this screen
               // is the app, and "Back" would lead nowhere.
-              onClose={store.onboardedAt ? () => goTo('dashboard') : undefined}
+              onClose={store.onboardedAt ? goBack : undefined}
             />
           </m.div>
         )
@@ -891,6 +1037,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
           <m.div key="report" variants={pageIn} initial="hidden" animate="show" exit="exit">
             <ReportView
               report={state.report}
+              backLabel={backLabel}
               onReset={closeReport}
               onEditMetric={() => setRescueOpen(true)}
             />
@@ -940,7 +1087,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
           <>
             <Grievances
               key={`grievances-${deskKey}`}
-              onClose={go('dashboard')}
+              onClose={goBack}
               focusIssueId={focusIssue}
               onOpenNextPost={() => goTo('nextpost')}
             />
@@ -951,30 +1098,33 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
       // screen asks what a set of accounts is saying in general, this one asks
       // what every masthead is saying about one named person.
       case 'personas':
-        return <Persona key="personas" onClose={go('dashboard')} />
+        return <Persona key="personas" onClose={goBack} />
       case 'influencers':
         return (
           <Influencers
             key="influencers"
-            onClose={go('dashboard')}
-            onRead={(mention) => readPost(mention.postUrl, 'influencers')}
+            onClose={goBack}
+            onRead={(mention) => readPost(mention.postUrl)}
             focusId={focusIssue}
           />
         )
       case 'actions':
         return (
           <>
-            <Actions key={`actions-${deskKey}`} onClose={go('dashboard')} />
+            <Actions key={`actions-${deskKey}`} onClose={goBack} />
             {demoOpen && <DemoNote />}
           </>
         )
       case 'accounts':
         return (
+          // Keyed by the desk, like every sibling screen here. It was the one
+          // screen the desk sync did not remount, so after a sync it went on
+          // showing the handles it had read for the previous desk.
           <Dashboard
-            key="accounts"
+            key={`accounts-${deskKey}`}
             mode="accounts"
-            onClose={go('dashboard')}
-            onRead={(postUrl) => readPost(postUrl, 'dashboard')}
+            onClose={goBack}
+            onRead={readPost}
           />
         )
       case 'compare':
@@ -985,9 +1135,9 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
             <Dashboard
               key={`compare-${deskKey}`}
               mode="compare"
-              onClose={go('dashboard')}
+              onClose={goBack}
               onOpenActions={() => goTo('actions')}
-              onRead={(postUrl) => readPost(postUrl, 'dashboard')}
+              onRead={readPost}
               onOpenReport={openStoredReport}
             />
           </>
@@ -995,7 +1145,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
       // The dashboard week card's Explore page: the same week the card
       // scores, read closely, with the lessons filing onto the task list.
       case 'weekly':
-        return <WeekCompare key={`weekly-${deskKey}`} onClose={go('dashboard')} />
+        return <WeekCompare key={`weekly-${deskKey}`} onClose={goBack} />
       // The one screen here that makes something rather than reads something.
       case 'studio':
         return (
@@ -1004,7 +1154,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
             seed={studioSeed}
             onClose={() => {
               setStudioSeed(null)
-              goTo('dashboard')
+              goBack()
             }}
           />
         )
@@ -1014,26 +1164,28 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
         return (
           <PostHighlights
             key={`highlights-${deskKey}`}
-            onClose={go('dashboard')}
+            initialLens={lensRequest?.lens}
+            initialWindow={lensRequest?.win ?? undefined}
+            onClose={goBack}
             onOpenReport={openStoredReport}
-            onRead={(postUrl) => readPost(postUrl, 'dashboard')}
+            onRead={readPost}
           />
         )
       case 'audience':
         return (
           <AudienceScreen
             key={`audience-${deskKey}`}
-            onClose={go('dashboard')}
+            onClose={goBack}
             onOpenAccounts={() => goTo('accounts')}
           />
         )
       case 'localnews':
-        return <LocalNews key={`localnews-${deskKey}`} onClose={go('dashboard')} />
+        return <LocalNews key={`localnews-${deskKey}`} onClose={goBack} />
       case 'nextpost':
         return (
           <NextPost
             key={`nextpost-${deskKey}`}
-            onClose={go('dashboard')}
+            onClose={goBack}
             onMakePost={(brief) => {
               setStudioSeed(brief)
               goTo('studio')
@@ -1044,7 +1196,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
         return (
           <Settings
             key="settings"
-            onClose={go('dashboard')}
+            onClose={goBack}
             // History is a panel over whatever is open, not a tab — the same
             // special case every nav surface's onSelect already carries.
             onOpenTool={(t) => {
@@ -1104,7 +1256,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
               setDeskKey((k) => k + 1)
               window.scrollTo({ top: 0 })
             }}
-            onRead={(postUrl) => readPost(postUrl, 'dashboard')}
+            onRead={readPost}
             onOpenReport={openStoredReport}
             onEditIdentity={() => {
               // Clearing the stamp is what puts the setup screen back in front:
@@ -1113,7 +1265,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
               update((prev) => ({ ...prev, onboardedAt: null }))
               window.scrollTo({ top: 0 })
             }}
-            onNavigate={(to, issueId) => {
+            onNavigate={(to, issueId, lens, win) => {
               if (to === 'analyse') {
                 goTo('analyse')
                 startOver()
@@ -1122,6 +1274,7 @@ This signs you out of ${account.name}. Your records stay encrypted on this devic
               // Carried so the destination can open the thing that was clicked
               // rather than the top of a list containing it.
               setFocusIssue(issueId ?? null)
+              setLensRequest(lens ? { lens, win: win ?? null } : null)
               goTo(to)
             }}
             />

@@ -222,8 +222,15 @@ export async function complete(req: CompletionRequest): Promise<CompletionResult
       body: JSON.stringify({
         model: provider.model,
         messages: buildMessages({ ...req, system }),
-        max_tokens: outputBudget(provider, req, system),
-        temperature: 0.2,
+        /* OpenAI's gpt-5 family rejects `max_tokens` outright (HTTP 400,
+           "use 'max_completion_tokens' instead") and accepts only the default
+           temperature — measured live: the configured fallback 400'd before
+           generating a token, so a Groq outage took the whole analysis down
+           with it. Groq's and Cerebras's compat endpoints still expect the
+           classic parameters, so the shape follows the host. */
+        ...(provider.baseUrl?.startsWith('https://api.openai.com')
+          ? { max_completion_tokens: outputBudget(provider, req, system) }
+          : { max_tokens: outputBudget(provider, req, system), temperature: 0.2 }),
         stream: true,
         stream_options: { include_usage: true },
         response_format: format,
@@ -260,6 +267,14 @@ function providerError(provider: Provider, status: number, body: string): string
     return `${provider.label} refused the request as too large for its tokens-per-minute allowance. The output ceiling is counted up front, so lower it with LLM_MAX_TOKENS (currently ${provider.maxTokens}).`
   }
   if (status === 429) {
+    /* A 429 is TWO different problems wearing one status code, and telling a
+       reader to wait when the account is empty wastes their afternoon. A bulk
+       run of 61 posts retried three times each against an exhausted balance
+       and reported "rate-limited … retry" 183 times; the body said
+       insufficient_quota / "no credits remaining" the whole way. */
+    if (/insufficient_quota|no credits remaining|exceeded your current quota/i.test(body)) {
+      return `${provider.label} has no credit left on this key — it is out of quota, not busy. Add credit, or unset LLM_PROVIDER to fall back to another provider.`
+    }
     const wait = /try again in ([\d.]+\s*\w+)/i.exec(body)?.[1]
     return `${provider.label} rate-limited this request${wait ? `. Retry in ${wait}` : ''}. Free tiers cap tokens per minute and requests per day.`
   }

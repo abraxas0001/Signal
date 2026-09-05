@@ -29,6 +29,7 @@ import {
   type ScrapedComment,
   type ProfileInfo,
   type ScrapedPost,
+  cutCaption,
 } from '../types'
 import { autoScroll } from '../browser'
 
@@ -202,7 +203,7 @@ export const linkedin: PlatformAdapter = {
         found.set(url, {
           url,
           id,
-          title: r.text?.slice(0, 140) ?? null,
+          title: cutCaption(r.text),
           // The feed renders relative ages ("2d"), not timestamps. Rather than
           // convert an approximation into a false ISO date, this is left null
           // and the app's own reader supplies the real one.

@@ -1222,10 +1222,18 @@ export function EntryScreen({
             </div>
           </div>
 
+          {/* The visible chooser below is the real affordance, and it forwards
+              the click here. This input is only the file dialog's plumbing, so
+              it is taken out of the tab order and out of the tree: sr-only
+              leaves an element focusable, and a keyboard user tabbing through
+              the restore card landed on a control with no name at all, with
+              nothing on screen to show where the focus had gone. */}
           <input
             ref={fileRef}
             type="file"
             accept=".json,application/json"
+            tabIndex={-1}
+            aria-hidden
             className="sr-only"
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null)

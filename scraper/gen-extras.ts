@@ -27,6 +27,7 @@ import { analysePost } from '../netlify/functions/lib/analyse'
 import { PROVIDER_ENV_VARS, resolveProviders } from '../netlify/functions/lib/provider'
 import type { Provider } from '../netlify/functions/lib/provider'
 import type { Comment, Report } from '../shared/types'
+import { cleanQuote } from '../src/lib/utils'
 
 const ROSTER = resolve(process.cwd(), 'public/demo-politicians.json')
 const REPORTS = resolve(process.cwd(), 'public/demo-reports.json')
@@ -48,6 +49,42 @@ const API = process.env['SIGNAL_API'] ?? 'http://localhost:8888'
  * so forty is generous to a reader and still bounded: demo-reports.json is
  * already 941 KB and ships to every visitor of the example desk.
  */
+/**
+ * The words of a comment, with the platform's own furniture taken off.
+ *
+ * Facebook renders the author, the age and its Like/Reply controls inside the
+ * comment's text run, so the same comment arrives from the browser scraper
+ * and from the extractor looking like two different sentences. This reduces
+ * both to the thing a person actually typed, which is what identifies it.
+ */
+const COMMENT_PREFIX =
+  /^[^\n\u00b7]{2,40}\u00b7\s*\d+\s*(?:\u0918\u0902\u091f\u0947|\u0926\u093f\u0928|\u092e\u093f\u0928\u091f|\u0938\u092a\u094d\u0924\u093e\u0939|\u0938\u0947\u0915\u0902\u0921|\u0938\u093e\u0932|\u092e\u0939\u0940\u0928\u0947|hours?|days?|weeks?|mins?|minutes?|[hdwmy])(?:\s*\u00b7\s*(?:\u091f\u0949\u092a\s*\u095e\u0948\u0928|Top\s*fan))?/u
+
+const COMMENT_CHROME =
+  /(\u0932\u093e\u0907\u0915\s*\u0915\u0930\u0947\u0902|\u091c\u0935\u093e\u092c\s*\u0926\u0947\u0902|\u0905\u0928\u0941\u0935\u093e\u0926\s*\u0926\u0947\u0916\u0947\u0902|See\s*translation|\u091f\u0949\u092a\s*\u095e\u0948\u0928|Top\s*fan|GIPHY)/giu
+
+function commentKey(text: string): string {
+  return (
+    text
+      .replace(COMMENT_PREFIX, '')
+      .replace(COMMENT_CHROME, ' ')
+      /*
+       * AND THE DECORATION COMES OFF TOO.
+       *
+       * Widening the chrome list was not enough on its own. An audit of the
+       * merged readings found seventeen pairs still standing, and thirteen of
+       * them differed by nothing but Facebook's "See translation" tail or a
+       * trailing 🙏 that one copy kept and the other dropped. A key that a
+       * single emoji can split is not an identity. Emoji, variation
+       * selectors, joiners and zero-width marks are all decoration around the
+       * words, so the key is the words.
+       */
+      .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u200B-\u200F]/gu, '')
+      .replace(/\s+/g, '')
+      .toLowerCase()
+  )
+}
+
 const KEEP_PER_REPORT = 40
 
 interface Post {
@@ -184,12 +221,46 @@ function mergeComments(
    * only here: every other platform keeps the author in the key, because
    * elsewhere the two sources agree on how a person is named.
    */
-  const authorless = platform === 'YouTube'
+  /*
+   * AND THE KEY IS THE WORDS ALONE, ON EVERY PLATFORM.
+   *
+   * The rule above kept the author in the key everywhere but YouTube, on the
+   * reasoning that the two sources agree on how a person is named. On
+   * Facebook they do not, and not by a small margin: the browser scraper
+   * reads the author, the age and the Like/Reply row as part of the comment's
+   * own text run ("Karunakarreddy Patel \u00b7 22 \u0918\u0902\u091f\u0947\u0c2e\u0c39\u0c2c\u0c42..."), while the
+   * extractor puts the author in its own field and stores the sentence clean.
+   * Same comment, different text AND different author, so the key differed
+   * and both copies survived. That put 36 duplicates across 16 of her posts
+   * into the readings, which is why a post showing three comments told the
+   * office it had read four.
+   *
+   * So the platform's furniture is stripped before keying, and the words
+   * decide. The cost the note above describes is unchanged and still
+   * accepted: three people each writing "Jai Hind" collapse to one. A count
+   * one too low beats a comment counted twice and an opinion voted twice.
+   */
   for (const c of [...(fromPost ?? []), ...fromScraper]) {
     const flat = (c.text ?? '').replace(/\s+/g, ' ').trim()
     if (!flat) continue
-    const key = authorless ? flat.toLowerCase() : `${flat.toLowerCase()}|${c.author ?? ''}`
-    if (seen.has(key)) continue
+    /*
+     * THE PLATFORM'S FURNITURE IS NOT A COMMENT, AND MUST NOT BE STORED AS ONE.
+     *
+     * Instagram paints each comment's age as its own text node ("19 h", "5 h",
+     * "64 w") and a verified badge as the word "Verified" run onto the
+     * username. The scraper reads text nodes, so eleven of these were kept as
+     * comments. The app's display filter skipped them, but every COUNT was
+     * taken over the stored rows, so a post Instagram published ten comments
+     * on told the office it held eleven — and five of them had been given a
+     * side by the classifier and were voting in the sentiment split.
+     *
+     * Dropping them HERE, where the row is first kept, is what makes the
+     * counts and the list agree everywhere at once instead of in the twenty
+     * places that print one.
+     */
+    if (cleanQuote(flat).length === 0) continue
+    const key = commentKey(flat)
+    if (!key || seen.has(key)) continue
     seen.add(key)
     merged.push(c)
   }
@@ -569,7 +640,18 @@ async function genReports(file: RosterFile): Promise<void> {
     if (!person) continue
     const posts: { post: Post; platform: string }[] = []
     for (const h of person.handles) {
-      if (h.failure) continue
+      /*
+       * A FAILED REFRESH IS NOT AN EMPTY ACCOUNT.
+       *
+       * This skipped any handle carrying a failure, which is right when the
+       * failure means there is nothing to read. It is wrong when the handle
+       * still holds posts from its last good read: her Facebook page kept its
+       * 25 posts and 17 of them had comments already scraped, and every one
+       * of those was passed over here because today's refresh had failed. The
+       * posts are real, the comments are on disk, and the reading costs the
+       * same either way. An account with nothing to show still skips.
+       */
+      if (h.failure && h.posts.length === 0) continue
       for (const post of h.posts) {
         if (!(post.title ?? '').trim() && !post.thumbnailUrl) continue
         posts.push({ post, platform: h.platform })
@@ -588,8 +670,25 @@ async function genReports(file: RosterFile): Promise<void> {
        left most rows saying "not read". A rival's column needs only enough to
        characterise them. */
     const own = pairing.principal === file.pairings[0]?.principal
-    const perPlatformCap = own ? 10 : 4
-    const totalCap = own ? 32 : 10
+    /*
+     * A POST WITH COMMENTS ON RECORD EARNS ITS READING FIRST.
+     *
+     * The budget used to be spent purely on engagement rank, which ignored
+     * the one fact that decides whether a reading can say anything about an
+     * audience: whether the browser scraper has already read that post's
+     * comments. On this desk that left 269 scraped comments spread over 54
+     * posts, of which only the 32 highest-engagement posts got a reading, so
+     * most of the comments the office paid a signed-in scrape to collect
+     * reached no screen at all.
+     *
+     * The caps now stretch to cover every post whose comments are already on
+     * disk. Nothing extra is fetched for them; the comments are sitting in
+     * scraper/demo-comments.json and the reading is what turns them into
+     * something the dashboard can count.
+     */
+    const withComments = posts.filter(({ post }) => (comments[post.url]?.length ?? 0) > 0).length
+    const perPlatformCap = own ? Math.max(10, withComments) : 4
+    const totalCap = own ? Math.max(32, withComments) : 10
     const perPlatform = new Map<string, number>()
     const chosen: { post: Post; platform: string }[] = []
     const add = (row: { post: Post; platform: string }): void => {
@@ -617,6 +716,11 @@ async function genReports(file: RosterFile): Promise<void> {
     for (const row of posts) {
       byPlatform.set(row.platform, [...(byPlatform.get(row.platform) ?? []), row])
     }
+    /* Comment-bearing posts before anything ranked, for the reason above. */
+    for (const row of posts) {
+      if ((comments[row.post.url]?.length ?? 0) > 0) add(row)
+    }
+
     for (const list of byPlatform.values()) {
       const measured = list.some(
         (r) => r.post.likes != null || r.post.comments != null || r.post.shares != null,

@@ -5,12 +5,11 @@ import {
   newsSelection,
   ownPostsOf,
   whatLandsOf,
-  type LandsFinding,
   type LandsReading,
   type OwnPost,
   type RankedIssue,
 } from '@/lib/briefing'
-import type { TrackedHandle } from '@/lib/handles'
+import { readStandingCache, type TrackedHandle } from '@/lib/handles'
 import {
   countVerdicts,
   describeVerdict,
@@ -35,9 +34,17 @@ import type { SuggestionIssue } from '@/lib/suggest'
  *   "POSITIVE SENTIMENT PER THEME" DOES NOT EXIST. Comment sentiment is read
  *   per ACCOUNT and no scored comment carries a post or a topic, so nothing
  *   can honestly say which theme the positive comments were under. What CAN
- *   be said per theme is the audience's recorded answer to each post, the
- *   `publicNarrative`, tallied with its denominator. That is what this model
- *   says instead.
+ *   be said per theme is the audience's recorded answer to each post THAT
+ *   DREW COMMENTS, the `publicNarrative`, tallied with its denominator. That
+ *   is what this model says instead.
+ *
+ *   AND THAT TALLY OBEYS THE SAME RULE AS THE MEAN. `publicNarrative` is
+ *   written by the same reading that writes the sentiment score, and on a
+ *   post with no comments under it the model has nothing to read but the
+ *   post's own words — so "Agreed" there is the office agreeing with itself.
+ *   Counted over every reading, a column headed "Audience answered" said
+ *   Governance answered on 19 posts while only 17 of them had an audience.
+ *   The tally is taken over the commented readings, exactly like the mean.
  *
  *   DESK-WIDE ENGAGEMENT MULTIPLES ARE A PLATFORM ARTIFACT. Median reactions
  *   on this desk run Facebook 107, Instagram 478, X 34, and the themes
@@ -75,12 +82,29 @@ export interface ThemeRow {
    * This is the tone of the POSTS as read, not of the audience.
    */
   meanScore: number | null
+  /**
+   * How many readings that mean was taken over: the posts of this theme that
+   * drew comments. It is NOT `posts`. A theme with nine read posts and four
+   * commented ones has a mean over four, and a card that prints that mean an
+   * inch from "9 read posts" has named a denominator the figure never had.
+   */
+  meanOver: number
   verdict: 'working' | 'not-landing' | 'mixed' | 'thin'
-  /** The whatLandsOf sentence for this topic, verbatim, when it made one. */
-  evidence: string | null
-  /** The audience's recorded answers, tallied: e.g. Agreed 5, Divided 1. */
+  /**
+   * EVERY recorded answer, ranked — not the top three.
+   *
+   * It was sliced to three here while the cell printed the survivors against
+   * the full `narrativeOver`, so Governance read "Agreed 7 · Happy 6 ·
+   * Divided 5 of 19 answered" and the reader was left to find the missing
+   * one. Truncation is a rendering decision and it belongs where the width
+   * is known; the model hands over the whole tally so whatever prints it can
+   * name its own remainder.
+   */
   narrative: { label: string; posts: number }[]
-  /** How many of the topic's readings carried an answer at all. */
+  /**
+   * How many of the topic's COMMENTED readings carried an answer at all.
+   * The tally above sums to exactly this.
+   */
   narrativeOver: number
   /**
    * Reactions against ONE platform's own average, when this topic has three
@@ -89,8 +113,6 @@ export interface ThemeRow {
   lift: { platform: string; multiple: number; n: number; typical: number } | null
   /** Published comment counts, summed where the platform published one. */
   comments: { total: number; over: number } | null
-  /** One notable quote a reading recorded against a post of this theme. */
-  quote: { text: string; from: string } | null
 }
 
 export interface CadenceRow {
@@ -112,8 +134,33 @@ export interface NextPostModel {
   postsWalked: number
   postsAnalysed: number
   postsInWindow: number
+  /**
+   * Posts INSIDE THE WINDOW that were read in full — the readings the themes
+   * below were actually taken over. `postsAnalysed` counts every reading the
+   * desk holds, whatever its date, so a windowed count printed beside a
+   * windowed theme count has to come from here or the denominator names a
+   * different set from the number above it.
+   */
+  analysedInWindow: number
   measuredInWindow: number
   commentsRead: number
+  /**
+   * THE DENOMINATOR THE SPLIT IS ACTUALLY OVER, WHICH IS NOT `commentsRead`.
+   *
+   * `audienceOf` divides its positive/neutral/negative share by the sum of
+   * the three COUNTS each account reading recorded, and `commentsRead` is a
+   * different figure the same reading also records: how many comments it
+   * walked. On this desk the two happen to agree at 280; on three of the
+   * other four example desks they do not — one reading counts 100 comments
+   * into its split and reports 33 read, another splits 219 and reports 220 —
+   * so a tile guarding on `commentsRead` and printing "14% of 280" was
+   * naming a denominator the percentage above it had never been taken over.
+   *
+   * Recomputed here from the same standings `audienceOf` reads, by the same
+   * rule, so the two screens cannot drift: the SHARE still comes from
+   * `audienceOf` verbatim, and this is only the count it divided by.
+   */
+  commentsScored: number
   platforms: number
   /* the shared models, reused verbatim */
   audience: AudienceModel
@@ -126,8 +173,10 @@ export interface NextPostModel {
   cadence: CadenceRow[]
   /** All cadence caveats in one place: which platforms publish no dates. */
   undatedNote: string | null
-  /** Deterministic, from the same findings the dashboard advice card reads. */
+  /** Deterministic, from this screen's own comment-backed rows. */
   recommendation: string
+  /** What that sentence was counted over. It rides a hover, never the tile. */
+  recommendationBasis: string
 }
 
 /* ── the window ─────────────────────────────────────────────────────────── */
@@ -153,8 +202,10 @@ const EMPTY_MODEL: NextPostModel = {
   postsWalked: 0,
   postsAnalysed: 0,
   postsInWindow: 0,
+  analysedInWindow: 0,
   measuredInWindow: 0,
   commentsRead: 0,
+  commentsScored: 0,
   platforms: 0,
   audience: undefined as unknown as AudienceModel,
   lands: {
@@ -171,6 +222,7 @@ const EMPTY_MODEL: NextPostModel = {
   cadence: [],
   undatedNote: null,
   recommendation: 'Nothing has been read yet, so there is nothing to recommend.',
+  recommendationBasis: 'No posts and no comments have been read for this desk.',
 }
 
 export function nextPostModelOf(
@@ -186,6 +238,21 @@ export function nextPostModelOf(
   // desk's own accounts speak here.
   const all = ownPostsOf(handles.filter((h) => h.own))
   const map = reports ?? new Map<string, Report>()
+
+  /* The comment split's own denominator, by `audienceOf`'s rule: the accounts
+     it reads (own where any is marked, else every tracked one), the standings
+     it accepts (a scored reading, never a press record), and the three counts
+     it divides by. See `commentsScored` on the model. */
+  const ownMarked = handles.filter((h) => h.own)
+  const voiceOf = ownMarked.length > 0 ? ownMarked : handles
+  let scored = 0
+  for (const h of voiceOf) {
+    const st = readStandingCache(h.id)
+    if (!st || st.source === 'record') continue
+    scored += st.positive + st.neutral + st.negative
+  }
+  const commentsScored = Math.round(scored)
+
   if (all.length === 0 && audience.postsStored === 0) return { ...EMPTY_MODEL, windowId }
 
   /* the window, anchored to the newest dated post so a fixed dataset does not
@@ -227,12 +294,16 @@ export function nextPostModelOf(
     byTopic.set(topic, [...(byTopic.get(topic) ?? []), r])
   }
 
-  const evidenceFor = (topic: string): string | null => {
-    const hit = [...lands.working, ...lands.notLanding].find(
-      (f: LandsFinding) => f.kind === 'topic' && f.label === topic,
-    )
-    return hit ? hit.evidence : null
-  }
+  /**
+   * THE whatLandsOf TOPIC SENTENCE IS NOT ALLOWED INTO A THEME ROW.
+   *
+   * Every row used to carry `evidence`: the sentence `whatLandsOf` writes for
+   * a topic, which quotes a mean taken over EVERY reading of that topic, posts
+   * with no comments under them included. The row's own mean excludes those
+   * deliberately, so the two figures disagreed by construction — and the
+   * export sheet shipped the forbidden one in a column headed Evidence. A
+   * row's evidence is the columns of the row.
+   */
 
   const themes: ThemeRow[] = []
   let thinTopics = 0
@@ -241,13 +312,43 @@ export function nextPostModelOf(
       thinTopics += 1
       continue
     }
-    const scores = list.map((r) => r.report.analysis?.sentiment.score ?? 0)
-    const mean = scores.reduce((s, v) => s + v, 0) / scores.length
+    /**
+     * THE MEAN IS THE AUDIENCE'S, OR IT IS NOTHING.
+     *
+     * This averaged every reading's sentiment score, and on a post with no
+     * comments that score is read from the POST'S OWN WORDS — so a theme
+     * whose six posts drew zero comments was ranked "Working +62" as though
+     * an audience had said so, and one whose comment-backed posts average a
+     * mild +6.7 was printed "Not landing" in red. A null score also counted
+     * as a 0, dragging every mean toward the middle.
+     *
+     * Only readings with comments under them can speak for an audience, and
+     * three is the floor this product uses everywhere else for a mean. Below
+     * that the row carries no score and says so.
+     */
+    const commented = list.filter((r) => (r.report.snapshot.comments?.length ?? 0) > 0)
+    const scores = commented
+      .map((r) => r.report.analysis?.sentiment.score)
+      .filter((v): v is number => v != null)
+    const mean =
+      scores.length >= 3 ? scores.reduce((s, v) => s + v, 0) / scores.length : null
 
-    /* the audience's recorded answer, tallied over the readings that gave one */
+    /**
+     * The audience's recorded answer — over the SAME readings as the mean.
+     *
+     * `commented` is the one population on this row an audience is in. The
+     * tally used to walk `list`, every reading of the theme, so the column
+     * headed "Audience answered" counted posts where nobody had answered
+     * anything: on this desk Governance answered "of 19" over 17 commented
+     * posts, and two of those nineteen answers were the reading inferring a
+     * crowd's mood from the office's own caption. Same rule as the mean, and
+     * for the same reason.
+     *
+     * Not sliced, either: the row that prints it names its own remainder.
+     */
     const tally = new Map<string, number>()
     let answered = 0
-    for (const r of list) {
+    for (const r of commented) {
       const narrative = r.report.analysis?.sentiment.publicNarrative
       if (!narrative || narrative === 'NA') continue
       answered += 1
@@ -255,8 +356,7 @@ export function nextPostModelOf(
     }
     const narrative = [...tally.entries()]
       .map(([label, posts]) => ({ label, posts }))
-      .sort((a, b) => b.posts - a.posts)
-      .slice(0, 3)
+      .sort((a, b) => b.posts - a.posts || a.label.localeCompare(b.label))
 
     /* the within-platform lift, only where one platform carries the theme */
     let lift: ThemeRow['lift'] = null
@@ -284,37 +384,33 @@ export function nextPostModelOf(
       }
     }
 
-    /* one quote a reading actually recorded, never stitched */
-    let quote: ThemeRow['quote'] = null
-    for (const r of list) {
-      const q = r.report.analysis?.notableQuotes?.[0]
-      if (q) {
-        // The translation where one exists, because the desk reads the screen
-        // in English; the original is what the reading actually recorded and
-        // is what the report screen shows.
-        quote = {
-          text: q.translation ?? q.original,
-          from: r.report.analysis?.headline ?? r.post.title ?? topic,
-        }
-        break
-      }
-    }
+    /* A notable quote was picked here for every theme and rendered nowhere —
+       and it could not have been rendered here honestly. `notableQuotes` are
+       phrases from the POST, this office's own words, while every other figure
+       on that screen is the audience answering; one of the office's own
+       sentences set among them in a tinted block reads as a voice that
+       answered. The report screen shows those quotes, in the post's context. */
 
     themes.push({
       topic,
       posts: list.length,
-      meanScore: list.length >= 3 ? mean : null,
+      meanScore: mean,
+      meanOver: scores.length,
+      /* 'thin' now means what it says: too little AUDIENCE evidence to call
+         the theme either way. A topic with plenty of posts but no comments
+         under them lands here rather than being crowned on the strength of
+         its own captions. */
       verdict:
-        list.length < 3 ? 'thin' : mean >= 15 ? 'working' : mean <= -15 ? 'not-landing' : 'mixed',
-      evidence: evidenceFor(topic),
+        mean === null ? 'thin' : mean >= 15 ? 'working' : mean <= -15 ? 'not-landing' : 'mixed',
       narrative,
       narrativeOver: answered,
       lift,
       comments: commentOver > 0 ? { total: commentTotal, over: commentOver } : null,
-      quote,
     })
   }
   themes.sort((a, b) => (b.meanScore ?? -999) - (a.meanScore ?? -999) || b.posts - a.posts)
+
+  const label = windowLabel(anchor, windowId)
 
   /* the reader's own credibility check across the window */
   let clean = 0
@@ -351,34 +447,52 @@ export function nextPostModelOf(
   }
   cadence.sort((a, b) => b.dated - a.dated)
 
-  /* the sentence, from the same findings the dashboard's advice card reads,
-     so the two screens can never name different best themes */
-  const workingTopics = lands.working.filter((f) => f.kind === 'topic').slice(0, 2)
+  /**
+   * THE SENTENCE, AND THE ONE STATISTIC IT WAS BUILT FROM AND MAY NOT BE.
+   *
+   * It named its warm themes out of `lands.working`'s TOPIC findings, whose
+   * value is the mean of every reading's sentiment score — INCLUDING the posts
+   * nobody commented on. That is the exact figure this file was rewritten to
+   * refuse, and it was riding the most prominent tile on the screen, and the
+   * dashboard's door card with it. The warm themes now come from this model's
+   * own rows, whose means are taken over commented posts only and only at
+   * three of them. Where no theme is warm the sentence falls back to REACH and
+   * says the word reactions, so the two measurements never wear each other's
+   * clothes; and the basis each was counted over rides a hover, never the
+   * tile.
+   */
+  const warm = themes.filter((t) => t.verdict === 'working').slice(0, 2)
   const workingBucket = lands.working.find((f) => f.kind !== 'topic')
   let recommendation: string
-  if (lands.thin) {
-    recommendation = `Only ${lands.measuredPosts} posts carry measured reactions in this window, too few to recommend from. Read more posts first.`
-  } else if (workingTopics.length > 0) {
-    const names = workingTopics.map((f) => f.label).join(' and ')
-    recommendation = `Your readings back more on ${names}${
-      workingBucket ? `, and ${workingBucket.label} posts are carrying furthest` : ''
-    }.`
+  let recommendationBasis: string
+  if (warm.length > 0) {
+    recommendation = `Your warmest readings are on ${warm.map((t) => t.topic).join(' and ')}.`
+    recommendationBasis = `Mean reading over the posts of each theme that drew comments — ${warm
+      .map((t) => `${t.topic} ${t.meanOver} of ${t.posts}`)
+      .join(', ')} — ${label}. Posts with no comments under them are not in it.`
   } else if (workingBucket) {
-    recommendation = `No theme has three warm readings yet, but ${workingBucket.label} posts are carrying furthest.`
+    recommendation = `${workingBucket.label} posts drew ${round1(workingBucket.value)}x your typical reactions.`
+    recommendationBasis = `${workingBucket.evidence} Reactions only: no theme has three commented posts to be read warm or cold.`
+  } else if (lands.thin) {
+    recommendation = `Only ${lands.measuredPosts} posts carry published reactions here, and no theme has three commented posts.`
+    recommendationBasis = `Five posts with published reactions before reach is compared at all, three commented posts before a theme is read warm or cold. ${label}.`
   } else {
-    recommendation = `Nothing stands out from your typical post in this window. The openings tab may still have something worth answering.`
+    recommendation = `Nothing stands out from your typical post in this window.`
+    recommendationBasis = `Counted over the ${lands.measuredPosts} posts whose reactions the platform published, ${label}, and no theme reads warm over its commented posts.`
   }
 
   return {
     empty: false,
     windowId,
-    windowLabel: windowLabel(anchor, windowId),
+    windowLabel: label,
     postsStored: audience.postsStored,
     postsWalked: audience.postsRead,
     postsAnalysed: audience.postsAnalysed,
     postsInWindow: posts.length,
+    analysedInWindow: reads.length,
     measuredInWindow: lands.measuredPosts,
     commentsRead: audience.commentsRead,
+    commentsScored,
     platforms: new Set(posts.map((p) => p.platform)).size,
     audience,
     lands,
@@ -391,7 +505,130 @@ export function nextPostModelOf(
         ? `${undated.join(' and ')} published no dates to the collector, so those posts cannot be placed in time.`
         : null,
     recommendation,
+    recommendationBasis,
   }
+}
+
+/* ── what the table itself cannot show ──────────────────────────────────── */
+
+const round1 = (n: number): string => (Math.round(n * 10) / 10).toFixed(1)
+
+/**
+ * The one line under the table that is not an echo of it.
+ *
+ * This slot used to print the top row's own sentence back at a reader who had
+ * just walked past it. That is not an insight, it is a repeat. What the table
+ * genuinely cannot show at a glance is a RATE: comment counts sit in one
+ * column and post counts in another, twelve rows apart, so the theme whose
+ * comments outrun its posts stays invisible unless somebody divides. That
+ * division is what this returns, and only where it holds — the table as a
+ * whole published counts on five posts, the theme published counts on three,
+ * and the theme runs at least half again the table's own rate.
+ *
+ * Below that floor the honest fallback is the RANGE the table is sorted by,
+ * which no single row states. Below that, null: a blank space beats a
+ * restated row.
+ */
+export function keyFindingOf(themes: ThemeRow[]): string | null {
+  const total = themes.reduce((s, t) => s + (t.comments?.total ?? 0), 0)
+  const over = themes.reduce((s, t) => s + (t.comments?.over ?? 0), 0)
+  const rate = over > 0 ? total / over : 0
+  const rated = themes.filter((t) => t.comments !== null && t.comments.over >= 3)
+  if (over >= 5 && rate > 0 && rated.length > 0) {
+    const rateOf = (t: ThemeRow): number => t.comments!.total / t.comments!.over
+    const top = rated.reduce((a, b) => (rateOf(b) > rateOf(a) ? b : a))
+    if (rateOf(top) >= rate * 1.5) {
+      return `${top.topic} draws ${round1(rateOf(top))} comments a post over ${top.comments!.over} posts, against ${round1(rate)} across every themed post here.`
+    }
+  }
+  const graded = themes.filter((t) => t.meanScore !== null)
+  const hi = graded[0]
+  const lo = graded[graded.length - 1]
+  if (graded.length >= 2 && hi && lo && hi !== lo) {
+    return `Your graded themes span ${Math.round(hi.meanScore!)} to ${Math.round(lo.meanScore!)}: ${hi.topic} at the top, ${lo.topic} at the bottom, over ${graded.length} themes.`
+  }
+  return null
+}
+
+/* ── the topic ring ─────────────────────────────────────────────────────── */
+
+export interface RingSlice {
+  label: string
+  posts: number
+  pct: number
+  /** The folded remainder, which is drawn and labelled grey. */
+  other: boolean
+}
+
+/**
+ * The ring, folded to the number of colours this product actually owns.
+ *
+ * The categorical palette is five validated hues and no more, so a ring drawn
+ * over seven topics repeated hue one on slice six — two different topics, the
+ * same blue, side by side in the legend. Rather than invent a sixth colour
+ * that nobody has run through the CVD check, the ring names the five largest
+ * and folds everything else into one grey bucket that carries its own count.
+ * The remainder was always real; it was previously drawn and then dropped
+ * from the legend, which is why the printed percentages summed to 76.
+ *
+ * `audienceOf` has already folded its own tail into an "Other topics (N)"
+ * segment; this folds further, and the two bucket labels differ only in how
+ * many topics each says it holds, which is the point of printing the count.
+ */
+export function topicRingOf(audience: AudienceModel, named = 5): RingSlice[] {
+  const all = audience.topics
+  const hasBucket = audience.topicTail.length > 0
+  const heads = hasBucket ? all.slice(0, -1) : all
+  const bucket = hasBucket ? all[all.length - 1] : undefined
+  const shown = heads.slice(0, named)
+  const folded = heads.slice(named)
+  const rest = folded.reduce((s, t) => s + t.posts, 0) + (bucket?.posts ?? 0)
+  const restCount = folded.length + audience.topicTail.length
+  const slices: RingSlice[] = shown.map((t) => ({
+    label: String(t.topic),
+    posts: t.posts,
+    pct: t.pct,
+    other: false,
+  }))
+  if (rest > 0 && restCount > 0) {
+    slices.push({
+      label: `Other topics (${restCount})`,
+      posts: rest,
+      pct: audience.topicPosts > 0 ? Math.round((rest / audience.topicPosts) * 100) : 0,
+      other: true,
+    })
+  }
+  return slices
+}
+
+/* ── the quoted comments ────────────────────────────────────────────────── */
+
+/**
+ * Three quotes that between them say what the readings actually found.
+ *
+ * Taking the first three in order gave three positives on this desk and read
+ * as a wall of agreement, which is a claim the split (14% positive) does not
+ * support. This takes the first quote of each side the readings recorded, in
+ * the model's own order, then fills from the top of the list. Where a desk
+ * genuinely recorded only positives, three positives is what shows: the rule
+ * widens the sample, it never manufactures a dissenting voice.
+ */
+export function quoteSpreadOf(
+  quotes: AudienceModel['quotes'],
+  n = 3,
+): AudienceModel['quotes'] {
+  const picked: AudienceModel['quotes'] = []
+  const seen = new Set<AudienceModel['quotes'][number]['side']>()
+  for (const q of quotes) {
+    if (picked.length >= n || seen.has(q.side)) continue
+    seen.add(q.side)
+    picked.push(q)
+  }
+  for (const q of quotes) {
+    if (picked.length >= n) break
+    if (!picked.includes(q)) picked.push(q)
+  }
+  return picked.slice(0, n)
 }
 
 /* ── tab two: the openings ──────────────────────────────────────────────── */

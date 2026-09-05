@@ -1,11 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { ArrowRight, Sparkles } from 'lucide-react'
+import * as m from 'motion/react-m'
+import { useReducedMotion } from 'motion/react'
 import { Card } from '../ui'
-import { DeltaChip, LineChart, seriesColor, type LineSeries } from '@/components/kit'
+import {
+  DeltaChip,
+  LineChart,
+  seriesColor,
+  smoothPath,
+  type LineSeries,
+} from '@/components/kit'
 import type { GrowthSummary } from '@/lib/growth'
 import { latestFollowersOf } from '@/lib/briefing'
 import type { TrackedHandle } from '@/lib/handles'
-import { windowLabel, windowStart, type WindowId } from '@/lib/window'
+import { presentAnchor, windowDays as daysOf, windowLabel, windowStart, type WindowId } from '@/lib/window'
 import { NoData, WindowPicker } from './controls'
 import { cn, compact, full } from '@/lib/utils'
 
@@ -20,6 +28,15 @@ import { cn, compact, full } from '@/lib/utils'
  * again) to see everyone. The window trims the READINGS, and the figures
  * beside the chart are recomputed over exactly the readings the chart shows —
  * the chart and the numbers are never two different claims.
+ *
+ * THE ALL VIEW IS LANES, NOT ONE PLOT. On one shared axis Instagram's +2,100
+ * sets the height and Twitter/X's +100 is a floor-hugger the office reported
+ * missing — twice. The axis cannot be bent and the line cannot be nudged (a
+ * moved follower count is a figure nobody read), so the composition changes
+ * instead: each platform gets a panel at its own scale, where its curve fills
+ * the height and its SHAPE becomes legible. The true cross-platform
+ * proportion is not lost — the contribution strip above the lanes carries the
+ * real split, and each lane prints its absolute figure as the headline.
  *
  * The reference's green callout reads "higher than 78% of other MPs in your
  * state". Nobody has that number — it would need follower histories for
@@ -105,11 +122,26 @@ function historyOf(
   }
 }
 
-/** How the desk's own growth compares with the accounts it watches. */
+/**
+ * How the desk's own growth compares with the accounts it watches.
+ *
+ * KEYED BY ACCOUNT, BECAUSE THE SENTENCE UNDERNEATH COUNTS ACCOUNTS. This map
+ * was keyed by `h.displayName`, and `demo-roster.ts` writes the PERSON's name
+ * onto every handle they own, so a rival's four accounts collapsed into one
+ * entry and `Math.max` kept only their fastest-growing one. D. K. Aruna's desk
+ * watches 8 accounts and all 8 carry two follower readings, yet the callout
+ * read "ahead of all 3 accounts you watch": three was the number of people.
+ * Keying by the handle id makes the printed count a count of accounts, which
+ * is the word the sentence uses.
+ *
+ * `watched` comes back untouched alongside it so the callout can say how many
+ * accounts were left out for want of a second reading, rather than quietly
+ * shrinking its own denominator to the ones it could measure.
+ */
 function standingAmongWatched(
   ownPct: number | null,
   watched: TrackedHandle[],
-): { ahead: number; of: number } | null {
+): { ahead: number; of: number; watched: number } | null {
   const rivals = new Map<string, number>()
   for (const h of watched) {
     const readings = h.snapshots.filter((s) => s.followers != null)
@@ -117,13 +149,13 @@ function standingAmongWatched(
     const last = readings.at(-1)!.followers!
     const prev = readings.at(-2)!.followers!
     if (prev <= 0) continue
-    const name = h.displayName ?? h.handle
-    rivals.set(name, Math.max(rivals.get(name) ?? -Infinity, ((last - prev) / prev) * 100))
+    rivals.set(h.id, ((last - prev) / prev) * 100)
   }
   if (rivals.size === 0 || ownPct == null) return null
   const ahead = [...rivals.values()].filter((pct) => ownPct > pct).length
-  return { ahead, of: rivals.size }
+  return { ahead, of: rivals.size, watched: watched.length }
 }
+
 
 export function FollowerGrowth({
   growth,
@@ -147,19 +179,17 @@ export function FollowerGrowth({
    * dots — only the yardstick changes.
    */
   const [metric, setMetric] = useState<'followers' | 'percent'>('followers')
+  /** The reading index under the pointer, shared by every lane's crosshair. */
+  const reduced = useReducedMotion()
 
 
-  /* Anchored to the newest READING — this section is about readings, not
-     posts, and a desk read daily should be able to ask for just the week. */
-  const anchor = useMemo(() => {
-    let newest: string | null = null
-    for (const h of ownHandles)
-      for (const s of h.snapshots)
-        if (s.followers != null && s.takenAt && (!newest || s.takenAt > newest)) newest = s.takenAt
-    return newest
-  }, [ownHandles])
+  /* Counted back from now, like every other window on the dashboard. A
+     window that ended at the newest reading kept the chart full but made the
+     picker lie about its own label; a desk that has not been read this week
+     now says so instead. */
+  const anchor = presentAnchor()
   const start = windowStart(anchor, window)
-  const windowDays = window === 'week' ? 7 : 30
+  const windowDays = daysOf(window) ?? 180
 
   const history = useMemo(() => historyOf(ownHandles, start), [ownHandles, start])
 
@@ -229,7 +259,30 @@ export function FollowerGrowth({
   const base = only ? history.series.filter((s) => s.name === only) : history.series
   const shownSeries =
     metric === 'followers'
-      ? base
+      ? /*
+         * FOLLOWERS GAINED, NOT THE RUNNING TOTAL, AND THAT IS WHY THE
+         * REFERENCE FITS FIVE PLATFORMS ON ONE AXIS.
+         *
+         * Plotting the totals put 3,290 and 280,000 on the same scale, where
+         * the axis padding alone is ten times YouTube's whole following: the
+         * largest account sets the height and every other line is pressed
+         * flat against the floor. The chart was drawing the gap between the
+         * accounts, which the reader already knows, instead of the movement,
+         * which is the thing this card is called after.
+         *
+         * The reference plots the gain - its own axis runs 0 to 10K under the
+         * heading "Total New Followers" - and gains are comparable across
+         * accounts of any size. Every line starts at 0 on its first reading
+         * in the window and rises by what it actually won, so all four share
+         * one axis honestly and a platform that moved can be seen to move.
+         * The absolute standing is not lost: it is the "Followers now" figure
+         * beside the chart, where a running total belongs.
+         */
+        base.map((s) => {
+          const first = s.values.find((v): v is number => v != null)
+          if (first == null) return s
+          return { ...s, values: s.values.map((v) => (v == null ? null : v - first)) }
+        })
       : base.map((s) => {
           const first = s.values.find((v): v is number => v != null)
           if (first == null || first <= 0) return { ...s, values: s.values.map(() => null) }
@@ -345,7 +398,7 @@ export function FollowerGrowth({
         >
           {(
             [
-              { id: 'followers' as const, label: 'Followers' },
+              { id: 'followers' as const, label: 'New followers' },
               { id: 'percent' as const, label: 'Growth %' },
             ]
           ).map((mo) => (
@@ -402,36 +455,44 @@ export function FollowerGrowth({
       </div>
 
       <div className="mt-3 grid gap-4 lg:grid-cols-[1.5fr_1fr] lg:items-start">
-        <div className="min-w-0">
+        <div className="relative min-w-0">
           {measurable && shownSeries.length > 0 ? (
-            <>
-              <LineChart
-                labels={history.labels}
-                series={shownSeries}
-                height={230}
-                legend={false}
-                area={metric === 'followers'}
-                formatValue={
-                  metric === 'percent'
-                    ? (n) => {
-                        if (n == null) return 'NA'
-                        // The axis hands over raw tick floats
-                        // (0.31639999999999996); unrounded they overflow the
-                        // left padding and clip to gibberish.
-                        const v = Math.round(n * 100) / 100
-                        return `${v > 0 ? '+' : ''}${v}%`
-                      }
-                    : undefined
-                }
-              />
-              {metric === 'percent' && (
-                <p className="mt-1 text-[10.5px] leading-relaxed text-ink-3">
-                  Each line starts at 0% at its first reading in this window, so a small
-                  account&rsquo;s movement shows beside a big one&rsquo;s. Every dot is a real
-                  reading.
-                </p>
-              )}
-            </>
+            (
+              <>
+                <LineChart
+                  labels={history.labels}
+                  series={shownSeries}
+                  /* Taller when every platform shares the frame: the whole
+                     Twitter/X complaint was a +100 rise crushed to eight
+                     pixels under Instagram's +2,100. The spread is real and
+                     stays real — more vertical room is the one honest lever
+                     that makes the smaller mover legible, and the endpoint
+                     labels state the exact figure either way. */
+                  height={only === null ? 350 : 230}
+                  legend={false}
+                  area={metric === 'followers'}
+                  formatValue={
+                    metric === 'percent'
+                      ? (n) => {
+                          if (n == null) return 'NA'
+                          // The axis hands over raw tick floats
+                          // (0.31639999999999996); unrounded they overflow the
+                          // left padding and clip to gibberish.
+                          const v = Math.round(n * 100) / 100
+                          return `${v > 0 ? '+' : ''}${v}%`
+                        }
+                      : (n) => (n == null ? 'NA' : `${n > 0 ? '+' : ''}${compact(n)}`)
+                  }
+                />
+                {metric === 'percent' && (
+                  <p className="mt-1 text-[10.5px] leading-relaxed text-ink-3">
+                    Each line starts at 0% at its first reading in this window, so a small
+                    account&rsquo;s movement shows beside a big one&rsquo;s. Every dot is a real
+                    reading.
+                  </p>
+                )}
+              </>
+            )
           ) : (
             <div className="rounded-[var(--radius-md)] bg-[var(--surface-2)] p-4">
               <p className="text-sm leading-relaxed text-ink-2">
@@ -466,10 +527,19 @@ export function FollowerGrowth({
               <Sparkles size={15} className="mt-0.5 shrink-0 text-[var(--pos)]" aria-hidden />
               <p className="text-xs leading-relaxed text-ink-2">
                 {standing.ahead === standing.of
-                  ? `Your follower growth is ahead of all ${standing.of} accounts you watch.`
+                  ? `Your follower growth is ahead of all ${standing.of} account${standing.of === 1 ? '' : 's'} you watch.`
                   : standing.ahead === 0
-                    ? `Every one of the ${standing.of} accounts you watch grew faster than you over the same readings.`
+                    ? `Every one of the ${standing.of} account${standing.of === 1 ? '' : 's'} you watch grew faster than you over the same readings.`
                     : `Your follower growth is ahead of ${standing.ahead} of the ${standing.of} accounts you watch.`}
+                {/* The accounts the comparison could not reach. A rate needs
+                    two readings, and a sentence that counts only the accounts
+                    it managed to measure quietly renames the watch list. */}
+                {standing.of < standing.watched &&
+                  ` ${standing.watched - standing.of} further watched ${
+                    standing.watched - standing.of === 1 ? 'account has' : 'accounts have'
+                  } only one follower reading, so ${
+                    standing.watched - standing.of === 1 ? 'it is' : 'they are'
+                  } not in this comparison.`}
               </p>
             </div>
           )}

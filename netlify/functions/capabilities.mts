@@ -98,11 +98,11 @@ export default async function handler(_req: Request, _context: Context): Promise
       unlocks:
         'Stance, sentiment, whether a claim looks fabricated, and what to do about it. Nothing is interpreted without this.',
       on: providers.length > 0,
-      needs: providers.length > 0 ? [] : ['GROQ_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY'],
+      needs: providers.length > 0 ? [] : ['GROQ_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'],
       cost: 'free-key',
       steps: [
         'Groq and Google both give a free key with no card: console.groq.com/keys or aistudio.google.com/apikey.',
-        'Add it to the site environment as GROQ_API_KEY or GEMINI_API_KEY.',
+        'Add it to the site environment as GROQ_API_KEY or OPENAI_API_KEY.',
       ],
       status:
         providers.length > 0

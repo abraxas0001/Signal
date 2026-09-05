@@ -484,12 +484,46 @@ export function clearDeskBrand(): void {
  * desk this table is never consulted, and a desk that installs this app gets an
  * empty slot and a screen asking for its own file.
  *
- * There is no entry for a party mark, in this table or anywhere else, because
- * the repository has no party's mark in it and will not be given one.
+ * A party mark used to be refused here outright ("the repository has no
+ * party's mark in it and will not be given one"). That rule is now narrower,
+ * on the owner's own ask: see DEMO_MARKS below for exactly what changed and
+ * what still holds.
  */
 const DEMO_LEADERS: Record<string, string> = {
   BJP: '/demo-avatars/modi-twitter-x.jpg',
   INC: '/demo-avatars/rahul-twitter-x.jpg',
+}
+
+/**
+ * Party marks the EXAMPLE desk may show, beside the portraits above and under
+ * the same gate.
+ *
+ * This table is a deliberate narrowing of an older absolute — this module once
+ * promised the repository would never hold a party's mark at all. What still
+ * holds: no symbol is drawn from memory (an approximated lotus is a wrong
+ * lotus), and no real desk is ever handed another party's mark — `demoPartyMark`
+ * answers only inside the demo scope, so an installing office still fills its
+ * own slots from its own files. What changed: the demo desk's owner asked for
+ * the reference sheet exactly, lotus included, so the file at /media/bjp-lotus.svg
+ * is Wikimedia Commons' public-domain copy of the symbol the party publishes of
+ * itself (File:Logo of the Bharatiya Janata Party.svg), fetched unaltered and
+ * named on the party's own MP desk — nominative use of a trademarked public
+ * symbol, the same footing as the portraits above.
+ */
+const DEMO_MARKS: Record<string, PartyMark> = {
+  BJP: { url: '/media/bjp-lotus.svg', alt: 'BJP lotus symbol' },
+}
+
+/** A stored image and the alt text it must carry wherever it is shown. */
+export interface PartyMark {
+  url: string
+  alt: string
+}
+
+/** The party's own mark, on the EXAMPLE desk alone. Null on any real desk. */
+export function demoPartyMark(party: string | null): PartyMark | null {
+  if (!isDemoScope()) return null
+  return DEMO_MARKS[brandFor(party).short] ?? null
 }
 
 /** Paths the EXAMPLE desk may point its slots at. Empty on a real desk. */

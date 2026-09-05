@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { BackBar } from './BackBar'
 import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
 import {
@@ -40,11 +41,14 @@ import { fadeUp, listItem, listStagger, spring, haptic } from '@/lib/motion'
 export function ReportView({
   report,
   onReset,
+  backLabel,
   onEditMetric,
   celebrate = true,
 }: {
   report: Report
   onReset: () => void
+  /** What the back control should name as the destination, if the caller knows. */
+  backLabel?: string | null
   onEditMetric?: () => void
   /**
    * Whether finishing this report is a moment worth marking.
@@ -142,7 +146,14 @@ export function ReportView({
   // around interpretation would be mostly holes. DataReport is a different
   // page for a different deliverable, not this one with sections removed.
   if (!analysis) {
-    return <DataReport report={report} onReset={onReset} onEditMetric={onEditMetric} />
+    return (
+      <DataReport
+        report={report}
+        onReset={onReset}
+        onEditMetric={onEditMetric}
+        backLabel={backLabel}
+      />
+    )
   }
 
   return (
@@ -152,6 +163,8 @@ export function ReportView({
       initial="hidden"
       animate="show"
     >
+      <BackBar label={backLabel} onBack={onReset} />
+
       {/* ── Verdict ─────────────────────────────────────────────────────── */}
       <m.div ref={heroRef} variants={fadeUp}>
         {/* The one lifted panel on this screen — everything else stays level. */}

@@ -263,3 +263,26 @@ export function canonicalUrl(raw: string, base?: string): string | null {
     return null
   }
 }
+
+/**
+ * A caption cut to the stored length, saying that it was cut.
+ *
+ * Every adapter stored `text.slice(0, 140)`, so 282 captions on this roster
+ * are exactly 140 characters and end mid-word: one of D. K. Aruna's stops
+ * inside "నియోజకవర్గం", and each screen printed those 140 characters as the
+ * whole of what the office wrote. The words cannot be recovered later, but
+ * that they were cut can be said at the moment the cut is made, which is
+ * here. A reader seeing an ellipsis knows to open the post; a reader seeing a
+ * severed word believes the office wrote it that way.
+ *
+ * A caption that already ends in an ellipsis of its own is left alone, and a
+ * caption shorter than the limit is returned untouched: the mark means "there
+ * is more", so it is only ever added where there genuinely is.
+ */
+export function cutCaption(text: string | null | undefined, limit = 140): string | null {
+  const raw = (text ?? '').trim()
+  if (!raw) return null
+  if (raw.length <= limit) return raw
+  const cut = raw.slice(0, limit).trimEnd()
+  return /(?:…|\.\.\.)$/.test(cut) ? cut : `${cut}…`
+}

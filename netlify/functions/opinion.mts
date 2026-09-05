@@ -104,7 +104,7 @@ export default async function handler(req: Request, _c: Context): Promise<Respon
     if (!parsed) {
       return json({
         error:
-          'The research was gathered but no language model was available to structure it. Set GROQ_API_KEY or GEMINI_API_KEY.',
+          'The research was gathered but no language model was available to structure it. Set GROQ_API_KEY or OPENAI_API_KEY.',
         ms: Date.now() - started,
       })
     }

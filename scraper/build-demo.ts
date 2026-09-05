@@ -231,6 +231,19 @@ function carryForward(next: DemoHandle, prev: DemoHandle | undefined): DemoHandl
     merged['followers'] = prev.followers
     merged['takenAt'] = prev.takenAt
   }
+  /*
+   * The same exception, extended to the timeline, after it bit: a run whose
+   * Facebook read failed wrote its failure note plus an EMPTY post list, and
+   * the merge let that emptiness overwrite twenty-five collected posts. That
+   * is precisely the "recorded as a failure, never as a profile with zero
+   * posts" claim in the header being broken by the merge itself. When the
+   * read failed and brought nothing, the last successful read's posts stay,
+   * and the failure note stays beside them so the desk knows today's attempt
+   * did not refresh them.
+   */
+  if (next.failure && (next.posts?.length ?? 0) === 0 && (prev.posts?.length ?? 0) > 0) {
+    merged['posts'] = prev.posts
+  }
   return merged as unknown as DemoHandle
 }
 

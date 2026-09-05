@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { PersonaBar } from '@/components/PersonaBar'
 import { useReducedMotion } from 'motion/react'
 import * as m from 'motion/react-m'
-import { CalendarDays, GitCompareArrows, UserRound } from 'lucide-react'
+import { CalendarDays, GitCompareArrows, Plus, UserRound } from 'lucide-react'
 import type { Identity } from '@shared/identity'
 import type { Report } from '@shared/types'
-import { readStore, useStore } from '@/lib/store'
+import { isDemoScope, readStore, useStore } from '@/lib/store'
 import { briefingOf, ownPostsOf, whatLandsOf } from '@/lib/briefing'
 import { growthSummary } from '@/lib/growth'
 import { loadPostReports } from '@/lib/post-reports'
+import { presentAnchor, windowLabel as windowRangeLabel, type WindowId } from '@/lib/window'
 import { useMorningScan } from '@/lib/morning-scan'
 import {
   ownedBySubject,
@@ -17,7 +18,7 @@ import {
   reconcileOwnership,
   type Standing,
 } from '@/lib/handles'
-import { Avatar, Button, Shell } from './ui'
+import { Avatar, Button, Card, Shell } from './ui'
 import { fadeUp, listStagger } from '@/lib/motion'
 import { OverallReach } from './briefing/OverallReach'
 import { SentimentOverview } from './briefing/SentimentOverview'
@@ -32,6 +33,7 @@ import { PostHighlights } from './PostHighlights'
 import { AudienceScreen } from './AudienceScreen'
 import { LocalNews } from './LocalNews'
 import { CompareBoard } from './CompareBoard'
+import type { Lens as HighlightLens } from '@/components/PostHighlights'
 
 /**
  * The dashboard, rebuilt to the product owner's reference design.
@@ -81,7 +83,12 @@ export function Briefing({
   onOpenReport,
   onPersonaSwitched,
 }: {
-  onNavigate: (to: Destination, issueId?: string) => void
+  onNavigate: (
+    to: Destination,
+    issueId?: string,
+    lens?: HighlightLens,
+    win?: WindowId,
+  ) => void
   /**
    * A different politician's desk is now open. Everything below reads a
    * different storage namespace, so the host remounts rather than this
@@ -212,19 +219,32 @@ export function Briefing({
    * reports the range the stored posts span instead of offering windows the
    * data cannot be cut into.
    */
-  const windowLabel = useMemo(() => {
-    const dates = postHandles
-      .flatMap((h) => h.snapshots.at(-1)?.posts ?? [])
-      .map((p) => p.publishedAt)
-      .filter((d): d is string => Boolean(d))
-      .sort()
-    if (dates.length === 0) return 'Latest reading'
-    const fmt = (iso: string): string =>
-      new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-    const first = fmt(dates[0]!)
-    const last = fmt(dates.at(-1)!)
-    return first === last ? first : `${first} to ${last}`
-  }, [postHandles])
+  /**
+   * The dashboard's window, and the dates it covers.
+   *
+   * THE PILL USED TO REPORT SOMETHING ELSE. It printed the span of every dated
+   * post the desk holds, which is a real fact but not the one a reader takes
+   * from a date beside a Last 7 days / Last 30 days switch: the office pressed
+   * the switch, watched "25 Jun 2026 to 27 Aug 2026" sit unchanged, and read
+   * the whole control as broken. The window now lives here, the card below
+   * drives it, and the pill names the days that window actually covers.
+   *
+   * The anchor is the newest post the desk holds rather than today's clock,
+   * so a window is measured from the last time these accounts were read. A
+   * desk read on Monday and opened on Friday would otherwise report an empty
+   * week and call it a quiet one.
+   */
+  const [window, setWindow] = useState<WindowId>('week')
+
+  // Counted back from now, not from the newest post: the office reads the
+  // resolved dates against today's calendar, and a label that ends a week ago
+  // reads as a broken control however deliberate the anchor was.
+  const windowAnchor = presentAnchor()
+
+  const windowLabel = useMemo(
+    () => (windowAnchor ? windowRangeLabel(windowAnchor, window) : 'Latest reading'),
+    [windowAnchor, window],
+  )
 
   return (
     <Shell className="stack">
@@ -246,14 +266,96 @@ export function Briefing({
           />
         </m.header>
 
-        {/* ── 1 · overall reach ───────────────────────────────────────── */}
+        {/*
+          ── A DESK THAT FOLLOWS NOTHING SAYS SO, AT THE TOP ──────────────
+
+          Setup asks who the desk is FOR and stops there — it records an
+          identity and adds no tracked accounts. So a freshly built desk
+          landed here with every card in its empty state and no reach card at
+          all, and the only route to fix it was a link reading "Open your
+          accounts" buried inside an empty card about comments. The Accounts
+          screen is deliberately UNLISTED (the owner asked for everything that
+          is not a daily read to live under Settings), which is a reasonable
+          place for it once a desk is running and the wrong place for it when
+          the desk cannot do anything until you have been there.
+
+          So the desk asks, once, in the first thing on the screen, and stops
+          asking the moment an account is marked as its own. Not shown on the
+          example desk, which arrives with its accounts already on it.
+        */}
+        {ownHandles.length === 0 && handles.length > 0 && !isDemoScope() && (
+          <m.section variants={fadeUp} aria-label="Mark this desk's own accounts">
+            <Card tone="accent">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[15px] font-bold tracking-[-0.01em]">
+                    None of your {handles.length} account
+                    {handles.length === 1 ? ' is' : 's are'} marked as this desk&rsquo;s
+                  </p>
+                  <p className="mt-1 max-w-[62ch] text-sm leading-relaxed text-ink-2">
+                    {/* The distinction this card exists for. Every figure on this
+                        page is captioned "yours", so it counts only accounts the
+                        desk owns — an account it merely watches belongs on the
+                        comparison board, not in a total labelled with your name.
+                        Saying "no accounts yet" to a desk that plainly has four
+                        was worse than saying nothing: it was false, and it sent
+                        the reader off to add accounts they had already added. */}
+                    They are being watched, not measured. Open Accounts and mark the ones that
+                    belong to {store.identity?.name ?? 'this desk'} as yours &mdash; every figure
+                    here counts only the desk&rsquo;s own accounts, so a watched account cannot be
+                    totalled under your name.
+                  </p>
+                </div>
+                <Button className="shrink-0" onClick={() => onNavigate('accounts')}>
+                  <Plus size={16} aria-hidden />
+                  Mark mine
+                </Button>
+              </div>
+            </Card>
+          </m.section>
+        )}
+
+        {handles.length === 0 && !isDemoScope() && (
+          <m.section variants={fadeUp} aria-label="Add this desk's accounts">
+            <Card tone="accent">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[15px] font-bold tracking-[-0.01em]">
+                    This desk follows no accounts yet
+                  </p>
+                  <p className="mt-1 max-w-[60ch] text-sm leading-relaxed text-ink-2">
+                    {store.identity?.name
+                      ? `Add ${store.identity.name}'s social accounts and every figure on this page fills in. Nothing here can be measured until then.`
+                      : 'Add the accounts this desk follows and every figure on this page fills in.'}
+                  </p>
+                </div>
+                <Button className="shrink-0" onClick={() => onNavigate('accounts')}>
+                  <Plus size={16} aria-hidden />
+                  Add accounts
+                </Button>
+              </div>
+            </Card>
+          </m.section>
+        )}
+
+        {/* ── SECTION 1 · 1 of 4 · overall reach ──────────────────────── */}
         <m.section variants={fadeUp} aria-label="Overall reach">
-          <OverallReach handles={postHandles} reports={reports} />
+          <OverallReach
+              handles={postHandles}
+              reports={reports}
+              window={window}
+              onWindow={setWindow}
+            />
         </m.section>
 
-        {/* ── 2 · sentiment, and who the comments name ────────────────── */}
+        {/* ── SECTION 1 · 2 of 4 · sentiment, and who the comments name ── */}
         <m.section variants={fadeUp} aria-label="Sentiment and mentions">
-          <div className="grid gap-3 xl:grid-cols-2 xl:items-start">
+          {/* STACKED, NOT SIDE BY SIDE. These shared a row while each held a
+              donut and a short list. Both now carry the reasons read out of
+              the comments and several quotes apiece, and at half the width
+              the chips wrapped to four lines and the quotes clipped. Full
+              width each, one below the other. */}
+          <div className="grid gap-3">
             <SentimentOverview
               handles={postHandles}
               reports={reports}
@@ -270,7 +372,63 @@ export function Briefing({
           </div>
         </m.section>
 
-        {/* ── 3 · how the week reads against the people you track ──────
+        {/* ── SECTION 1 · 3 of 4 · content insights ───────────────────── */}
+        <m.section variants={fadeUp} aria-label="Content insights">
+          <ContentInsights
+            handles={postHandles}
+            reports={reports}
+            onRead={onRead}
+            onOpenReport={onOpenReport}
+            onOpenAccounts={go('accounts')}
+            /* The two tables land on the matching half of the highlights
+               screen rather than both on its default lens. */
+            onOpenAllPosts={(lens, win) => onNavigate('highlights', undefined, lens, win)}
+          />
+        </m.section>
+
+        {/* ── SECTION 1 · 4 of 4 · follower growth ────────────────────── */}
+        <m.section variants={fadeUp} aria-label="Follower growth">
+          <FollowerGrowth
+            growth={growth}
+            ownHandles={postHandles}
+            watchedHandles={watchedHandles}
+            onOpenAccounts={go('accounts')}
+          />
+        </m.section>
+
+        {/* ── SECTION 2 · post highlights, at half height ───────────────
+            The office numbers this desk in three: the figures above are
+            section one, this is section two, and what people are saying is
+            section three. They read in that order, so they sit in that order,
+            each mounting the REAL screen cut off partway down rather than a
+            hand-written precis of it that would have to be kept in step. */}
+        <m.section variants={fadeUp} aria-label="Post highlights">
+          <PeekPanel
+            title="Post highlights"
+            subtitle="Which posts landed, and what they had in common"
+            action="Open post highlights"
+            onOpen={go('highlights')}
+            trim={72}
+          >
+            <PostHighlights onClose={noop} onOpenReport={onOpenReport} onRead={onRead} />
+          </PeekPanel>
+        </m.section>
+
+        {/* ── SECTION 3 · what the comments say, at half height ────────── */}
+        <m.section variants={fadeUp} aria-label="What people are saying">
+          <PeekPanel
+            title="What people are saying"
+            subtitle="The comments under your posts, in their own words"
+            action="Open what people are saying"
+            onOpen={go('audience')}
+            trim={72}
+          >
+            <AudienceScreen onClose={noop} onOpenAccounts={noop} />
+          </PeekPanel>
+        </m.section>
+
+        {/* ── then the rest of the desk ───────────────────────────────── */}
+        {/* ── 5 · how the week reads against the people you track ──────
             The office asked for a comparison on the dashboard. This card was
             written and never mounted, so the desk had a rivals view it could
             not reach from its front page. It renders nothing at all when the
@@ -282,7 +440,7 @@ export function Briefing({
           </m.section>
         )}
 
-        {/* ── the comparison board, at half height ─────────────────────
+        {/* ── 6 · the comparison board, at half height ─────────────────
             The office's words: the week-against-rivals card above is "a
             different thing" — it says who posted what — and they also wanted
             the comparison proper on the front page. This is that board, the
@@ -310,43 +468,12 @@ export function Briefing({
           </m.section>
         )}
 
-        {/* ── 4 · the sections themselves, at half height ──────────────
-            These were "glance" cards: a hand-written precis of each screen
-            that restated two of its figures. A reader could not tell from one
-            what the section actually held, so the office asked for the real
-            section on the page, cut off partway down with the rest veiled and
-            one press to open it in full. Each takes the whole width because
-            these are wide screens; at half width they were unreadable. */}
-        <m.section variants={fadeUp} aria-label="Post highlights">
-          <PeekPanel
-            title="Post highlights"
-            subtitle="Which posts landed, and what they had in common"
-            action="Open post highlights"
-            onOpen={go('highlights')}
-            trim={72}
-          >
-            <PostHighlights onClose={noop} onOpenReport={onOpenReport} onRead={onRead} />
-          </PeekPanel>
-        </m.section>
-
-        <m.section variants={fadeUp} aria-label="What people are saying">
-          <PeekPanel
-            title="What people are saying"
-            subtitle="The comments under your posts, in their own words"
-            action="Open what people are saying"
-            onOpen={go('audience')}
-            trim={72}
-          >
-            <AudienceScreen onClose={noop} onOpenAccounts={noop} />
-          </PeekPanel>
-        </m.section>
-
-        {/* The third door: what to do about the two readings above. */}
+        {/* ── 8 · what to do about the readings above ─────────────────── */}
         <m.section variants={fadeUp} aria-label="What to post next">
           <NextPostGlance handles={postHandles} reports={reports} onExplore={go('nextpost')} />
         </m.section>
 
-        {/* ── 5 · what the papers carried ─────────────────────────────── */}
+        {/* ── 9 · what the papers carried ─────────────────────────────── */}
         <m.section variants={fadeUp} aria-label="Local news mentions">
           <PeekPanel
             title="Local news mentions"
@@ -359,26 +486,6 @@ export function Briefing({
           </PeekPanel>
         </m.section>
 
-        {/* ── 5 · content insights ────────────────────────────────────── */}
-        <m.section variants={fadeUp} aria-label="Content insights">
-          <ContentInsights
-            handles={postHandles}
-            reports={reports}
-            onRead={onRead}
-            onOpenReport={onOpenReport}
-            onOpenAccounts={go('accounts')}
-          />
-        </m.section>
-
-        {/* ── 4 · follower growth ─────────────────────────────────────── */}
-        <m.section variants={fadeUp} aria-label="Follower growth">
-          <FollowerGrowth
-            growth={growth}
-            ownHandles={postHandles}
-            watchedHandles={watchedHandles}
-            onOpenAccounts={go('accounts')}
-          />
-        </m.section>
       </m.div>
     </Shell>
   )

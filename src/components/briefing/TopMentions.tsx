@@ -9,7 +9,7 @@ import { audienceOf, ownNames } from '@/lib/audience'
 import { InfoMark } from './controls'
 import { type TrackedHandle } from '@/lib/handles'
 import type { Report } from '@shared/types'
-import { cn } from '@/lib/utils'
+import { cleanQuote, cn } from '@/lib/utils'
 
 /**
  * "Top Mentions in Comments" — the right card of the reference design's
@@ -44,6 +44,8 @@ interface Quote {
   handle: string
   /** Which side the reading put it on, or null when nothing scored it. */
   side: 'positive' | 'neutral' | 'negative' | null
+  /** What this comment is about, in its own words. Null when it gives no reason. */
+  theme: string | null
   /** The post it sits under, where the reading recorded which one. */
   postUrl: string | null
 }
@@ -53,23 +55,42 @@ interface Row {
   label: string
   sub: string | null
   count: number
-  sample: string
   /**
-   * The permalink of the post the sample comment sits under.
+   * ONE LINK PER PLATFORM THIS MENTION WAS FOUND ON.
    *
-   * The office's reason for wanting it: "the user should redirect to that post
-   * and he can manually verify that, yes, these mentions were there so that we
-   * can verify our platform is extracting the correct data." Null where the
-   * quote came from an account-level reading, which does not record which post
-   * each comment was on; the row then shows no link rather than a wrong one.
+   * The office's reason for wanting them: "the user should redirect to that
+   * post and he can manually verify that, yes, these mentions were there so
+   * that we can verify our platform is extracting the correct data."
+   *
+   * It used to be a single `sampleUrl` — `hits.find(h => h.postUrl)` — so a
+   * name mentioned on Facebook, Instagram AND YouTube offered exactly one
+   * link and the row's own platform marks said three. You could verify a
+   * third of what the row claimed.
+   *
+   * `kind` is the honest part. A comment read from a POST carries its
+   * permalink, so that link lands on the thing being quoted. A comment from
+   * an account-level reading does not record which post it was on — the
+   * survey quotes across a whole account — so the best that can be offered
+   * is the account itself, and the link says "account", never "post". A
+   * verification link that lands somewhere other than it promised is worse
+   * than none.
    */
-  sampleUrl: string | null
+  sources: { platform: string; url: string; kind: 'post' | 'account' }[]
   avatarUrl: string | null
   platforms: string[]
   /** How the comments naming this were read. Unscored ones are in none. */
   positive: number
   negative: number
   neutral: number
+  /**
+   * A couple of the comments behind each side, for the hover.
+   *
+   * "3 positive" is a count, and a count is not a reason. The comments that
+   * earned it are already in hand at this point, so the row keeps a sample of
+   * each side rather than making a reader open the audience screen to find
+   * out what "positive" meant here.
+   */
+  examples: { positive: string[]; negative: string[]; neutral: string[] }
 }
 
 /** Lowercased word tokens of a name, punctuation stripped. */
@@ -139,29 +160,81 @@ function toneStyle(r: { positive: number; negative: number; neutral: number }): 
   return { background: 'var(--warn-soft)', color: 'var(--warn)' }
 }
 
-function rowFrom(key: string, label: string, sub: string | null, hits: Quote[], avatarUrl: string | null): Row {
+/**
+ * One verifiable link per platform, best evidence first.
+ *
+ * A post permalink beats an account address on the same platform, because it
+ * lands on the comment being quoted rather than somewhere it might be. Only
+ * one link per platform: a row mentioned in nine YouTube comments does not
+ * need nine identical-looking links, it needs one that proves YouTube.
+ */
+function sourcesOf(
+  hits: Quote[],
+  profileOf: Map<string, string>,
+): { platform: string; url: string; kind: 'post' | 'account' }[] {
+  /**
+   * ONE LINK PER POST, not one per platform.
+   *
+   * This used to key on the PLATFORM, so a row whose sub-line said "6 posts"
+   * offered a single link — five sixths of what it claimed was unverifiable,
+   * and the office said so: "if there are 6 posts then there should be 6
+   * links". Keyed on the URL, a row offers exactly as many links as it has
+   * distinct posts behind it, and the count beside it is computed from the
+   * same set so the two can never disagree again.
+   */
+  const posts = new Map<string, { platform: string; url: string; kind: 'post' }>()
+  for (const h of hits) {
+    if (!h.postUrl) continue
+    if (!posts.has(h.postUrl)) {
+      posts.set(h.postUrl, { platform: h.platform, url: h.postUrl, kind: 'post' })
+    }
+  }
+
+  /**
+   * NO ACCOUNT LINKS. There used to be a fallback here: a platform whose
+   * comments came only from an account-level reading, which does not record
+   * which post each comment sat under, got a link to the account instead.
+   * The office asked the right question about it: the claim being verified
+   * is "this comment was written under this post", and an account link
+   * proves only that the account exists, which nobody disputed. A link that
+   * cannot verify the claim beside it dresses the row up without evidencing
+   * it, so a comment whose post is unknown now carries no link at all, and
+   * the absence is the honest statement that the reading did not record one.
+   */
+  return [...posts.values()]
+}
+
+function rowFrom(
+  key: string,
+  label: string,
+  sub: string | null,
+  hits: Quote[],
+  avatarUrl: string | null,
+  /** handle -> its profile address, for quotes that know no post. */
+  profileOf: Map<string, string>,
+): Row {
   let positive = 0
   let negative = 0
   let neutral = 0
+  const examples = { positive: [] as string[], negative: [] as string[], neutral: [] as string[] }
   for (const h of hits) {
     if (h.side === 'positive') positive++
     else if (h.side === 'negative') negative++
     else if (h.side === 'neutral') neutral++
+    if (h.side && examples[h.side].length < 2) examples[h.side].push(h.text)
   }
   return {
     key,
     label,
     sub,
     count: hits.length,
-    sample: hits[0]?.text ?? '',
-    // The first hit that actually knows its post, so a row is linkable
-    // whenever ANY of its comments came from a post reading.
-    sampleUrl: hits.find((h) => h.postUrl)?.postUrl ?? null,
+    sources: sourcesOf(hits, profileOf),
     avatarUrl,
     platforms: [...new Set(hits.map((h) => h.platform))],
     positive,
     negative,
     neutral,
+    examples,
   }
 }
 
@@ -196,6 +269,31 @@ export function TopMentions({
    */
   const model = useMemo(() => audienceOf(handles, reports), [handles, reports])
 
+  /**
+   * handle -> profile address, so a quote that knows no post can still be
+   * traced to the account it was left on. Keyed the same way a Quote names
+   * itself: platform + handle.
+   */
+  const profileOf = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const h of handles) {
+      const url = h.profileUrl?.trim()
+      if (!url) continue
+      /**
+       * Keyed under BOTH names the quote might carry.
+       *
+       * `audienceOf` names an account-level quote with `displayName ?? handle`
+       * — so a comment on D. K. Aruna's Facebook page arrives as
+       * "Facebook:D. K. Aruna", while the tracked handle is
+       * "Facebook:DKAruna.TG". Keying on the raw handle alone missed every
+       * one of them, which is why the People lens showed no links at all.
+       */
+      m.set(`${h.platform}:${h.handle}`, url)
+      if (h.displayName) m.set(`${h.platform}:${h.displayName}`, url)
+    }
+    return m
+  }, [handles])
+
   const quotes = useMemo<Quote[]>(
     () =>
       model.quotes.map((q) => ({
@@ -203,6 +301,7 @@ export function TopMentions({
         platform: q.platform,
         handle: q.handle,
         side: q.side,
+        theme: q.theme,
         postUrl: q.postUrl,
       })),
     [model.quotes],
@@ -289,6 +388,7 @@ export function TopMentions({
             p.own ? [p.party, 'you'].filter(Boolean).join(' · ') : p.party,
             matches(quotes, needlesFor(p.name, roster)),
             p.avatarUrl,
+            profileOf,
           ),
         )
         .filter((r) => r.count > 0)
@@ -301,29 +401,66 @@ export function TopMentions({
       for (const h of handles) if (h.label?.trim()) parties.add(h.label.trim())
       if (identity?.party) parties.add(identity.party)
       return [...parties]
-        .map((p) => rowFrom(p, p, null, matches(quotes, [p]), null))
+        .map((p) => rowFrom(p, p, null, matches(quotes, [p]), null, profileOf))
         .filter((r) => r.count > 0)
         .sort((a, b) => b.count - a.count)
         .slice(0, 8)
     }
 
     if (lens === 'incidents') {
-      /* An "incident" this desk can name is one already on its grievance
-         desk. Matched on the place, which is the word a constituent would
-         actually type in a comment — the issue's own title carries the
-         topic, which is our vocabulary rather than theirs. */
-      const seen = new Map<string, IssueCluster>()
+      /*
+       * AN INCIDENT IS WHAT THE COMMENT IS ABOUT, NOT WHERE IT WAS TYPED.
+       *
+       * This lens used to match comments on the PLACE named in a grievance
+       * and then head the row with that grievance's CATEGORY. Those are two
+       * different claims, and the office caught it: a comment reading "Madam
+       * Ji Shadnagar chattanpally railway gate please" was filed under
+       * "Roads", because a Roads grievance happened to exist in Shadnagar.
+       * The comment names a railway gate. Nothing in it is about roads, and
+       * the tooltip went as far as "1 negative comment naming Roads", which
+       * was simply untrue.
+       *
+       * Every comment now carries its own subject, read out of the comment
+       * itself by classify-comments.ts. So the lens groups by that: a row is
+       * a matter people actually raised, counted over the comments that
+       * raised it, with the places those comments name shown beside it as
+       * context rather than as the thing being claimed. A comment that gave
+       * no reason joins no row, because there is nothing to file it under.
+       */
+      const places = new Set<string>()
       for (const i of issues) {
-        // An issue's places are the words a constituent would actually type;
-        // its title carries our topic vocabulary, not theirs.
         for (const place of [i.constituency, ...i.places]) {
           const p = (place ?? '').trim()
-          if (p && !seen.has(p.toLowerCase())) seen.set(p.toLowerCase(), i)
+          if (p) places.add(p.toLowerCase())
         }
       }
-      return [...seen.entries()]
-        .map(([place, i]) =>
-          rowFrom(`${i.id}:${place}`, place, i.category, matches(quotes, [place]), null),
+
+      const byTheme = new Map<string, { hits: Quote[]; places: Set<string> }>()
+      for (const q of quotes) {
+        const theme = (q.theme ?? '').trim().toLowerCase()
+        if (!theme) continue
+        const row = byTheme.get(theme) ?? { hits: [], places: new Set<string>() }
+        row.hits.push(q)
+        // Only a place the desk tracks, and only because this comment says it.
+        const hay = ` ${q.text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ')} `
+        for (const place of places) {
+          if (hay.includes(` ${place} `)) row.places.add(place)
+        }
+        byTheme.set(theme, row)
+      }
+
+      const titleOf = (s: string): string => s.replace(/\p{L}/gu, (c) => c.toUpperCase())
+
+      return [...byTheme.entries()]
+        .map(([theme, row]) =>
+          rowFrom(
+            `theme:${theme}`,
+            titleOf(theme),
+            row.places.size > 0 ? [...row.places].map(titleOf).join(', ') : null,
+            row.hits,
+            null,
+            profileOf,
+          ),
         )
         .filter((r) => r.count > 0)
         .sort((a, b) => b.count - a.count)
@@ -341,22 +478,41 @@ export function TopMentions({
      * A word count is a good answer to "what are people saying"; it was never
      * an answer to "what about".
      */
-    const byTopic = new Map<string, { comments: Quote[]; posts: number }>()
+    const byTopic = new Map<string, { comments: Quote[]; posts: Set<string> }>()
     for (const h of handles) {
       if (!h.own) continue
       for (const post of h.snapshots.at(-1)?.posts ?? []) {
         const topic = reports?.get(post.url)?.analysis?.topics?.primary
         if (!topic) continue
-        const row = byTopic.get(topic) ?? { comments: [], posts: 0 }
-        row.posts += 1
-        for (const c of reports?.get(post.url)?.snapshot.comments ?? []) {
+        const row = byTopic.get(topic) ?? { comments: [], posts: new Set<string>() }
+        /**
+         * Posts that actually CONTRIBUTED a comment, not posts on the topic.
+         *
+         * This counted every post filed under the topic, so a row read
+         * "Agriculture · 6 posts" while carrying no comments and no links —
+         * a count with nothing behind it on a card about comments. The set
+         * below is the same one the links are built from, so the number and
+         * the links cannot drift apart.
+         */
+        /* Cleaned the way `audienceOf` cleans the other three lenses, so
+           every lens on this card counts the same population. Left raw, the
+           Topics lens counted Instagram's age chips and verified badges as
+           comments and the card's own subtitle disagreed with its rows. */
+        const comments = (reports?.get(post.url)?.snapshot.comments ?? [])
+          .map((c) => ({ ...c, text: cleanQuote(c.text ?? '') }))
+          .filter((c) => c.text.length > 0)
+        if (comments.length > 0) row.posts.add(post.url)
+        for (const c of comments) {
           row.comments.push({
             text: c.text,
             platform: h.platform,
             handle: h.displayName ?? h.handle,
-            // The stored comments carry no score. Filing them as neutral
-            // would invent a reading nobody made.
-            side: quotes.find((q) => q.text === c.text)?.side ?? null,
+            /* Each comment's own reading, from classify-comments.ts. It
+               used to be looked up by matching text against the account
+               survey's handful of quotes, which found a side for almost
+               none of them. Null still means not classified, never neutral. */
+            side: c.side ?? null,
+            theme: c.theme ?? null,
             postUrl: post.url,
           })
         }
@@ -368,11 +524,21 @@ export function TopMentions({
         rowFrom(
           topic,
           topic,
-          `${row.posts} ${row.posts === 1 ? 'post' : 'posts'}`,
+          `${row.posts.size} ${row.posts.size === 1 ? 'post' : 'posts'}`,
           row.comments,
           null,
+          profileOf,
         ),
       )
+      /**
+       * A topic with no comments is not a mention.
+       *
+       * The other lenses drop empty rows; this one did not, so topics with a
+       * post count and nothing else sat on a card titled "Top mentions in
+       * comments" — the office's words: "in agriculture, education and all
+       * you are showing n posts but the rest of the data is empty".
+       */
+      .filter((r) => r.count > 0)
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
       .slice(0, 6)
   }, [quotes, handles, identity, issues, reports, topicStop])
@@ -396,6 +562,33 @@ export function TopMentions({
     lens ?? (LENSES.find((l) => lensRows[l.id].length > 0)?.id ?? 'people')
   const rows = lensRows[activeLens]
 
+  /**
+   * WHAT THE NUMBER IN THE SUBTITLE IS A COUNT OF.
+   *
+   * It read "Counted across every one of the N comments this desk holds",
+   * which was three claims and none of them true. The list is two populations
+   * at once: comments this desk stores in full, read off its own posts, and
+   * comments an account survey quoted while counting a far larger set it did
+   * not keep. On this desk that larger set is 280 comments against 173 stored,
+   * so no single number here is "the comments this desk holds", and the word
+   * "every" promised a completeness the list never had.
+   *
+   * `postUrl` is the honest divider: a comment read off a post carries the
+   * post's address, a comment lifted out of a bulk survey has no post to name.
+   * Both are counted, each is named for what it is, and the reader can see at
+   * a glance how much of the card rests on comments the desk can show them.
+   */
+  const stored = quotes.filter((q) => q.postUrl !== null).length
+  const surveyed = quotes.length - stored
+  const countedOver =
+    stored > 0 && surveyed > 0
+      ? `Counted across ${stored} comments stored in full on your posts, and ${surveyed} more quoted by the account readings`
+      : stored > 0
+        ? `Counted across ${stored} comment${stored === 1 ? '' : 's'} stored in full on your posts`
+        : surveyed > 0
+          ? `Counted across ${surveyed} comment${surveyed === 1 ? '' : 's'} the account readings quoted`
+          : 'No comments have been read on your accounts yet'
+
   const empty: Record<Lens, string> = {
     people: 'None of the people you track are named in the comments read so far.',
     party: 'No party is named in the comments read so far.',
@@ -407,11 +600,7 @@ export function TopMentions({
     <Card className="p-4 sm:p-5">
       <div className="min-w-0">
         <h2 className="text-[17px] font-bold tracking-[-0.015em]">Top mentions in comments</h2>
-        <p className="mt-0.5 text-xs text-ink-3">
-          {quotes.length > 0
-            ? `Counted across every one of the ${quotes.length} comments this desk holds`
-            : 'No comments have been read on your accounts yet'}
-        </p>
+        <p className="mt-0.5 text-xs text-ink-3">{countedOver}</p>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
@@ -471,59 +660,91 @@ export function TopMentions({
                   )
                     .filter(([, n]) => n > 0)
                     .map(([label, n, colour]) => (
-                      <span key={label} className="inline-flex items-center gap-1" style={{ color: colour }}>
+                      <span
+                        key={label}
+                        className="inline-flex cursor-help items-center gap-1"
+                        style={{ color: colour }}
+                        /* The comments that earned this count, on the count
+                           itself. A number nobody can check is a number
+                           nobody should have to take on trust. */
+                        title={
+                          r.examples[label].length > 0
+                            ? `${n} ${label} comment${n === 1 ? '' : 's'} naming ${r.label}:\n\n` +
+                              r.examples[label]
+                                .map((q) => `\u201c${q.length > 160 ? `${q.slice(0, 160)}\u2026` : q}\u201d`)
+                                .join('\n\n')
+                            : `${n} comment${n === 1 ? '' : 's'} naming ${r.label} were read as ${label}. The reading counted them without quoting them.`
+                        }
+                      >
                         <span className="size-1.5 rounded-full" style={{ background: colour }} aria-hidden />
                         {n} {label}
                       </span>
                     ))}
-                  {r.positive + r.negative + r.neutral === 0 && (
-                    <span className="inline-flex items-center gap-1 text-ink-3">
-                      Not scored
-                      <InfoMark note="An account reading scores the comments it quotes; the rest are stored whole but carry no side. These comments are counted and quoted here, and their sentiment simply has not been read." />
-                    </span>
-                  )}
+                  {/*
+                      THE COMMENTS THE SIDES DO NOT ACCOUNT FOR, NAMED.
+                      A row read "10 comments · 2 positive · 2 neutral" and
+                      left the reader to notice that four is not ten. The
+                      missing six were real — stored, counted, quoted, simply
+                      never read for a side — but nothing on the row said so,
+                      so the only two readings available were "the count is
+                      wrong" or "six comments were neither positive, neutral
+                      nor negative". Both are worse than the truth.
+                  */}
+                  {(() => {
+                    const scored = r.positive + r.negative + r.neutral
+                    const unread = r.count - scored
+                    if (scored > 0 && unread <= 0) return null
+                    return (
+                      <span className="inline-flex items-center gap-1 text-ink-3">
+                        {scored === 0 ? 'Not scored' : `${unread} not scored`}
+                        <InfoMark note="An account reading scores the comments it quotes; the rest are stored whole but carry no side. These comments are counted and quoted here, and their sentiment simply has not been read." />
+                      </span>
+                    )
+                  })()}
                 </p>
               </div>
-              {/* The reference links each row to the post the mention sat
-                  under. A reading quotes the comment, not the permalink it
-                  came from, so the row names the platform it was read on and
-                  shows the comment itself instead of linking somewhere the
-                  desk cannot actually point. */}
-              {/* The quote sits BESIDE the badges rather than over them:
-                  stacked and right-aligned, the badge row rode up onto the
-                  end of the quote and read as part of the sentence. */}
-              <div className="hidden min-w-0 max-w-[46%] items-center gap-2.5 sm:flex">
-                {r.sample && (
-                  <p className="line-clamp-1 min-w-0 text-right text-xs text-ink-3">
-                    &ldquo;{r.sample}&rdquo;
-                  </p>
-                )}
-                <span className="flex shrink-0 -space-x-1.5">
-                  {r.platforms.slice(0, 4).map((p) => (
-                    <PlatformBadge
-                      key={p}
-                      platform={p}
-                      size={18}
-                      className="ring-2 ring-[var(--surface)]"
-                    />
-                  ))}
-                </span>
-                {/* The office checks the desk's work against the platform
-                    itself. Only shown where the reading recorded which post
-                    the comment sat under. */}
-                {r.sampleUrl && (
+              {/*
+                The quote, then one link per platform, STACKED.
+
+                The links used to run along one line beside a separate cluster
+                of platform badges — so a mention found on three platforms
+                showed three logos that did nothing and one link that did, and
+                past two links the row ran out of width and truncated.
+
+                The badge cluster is gone: every link now carries its own
+                platform mark, so drawing the same logos twice said the same
+                thing twice and only one set of them was clickable. One link
+                per line, each naming its platform and what it opens.
+              */}
+              {/*
+                NO SAMPLE QUOTE HERE ANY MORE. One comment was printed beside
+                the row to show what the mentions sounded like; the tone counts
+                to the left now carry their own comments on hover, per side,
+                which is the same evidence organised better. Printing one of
+                them again out here said it twice and spent the row's width on
+                the repeat.
+
+                The links WRAP rather than stacking. One per line was fine at
+                two or three; a row with seventeen comments behind it turned
+                into a column of eleven and drove the card past five hundred
+                pixels of height for a single entity.
+              */}
+              <div className="hidden min-w-0 max-w-[46%] flex-wrap items-center justify-end gap-x-2.5 gap-y-1 sm:flex">
+                {r.sources.map((src) => (
                   <a
-                    href={r.sampleUrl}
+                    key={`${src.platform}:${src.url}`}
+                    href={src.url}
                     target="_blank"
                     rel="noreferrer noopener"
                     onClick={(e) => e.stopPropagation()}
-                    title="Open the post this comment is under"
+                    title={`Open the ${src.platform} post this comment is under`}
                     className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-semibold text-[var(--accent)]"
                   >
-                    View post
+                    <PlatformBadge platform={src.platform} size={13} />
+                    post
                     <ExternalLink size={11} aria-hidden />
                   </a>
-                )}
+                ))}
               </div>
             </li>
           ))}

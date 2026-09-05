@@ -126,18 +126,27 @@ const CANDIDATES: Candidate[] = [
     }),
   },
   {
-    env: 'GEMINI_API_KEY',
+    /* OpenAI replaced Gemini in this slot at the owner's request: the desk's
+       Gemini key had gone inactive and every bulk run was limping on Groq's
+       free tier alone. Gemini itself still has one job in this product —
+       Google-Search GROUNDING (grounded.ts and friends), which is a
+       Gemini-only capability this OpenAI-compatible slot cannot cover; those
+       call sites keep reading GEMINI_API_KEY and simply stay parked until a
+       valid key returns. */
+    env: 'OPENAI_API_KEY',
     build: (apiKey) => ({
       kind: 'openai-compat',
-      label: 'Gemini',
-      model: process.env['LLM_MODEL'] ?? 'gemini-2.5-flash',
+      label: 'OpenAI',
+      // Small tier by default: the analysis is one schema-enforced JSON call
+      // per post and the Telugu handling that matters here is well inside the
+      // mini model. LLM_MODEL overrides, as it does for every candidate.
+      model: process.env['LLM_MODEL'] ?? 'gpt-5-mini',
       apiKey,
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      baseUrl: 'https://api.openai.com/v1',
       maxTokens: 8192,
-      // Google states free-tier inputs and outputs may be used to improve its
-      // models. Paid keys are excluded from that, but we cannot tell which kind
-      // of key this is, so the honest default is false.
-      privateByDefault: false,
+      // OpenAI's API terms: business data sent via the API is not used to
+      // train models by default.
+      privateByDefault: true,
     }),
   },
   {

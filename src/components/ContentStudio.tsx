@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useBackToDismiss } from '@/lib/nav-history'
 import type { ReactNode } from 'react'
 import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
@@ -475,6 +476,10 @@ export function ContentStudio({
   const [copied, setCopied] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showPosts, setShowPosts] = useState(false)
+  /* System back dismisses the posts layer over the studio, the way it already does for the identical
+     layer on the grievance record. Without this the reader's back press left
+     the whole screen instead of closing what they had opened. */
+  useBackToDismiss(showPosts, useCallback(() => setShowPosts(false), []))
   const [posts, setPosts] = useState<SavedPoster[]>([])
   const [render, setRender] = useState<PosterRender | null>(null)
   /** Bumped when an occasion date is entered, so the strip re-reads storage. */

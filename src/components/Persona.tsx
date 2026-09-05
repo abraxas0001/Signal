@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
+import { useBackToDismiss } from '@/lib/nav-history'
+import type { Topic } from '@shared/taxonomy'
 import * as m from 'motion/react-m'
 import { useReducedMotion } from 'motion/react'
 import {
@@ -112,6 +114,16 @@ export interface PersonaMention {
   language: string | null
   excerpt: string
   place: string | null
+  /**
+   * The subject the reading filed this story under, where one was recorded.
+   *
+   * The persona scan does not classify a story into a topic, so a scanned
+   * mention carries null here and simply does not answer the topic filter.
+   * Stories that reach this screen from the grievance desk DO carry one, from
+   * the same taxonomy the rest of the product uses, so the filter is real
+   * wherever the desk actually knows the answer and absent where it does not.
+   */
+  topic?: Topic | null
   stance: PersonaStance
   sentiment: Sentiment | null
   fake: FakeAssessment | null
@@ -473,6 +485,10 @@ export function Persona({ onClose }: { onClose: () => void }) {
   const [aliases, setAliases] = useState('')
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null)
   const [selectedMention, setSelectedMention] = useState<string | null>(null)
+  /* System back dismisses the mention record over its list, the way it already does for the identical
+     layer on the grievance record. Without this the reader's back press left
+     the whole screen instead of closing what they had opened. */
+  useBackToDismiss(selectedMention !== null, useCallback(() => setSelectedMention(null), []))
   const [progress, setProgress] = useState<Progress | null>(null)
   const [report, setReport] = useState<CheckReport | null>(null)
   const [error, setError] = useState<string | null>(null)

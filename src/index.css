@@ -165,6 +165,9 @@
      soft background — chip text states severity and priority, so it has to be
      readable, not merely tinted. Dark mode already passed and is unchanged. */
   --pos: #067647;
+  /* Mood midpoint for the platform ledger's split bar. Validated for CVD
+     against the pos/neg pair; never a text token, which fails on marks. */
+  --mood-mid: #98a2b8;
   --pos-soft: #e4f6ec;
   --warn: #b45309;
   --warn-soft: #fef1e0;
@@ -297,6 +300,7 @@
     --accent-2-soft: #241b44;
 
     --pos: #34d399;
+  --mood-mid: #8792a8;
     --pos-soft: #0c2a21;
     --warn: #fbbf24;
     --warn-soft: #2c2310;
@@ -365,6 +369,7 @@
   --accent-2: #a78bfa;
   --accent-2-soft: #241b44;
   --pos: #34d399;
+  --mood-mid: #8792a8;
   --pos-soft: #0c2a21;
   --warn: #fbbf24;
   --warn-soft: #2c2310;

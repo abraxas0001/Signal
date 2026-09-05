@@ -77,12 +77,18 @@ export function NoData({ reason, className }: { reason: string; className?: stri
  * need is to know the number is missing rather than nought, and two words
  * carry that.
  */
-export function noViewsReason(platform: string): string {
-  return `Views not published by ${platform}.`
+/**
+ * "Not published by Facebook" was a claim about the PLATFORM hung on a fact
+ * about one post — and false as stated: Facebook published a view count on one
+ * of this desk's posts and Instagram on eleven. "Here" claims exactly what was
+ * observed: this post (or this window's posts), nothing wider.
+ */
+export function noViewsReason(_platform: string): string {
+  return 'Views not published here.'
 }
 
-export function noReactionsReason(platform: string): string {
-  return `Reactions not published by ${platform}.`
+export function noReactionsReason(_platform: string): string {
+  return 'Reactions not published here.'
 }
 
 /**

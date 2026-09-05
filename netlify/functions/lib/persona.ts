@@ -495,7 +495,7 @@ async function ask(
     // is named and skipped rather than left to fail as a URL parse against an
     // undefined base.
     if (!provider.baseUrl) {
-      lastError = `${provider.label} is configured, but the persona tracker only calls OpenAI-compatible providers. Set GROQ_API_KEY or GEMINI_API_KEY as well.`
+      lastError = `${provider.label} is configured, but the persona tracker only calls OpenAI-compatible providers. Set GROQ_API_KEY or OPENAI_API_KEY as well.`
       continue
     }
     try {

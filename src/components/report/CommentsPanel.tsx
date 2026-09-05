@@ -3,6 +3,7 @@ import { MessageSquare } from 'lucide-react'
 import type { Report } from '@shared/types'
 import { Card, Chip, SectionTitle, type ChipTone } from '../ui'
 import { fadeUp } from '@/lib/motion'
+import { cleanQuote } from '@/lib/utils'
 
 /**
  * What the audience made of it.
@@ -29,7 +30,20 @@ const NARRATIVE_TONE: Record<string, ChipTone> = {
 
 export function CommentsPanel({ report }: { report: Report }) {
   const { snapshot, analysis } = report
-  const comments = snapshot.comments ?? []
+  /*
+   * Comments, not stored rows.
+   *
+   * The scraper reads text nodes, so Instagram's per-comment age chips ("2 d",
+   * "19 h") and its verified badges ("m_k_krishna_bjpVerified") arrive stored
+   * alongside the comments. `cleanQuote` reduces a row that is nothing but
+   * that furniture to an empty string, which is how the rest of the desk drops
+   * them. Counting them here made this panel claim ten comments on reel
+   * DaApzwuOb-p, where Instagram published seven and seven is what it holds,
+   * and a badge row could be quoted back to the office as somebody's words.
+   */
+  const comments = (snapshot.comments ?? [])
+    .map((c) => ({ ...c, text: cleanQuote(c.text ?? '') }))
+    .filter((c) => c.text.length > 0)
   if (!comments.length) return null
 
   const total = snapshot.engagement.comments.value
@@ -41,10 +55,33 @@ export function CommentsPanel({ report }: { report: Report }) {
   return (
     <m.section variants={fadeUp} className="defer-paint">
       <SectionTitle
+        /*
+         * FOUR THINGS CAN BE TRUE, AND ONLY ONE OF THEM IS "all".
+         *
+         * This guarded the direction `total > read` alone and let everything
+         * else fall through to the word "all", so wherever the desk holds
+         * MORE rows than the platform published it asserted completeness
+         * against the larger of two numbers that disagree. On the demo desk
+         * that is five of D. K. Aruna's own posts, the sharpest being
+         * x.com/Aruna_DK/status/2093993831758708747: four comments stored,
+         * a published reply count of nought, and a hint reading "Read from
+         * all 4 comments on this post". A reply the platform counts in a
+         * thread rather than on the post, a comment hidden since the read and
+         * a figure the platform rounds all land on that side. Saying both
+         * numbers is the only honest answer.
+         *
+         * A post the platform published no count for at all is a fourth case
+         * and not a match: unknown is not agreement, so it does not get to
+         * borrow the word "all" either.
+         */
         hint={
-          total != null && total > read
-            ? `${read} of ${total.toLocaleString('en-IN')} comments read.`
-            : `Read from all ${read} comment${read === 1 ? '' : 's'} on this post.`
+          total == null
+            ? `Read from the ${read} comment${read === 1 ? '' : 's'} stored on this post. ${snapshot.platform} publishes no comment count to check that against.`
+            : total > read
+              ? `${read} of ${total.toLocaleString('en-IN')} comments read.`
+              : read > total
+                ? `${read} comment${read === 1 ? '' : 's'} stored here and all of ${read === 1 ? 'it' : 'them'} read. ${snapshot.platform} publishes a comment count of ${total.toLocaleString('en-IN')}, fewer than the desk holds.`
+                : `Read from all ${read} comment${read === 1 ? '' : 's'} on this post.`
         }
       >
         What people made of it

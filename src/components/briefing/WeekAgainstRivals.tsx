@@ -1,10 +1,12 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ScanEye, Swords } from 'lucide-react'
 import { Avatar, Button, Card } from '../ui'
 import { CardHead, HBarBoard } from '@/components/kit'
 import type { TrackedHandle } from '@/lib/handles'
+import type { Report } from '@shared/types'
 import type { LandsReading, LandsFinding } from '@/lib/briefing'
 import { FORMAT_IMAGE } from '@/lib/briefing'
+import { loadPostReports } from '@/lib/post-reports'
 import { weekOf } from '@/lib/week'
 import { compact } from '@/lib/utils'
 
@@ -34,15 +36,50 @@ function adviceOf(lands: LandsReading): string | null {
 export function WeekAgainstRivals({
   handles,
   lands,
+  reports,
   onExplore,
 }: {
-  /** Every tracked handle — the office's own AND the watched rivals. */
+  /** Every tracked handle: the office's own AND the watched rivals. */
   handles: TrackedHandle[]
   lands: LandsReading
+  /**
+   * The stored full readings, which carry the publication dates the listing
+   * scrape did not. See `weekOf`: without them this card counted only the
+   * Twitter/X half of everybody's week and named the wrong leader on the
+   * Rahul and Modi desks.
+   */
+  reports?: Map<string, Report> | null
   /** Open the full analysis page. */
   onExplore: () => void
 }) {
-  const week = useMemo(() => weekOf(handles), [handles])
+  /**
+   * The reports map from the dashboard when it hands one over, and otherwise
+   * fetched here.
+   *
+   * Not a second copy: `loadPostReports` caches the file at module level, so
+   * this resolves off the same map the dashboard already loaded. The card
+   * cannot simply do without it, because the verdict computed from the listing
+   * dates alone is not a cautious verdict, it is a different one.
+   */
+  const [loaded, setLoaded] = useState<Map<string, Report> | null>(null)
+  useEffect(() => {
+    if (reports !== undefined) return
+    let alive = true
+    loadPostReports().then(
+      (map) => {
+        if (alive) setLoaded(map)
+      },
+      () => {
+        if (alive) setLoaded(new Map())
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [reports])
+  const dated = reports === undefined ? loaded : reports
+
+  const week = useMemo(() => weekOf(handles, dated), [handles, dated])
   if (!week) return null
 
   const leader = week.rows[0]!
@@ -89,6 +126,19 @@ export function WeekAgainstRivals({
             {week.rows.filter((r) => r.reactions == null).length} of these accounts are not on the
             board: the platforms they posted on published no like, comment or share figure this
             week, and a bar of zero would say they were ignored rather than unmeasured.
+          </p>
+        )}
+        {/* WHAT THIS WEEK COULD NOT SEE, ON THE CARD.
+            A post with no publication date anywhere sits in no week, so it is
+            in nobody's total here. That used to be silent, and silence on a
+            board that names a winner reads as completeness: on this desk it
+            hid most of Facebook, where the collector reads no date at all. */}
+        {week.undated > 0 && (
+          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">
+            {week.undated.toLocaleString('en-IN')} stored{' '}
+            {week.undated === 1 ? 'post carries' : 'posts carry'} no publication date, in the
+            listing or in its full reading, so {week.undated === 1 ? 'it sits' : 'they sit'} in no
+            week and {week.undated === 1 ? 'is' : 'are'} counted for nobody above.
           </p>
         )}
       </div>

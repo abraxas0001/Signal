@@ -296,7 +296,7 @@ interface TipState {
   node: ReactNode
 }
 
-function useTip() {
+export function useTip() {
   const [tip, setTip] = useState<TipState | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const show = useCallback((clientX: number, clientY: number, node: ReactNode) => {
@@ -320,7 +320,7 @@ function useTip() {
   return { ref, tip, show, hide, overlay }
 }
 
-function TipRow({ color, label, value }: { color?: string; label: string; value: string }) {
+export function TipRow({ color, label, value }: { color?: string; label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="flex items-center gap-1.5 text-ink-2">
@@ -358,7 +358,7 @@ export function Legend({ items, className }: { items: { label: string; color: st
  * pixel: type is crisp at 11px on every screen, and the marks reflow instead
  * of shrinking. Falls back to the given default before first measure.
  */
-function useMeasuredWidth<T extends HTMLElement>(fallback: number) {
+export function useMeasuredWidth<T extends HTMLElement>(fallback: number) {
   const ref = useRef<T>(null)
   const [width, setWidth] = useState(fallback)
   useEffect(() => {
@@ -383,20 +383,80 @@ export interface LineSeries {
   values: (number | null)[]
 }
 
-/** Catmull-Rom → cubic bezier, for the smooth lines every reference uses. */
-function smoothPath(pts: { x: number; y: number }[]): string {
-  if (pts.length === 0) return ''
-  if (pts.length === 1) return `M${pts[0]!.x},${pts[0]!.y}`
+/**
+ * MONOTONE CUBIC, NOT CATMULL-ROM.
+ *
+ * The office asked for curves back, and they are right that a chart of straight
+ * segments reads as unfinished. What they must not get back is the curve that
+ * was there before: a plain Catmull-Rom through this desk's three follower
+ * readings drew the SAME sigmoid for every account, so Instagram (+2,100) and
+ * Twitter/X (+100) were one shape at two heights, and the office said so.
+ *
+ * The reason is overshoot. Catmull-Rom sets each tangent from the neighbours
+ * alone, so between two nearly equal readings it still bulges — inventing a
+ * dip or a climb the desk never measured, which on a follower count is a
+ * number about a real person that nobody read.
+ *
+ * Fritsch-Carlson gives smooth curves that CANNOT do that. Tangents are
+ * clamped to the slopes on either side, so the line is monotone wherever the
+ * data is monotone and never leaves the interval between two readings. Flat
+ * stays flat, a rise stays a rise, and the curve still passes exactly through
+ * every point the desk actually holds.
+ */
+export function smoothPath(pts: { x: number; y: number }[]): string {
+  const n = pts.length
+  if (n === 0) return ''
+  if (n === 1) return `M${pts[0]!.x},${pts[0]!.y}`
+  if (n === 2) return `M${pts[0]!.x},${pts[0]!.y} L${pts[1]!.x},${pts[1]!.y}`
+
+  // Secant slopes between consecutive readings.
+  const dx: number[] = []
+  const slope: number[] = []
+  for (let i = 0; i < n - 1; i++) {
+    const h = pts[i + 1]!.x - pts[i]!.x
+    dx.push(h)
+    slope.push(h === 0 ? 0 : (pts[i + 1]!.y - pts[i]!.y) / h)
+  }
+
+  // Tangents: the average of the neighbouring secants, then clamped.
+  const m: number[] = new Array(n).fill(0)
+  m[0] = slope[0] ?? 0
+  m[n - 1] = slope[n - 2] ?? 0
+  for (let i = 1; i < n - 1; i++) {
+    const s0 = slope[i - 1]!
+    const s1 = slope[i]!
+    // A local extremum or a flat run: tangent zero, so the curve cannot bulge
+    // past the readings on either side of it.
+    m[i] = s0 * s1 <= 0 ? 0 : (s0 + s1) / 2
+  }
+  for (let i = 0; i < n - 1; i++) {
+    const s = slope[i]!
+    if (s === 0) {
+      m[i] = 0
+      m[i + 1] = 0
+      continue
+    }
+    // Fritsch-Carlson: keep the tangent vector inside a circle of radius 3,
+    // which is exactly the condition that forbids overshoot.
+    const a = m[i]! / s
+    const b = m[i + 1]! / s
+    const h = Math.hypot(a, b)
+    if (h > 3) {
+      const k = 3 / h
+      m[i] = k * a * s
+      m[i + 1] = k * b * s
+    }
+  }
+
   let d = `M${pts[0]!.x},${pts[0]!.y}`
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i - 1] ?? pts[i]!
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i]!
     const p1 = pts[i]!
     const p2 = pts[i + 1]!
-    const p3 = pts[i + 2] ?? p2
-    const c1x = p1.x + (p2.x - p0.x) / 6
-    const c1y = p1.y + (p2.y - p0.y) / 6
-    const c2x = p2.x - (p3.x - p1.x) / 6
-    const c2y = p2.y - (p3.y - p1.y) / 6
+    const c1x = p1.x + h / 3
+    const c1y = p1.y + (m[i]! * h) / 3
+    const c2x = p2.x - h / 3
+    const c2y = p2.y - (m[i + 1]! * h) / 3
     d += ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${p2.x},${p2.y}`
   }
   return d
@@ -417,6 +477,9 @@ export function LineChart({
   tickCount = 4,
   markers = 'solid',
   domain,
+  pointDetail,
+  onPointClick,
+  endLabels = true,
   className,
 }: {
   labels: string[]
@@ -424,6 +487,13 @@ export function LineChart({
   height?: number
   area?: boolean
   formatValue?: (n: number | null | undefined) => string
+  /**
+   * The value printed at each line's end. On by default because it is what
+   * makes a small mover legible beside a large one (+100 under +2.1K). OFF
+   * where the values are shares: a percent stamped on the line restates what
+   * the hover already gives, and the office asked for those gone.
+   */
+  endLabels?: boolean
   /** Gridline intervals; the axis draws one more label than this. */
   tickCount?: number
   /** Hollow rings read lighter on a chart that is mostly line. */
@@ -432,6 +502,17 @@ export function LineChart({
   domain?: [number, number]
   /** Off when the host draws its own legend — e.g. a clickable one. */
   legend?: boolean
+  /**
+   * Extra tooltip content for one point: what the chart cannot say by itself.
+   *
+   * A share of 40% positive tells a reader the shape of the week and nothing
+   * about what happened in it. The host knows which post sits under each
+   * point and how it was read, so it supplies that here rather than this
+   * chart guessing at a caption.
+   */
+  pointDetail?: (index: number) => ReactNode
+  /** Opens the point in full. The chart shows a pointer cursor when set. */
+  onPointClick?: (index: number) => void
   className?: string
 }) {
   const reduced = useReducedMotion()
@@ -482,6 +563,22 @@ export function LineChart({
     return Array.from({ length: n + 1 }, (_, i) => minV + (span / n) * i)
   }, [minV, span, tickCount])
 
+  /**
+   * The axis label, at whatever precision the axis actually needs.
+   *
+   * `compact` is right for a scale that spans orders of magnitude and wrong
+   * for one that spans a hundred: an account moving 85,400 to 85,500 drew an
+   * axis reading "85.5K, 85.5K, 85.4K", two ticks with the same label at
+   * different heights. Where the formatter cannot separate the ticks, the
+   * axis falls back to grouped digits, which always can.
+   */
+  const tickLabel = useMemo(() => {
+    const shown = ticks.map((v) => formatValue(v))
+    if (new Set(shown).size === shown.length) return formatValue
+    return (v: number | null | undefined): string =>
+      v == null || !Number.isFinite(v) ? 'NA' : Math.round(v).toLocaleString('en-IN')
+  }, [ticks, formatValue])
+
   const pointsFor = (s: LineSeries) =>
     s.values.map((v, i) => (v == null ? null : { x: x(i), y: y(v), v, i })).filter((p): p is { x: number; y: number; v: number; i: number } => p != null)
 
@@ -494,11 +591,15 @@ export function LineChart({
     show(
       e.clientX,
       e.clientY,
-      <div className="space-y-1">
+      <div className="max-w-[280px] space-y-1">
         <p className="font-semibold text-ink">{labels[ci]}</p>
         {series.map((s) => (
           <TipRow key={s.name} color={s.color} label={s.name} value={formatValue(s.values[ci])} />
         ))}
+        {pointDetail?.(ci)}
+        {onPointClick && (
+          <p className="pt-1 text-[10.5px] text-ink-3">Click the point for the full reading</p>
+        )}
       </div>,
     )
   }
@@ -520,7 +621,7 @@ export function LineChart({
           <g key={i}>
             <line className="chart-grid" x1={PAD.l} x2={W - PAD.r} y1={y(t)} y2={y(t)} />
             <text className="chart-axis-label" x={PAD.l - 8} y={y(t) + 3.5} textAnchor="end">
-              {formatValue(t)}
+              {tickLabel(t)}
             </text>
           </g>
         ))}
@@ -540,30 +641,72 @@ export function LineChart({
           <line x1={x(hoverI)} x2={x(hoverI)} y1={PAD.t} y2={PAD.t + innerH} stroke="var(--border-strong)" strokeWidth="1" strokeDasharray="3 3" />
         )}
 
-        {series.map((s, si) => {
+        {(() => {
+          /**
+           * A SERIES HIDDEN UNDER AN IDENTICAL ONE IS A SERIES MISSING.
+           *
+           * Facebook and YouTube both gained nothing in this window, so both
+           * resolved to the same flat path and one was painted exactly over
+           * the other — four accounts in the legend, three lines on the chart,
+           * and the office reported an account missing from the graph.
+           *
+           * The fix must not move the line: a nudged series would be a
+           * follower count nobody read. So a duplicate keeps its exact path
+           * and is drawn dashed, which shows the one beneath it through the
+           * gaps. First occurrence stays solid, so an ordinary chart where no
+           * two series coincide is untouched.
+           */
+          const drawn = new Map<string, number>()
+          return series.map((s, si) => {
           const pts = pointsFor(s)
           if (pts.length === 0) return null
           const d = smoothPath(pts)
+          const twin = drawn.get(d) ?? 0
+          drawn.set(d, twin + 1)
           const areaD = `${d} L${pts[pts.length - 1]!.x},${PAD.t + innerH} L${pts[0]!.x},${PAD.t + innerH} Z`
           return (
             <g key={s.name}>
               {area && si === 0 && <path d={areaD} fill={`url(#la-${uid}-${si})`} />}
-              <m.path
-                d={d}
-                fill="none"
-                stroke={s.color}
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                initial={reduced ? false : { pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: si * 0.15 }}
-              />
+              {twin > 0 ? (
+                /* A PLAIN PATH, NOT AN ANIMATED ONE.
+                   The draw-on animation works by animating pathLength, which
+                   motion implements by writing stroke-dasharray itself — so a
+                   dash set here was overwritten and all four series came back
+                   reading "1 1". A coinciding series gives up the animation to
+                   keep the dash that makes it visible; it is the line
+                   underneath that the reader is missing. */
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth="3"
+                  strokeLinecap="butt"
+                  strokeLinejoin="round"
+                  strokeDasharray={`${5 + twin * 3} ${5 + twin * 3}`}
+                />
+              ) : (
+                <m.path
+                  d={d}
+                  fill="none"
+                  stroke={s.color}
+                  /* 3px, not 2.5: at 2.5 a single series on a pale area fill read
+                     as a hairline on a laptop screen and the office said so. */
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  initial={reduced ? false : { pathLength: 0 }}
+                  animate={{ pathLength: 1 }}
+                  transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: si * 0.15 }}
+                />
+              )}
               {pts.map((p) => (
                 <circle
                   key={p.i}
                   cx={p.x}
                   cy={p.y}
-                  r={hoverI === p.i ? 5 : markers === 'hollow' ? 4 : 3}
+                  /* 8px across at rest: a 6px dot on a 3px line is barely a
+                     mark, and a reader has to hit it to get the tooltip. */
+                  r={hoverI === p.i ? 6 : markers === 'hollow' ? 4.5 : 4}
                   fill={markers === 'hollow' ? 'var(--surface)' : s.color}
                   stroke={markers === 'hollow' ? s.color : 'var(--surface)'}
                   strokeWidth="2"
@@ -572,7 +715,67 @@ export function LineChart({
               ))}
             </g>
           )
-        })}
+          })
+        })()}
+
+        {/* THE END OF EACH LINE, IN WORDS.
+            A shared axis is honest and, on this desk, nearly unreadable:
+            Instagram gained 2,100 and Twitter/X gained 100, so X rises about
+            eight pixels against Instagram's hundred and seventy and the office
+            reported it missing from the chart twice. The line cannot be moved
+            — a nudged follower count is a figure nobody read — so the figure
+            is printed at the end of it instead. A line that barely rises still
+            says +100.
+            Labels are placed, not the data: where two ends coincide the second
+            label steps down far enough to clear the first, which is why
+            Facebook and YouTube at the same zero are both legible. */}
+        {endLabels &&
+          series.length <= 5 &&
+          (() => {
+            const ends = series
+              .map((s) => {
+                const pts = pointsFor(s)
+                const last = pts[pts.length - 1]
+                return last ? { s, last } : null
+              })
+              .filter((e): e is { s: LineSeries; last: { x: number; y: number; v: number; i: number } } => e != null)
+              .sort((a, b) => a.last.y - b.last.y)
+            /* Two passes, because one is not enough. A forward floor pass
+               alone let the bottom cluster all hit the clamp and collapse
+               onto one line — three labels at the same y, which is the
+               overlap this exists to prevent. Forward pass spaces them
+               going down; the backward pass lifts any run that fell past
+               the date band back up, preserving order and the 12px gaps. */
+            const ys = ends.map(({ last }) => last.y)
+            for (let i = 1; i < ys.length; i++) {
+              ys[i] = Math.max(ys[i]!, ys[i - 1]! + 14)
+            }
+            let ceiling = PAD.t + innerH - 4
+            for (let i = ys.length - 1; i >= 0; i--) {
+              ys[i] = Math.min(ys[i]!, ceiling)
+              ceiling = ys[i]! - 14
+            }
+            return ends.map(({ s, last }, ei) => {
+              const yy = ys[ei]!
+              return (
+                <text
+                  key={`end-${s.name}`}
+                  x={Math.min(last.x + 7, W - 4)}
+                  y={yy + 3.5}
+                  textAnchor="end"
+                  className="tnum"
+                  fontSize="10.5"
+                  fontWeight="700"
+                  fill={s.color}
+                  stroke="var(--surface)"
+                  strokeWidth="3"
+                  paintOrder="stroke"
+                >
+                  {formatValue(last.v)}
+                </text>
+              )
+            })
+          })()}
 
         {/* Hover capture layer — bigger than any mark. */}
         <rect
@@ -581,11 +784,13 @@ export function LineChart({
           width={innerW}
           height={innerH}
           fill="transparent"
+          className={onPointClick ? 'cursor-pointer' : undefined}
           onMouseMove={onMove}
           onMouseLeave={() => {
             setHoverI(null)
             hide()
           }}
+          onClick={onPointClick && hoverI != null ? () => onPointClick(hoverI) : undefined}
         />
       </svg>
       </div>

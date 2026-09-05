@@ -1,6 +1,8 @@
+import type { Report } from '@shared/types'
 import type { Platform } from '@shared/taxonomy'
 import type { Identity } from '@shared/identity'
 import { parseHandleUrl } from '@shared/handle-url'
+import { figureOf, interactionsOf } from '@/lib/figures'
 import { scopedKey } from '@/lib/store'
 import { deskKey } from '@/lib/personas'
 
@@ -295,7 +297,25 @@ export interface HandleStats {
   best: { title: string | null; url: string; interactions: number } | null
 }
 
-export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
+/**
+ * OPTIONAL, AND THE REASON IT EXISTS.
+ *
+ * Every figure below was summed from the LISTING alone, and the listing is the
+ * thinner witness: it carries no comment count for any YouTube video and no
+ * likes at all for some Instagram reels. Measured on this desk, her Instagram
+ * reported 966 interactions per post at a 1.062% rate against 1,533 and 1.686%
+ * actually held, and her YouTube Talk ratio printed NA over six comments the
+ * readings hold. The head-to-head then said a rival "doubles your rate" where
+ * the truth is that he leads narrowly.
+ *
+ * Passing the reports map fixes all of that. It stays OPTIONAL because several
+ * callers legitimately have no reports to hand, and those keep exactly the
+ * behaviour they had.
+ */
+export function statsFor(
+  snapshot: HandleSnapshot | undefined,
+  reports?: Map<string, Report> | null,
+): HandleStats {
   const empty: HandleStats = {
     followers: snapshot?.followers ?? null,
     posts: 0,
@@ -313,13 +333,14 @@ export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
   if (!snapshot?.posts.length) return empty
 
   const posts = snapshot.posts
+  const reportFor = (p: TrackedPost): Report | null => reports?.get(p.url) ?? null
   const sum = (pick: (p: TrackedPost) => number | null): number | null => {
     const vals = posts.map(pick).filter((v): v is number => v != null)
     return vals.length ? vals.reduce((a, b) => a + b, 0) : null
   }
 
-  const likes = sum((p) => p.likes)
-  const comments = sum((p) => p.comments)
+  const likes = sum((p) => figureOf(p, reportFor(p), 'likes'))
+  const comments = sum((p) => figureOf(p, reportFor(p), 'comments'))
   const interactions = (likes ?? 0) + (comments ?? 0)
   const measurable = likes != null || comments != null
 
@@ -336,7 +357,7 @@ export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
   }
 
   const followers = snapshot.followers ?? null
-  const views = sum((p) => p.views)
+  const views = sum((p) => figureOf(p, reportFor(p), 'views'))
   /**
    * DIVIDE BY THE POSTS THAT CARRIED THE FIGURE, NOT BY EVERY POST.
    *
@@ -347,11 +368,11 @@ export function statsFor(snapshot: HandleSnapshot | undefined): HandleStats {
    * true 100,000: a fivefold understatement, and one that then fed the
    * comparison boards.
    */
-  const postsWithViews = posts.filter((p) => p.views != null).length
-  const postsWithInteractions = posts.filter((p) => p.likes != null || p.comments != null).length
+  const postsWithViews = posts.filter((p) => figureOf(p, reportFor(p), 'views') != null).length
+  const postsWithInteractions = posts.filter((p) => interactionsOf(p, reportFor(p)).measured).length
 
   // Per-post interaction totals, used for the best post and for spread.
-  const perPost = posts.map((p) => (p.likes ?? 0) + (p.comments ?? 0))
+  const perPost = posts.map((p) => interactionsOf(p, reportFor(p)).value ?? 0)
   const mean = perPost.length ? perPost.reduce((a, b) => a + b, 0) / perPost.length : 0
   // Coefficient of variation, inverted and clamped: a channel whose posts all
   // land within a narrow band scores near 1, one with a single viral outlier

@@ -449,7 +449,7 @@ export async function surveyOpinion(input: SurveyInput): Promise<OpinionSurvey> 
   if (!parsed) {
     return {
       ...empty(
-        'The research was gathered but no language model was available to structure it. Set GROQ_API_KEY or GEMINI_API_KEY.',
+        'The research was gathered but no language model was available to structure it. Set GROQ_API_KEY or OPENAI_API_KEY.',
       ),
       searched: true,
       sources: read.sources,

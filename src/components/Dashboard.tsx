@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import type { Platform } from '@shared/taxonomy'
 import type { Report } from '@shared/types'
+import { interactionsOf } from '@/lib/figures'
 import { loadPostReports } from '@/lib/post-reports'
 import { Button, Card, Chip, PageHeader, SectionTitle, selectClass } from './ui'
 import {
@@ -723,11 +724,11 @@ export function Dashboard({
   const verdict = useMemo(() => {
     const mine = compared.find((h) => h.own)
     if (!mine || compared.length < 2) return null
-    const s = statsFor(mine.snapshots.at(-1))
+    const s = statsFor(mine.snapshots.at(-1), reports)
     if (s.engagementRate == null) return null
     const others = compared
       .filter((h) => !h.own)
-      .map((h) => ({ h, r: statsFor(h.snapshots.at(-1)).engagementRate }))
+      .map((h) => ({ h, r: statsFor(h.snapshots.at(-1), reports).engagementRate }))
       .filter((x): x is { h: TrackedHandle; r: number } => x.r != null)
     if (!others.length) return null
 
@@ -738,7 +739,7 @@ export function Dashboard({
     }
     const top = others.sort((a, b) => b.r - a.r)[0]!
     return `${top.h.displayName ?? top.h.handle} reaches a larger share of their following: ${top.r.toFixed(2)}% against ${name}'s ${s.engagementRate.toFixed(2)}%. Reach is not the gap; engagement is.`
-  }, [compared])
+  }, [compared, reports])
 
   // Load whatever opinion readings are already cached for the compared set.
   useEffect(() => {
@@ -984,7 +985,7 @@ export function Dashboard({
    * such total is stored.
    */
   const kpis = useMemo(() => {
-    const latest = shown.map((h) => statsFor(h.snapshots.at(-1)))
+    const latest = shown.map((h) => statsFor(h.snapshots.at(-1), reports))
     const followerCounts = latest
       .map((s) => s.followers)
       .filter((v): v is number => v != null)
@@ -996,7 +997,7 @@ export function Dashboard({
       postsRead: latest.reduce((a, s) => a + s.posts, 0),
       readingsKept: shown.reduce((a, h) => a + h.snapshots.length, 0),
     }
-  }, [shown])
+  }, [shown, reports])
 
   /**
    * The most engaging posts across every latest reading, ranked by the
@@ -1008,11 +1009,18 @@ export function Dashboard({
     const rows: { post: TrackedPost; handle: TrackedHandle; interactions: number; measured: boolean }[] = []
     for (const h of shown) {
       for (const p of h.snapshots.at(-1)?.posts ?? []) {
+        /* The listing alone left this card crowning the wrong post. Her
+           genuinely most engaging post — an Instagram reel holding 15,110
+           likes and comments in its stored reading — has an all-null listing
+           row, so it counted as unmeasured and sorted behind every post on
+           the strip, absent from a card titled "Most engaging posts". The
+           reports map is already in state for the board below. */
+        const merged = interactionsOf(p, reports?.get(p.url) ?? null)
         rows.push({
           post: p,
           handle: h,
-          interactions: (p.likes ?? 0) + (p.comments ?? 0),
-          measured: p.likes != null || p.comments != null,
+          interactions: merged.value ?? 0,
+          measured: merged.measured,
         })
       }
     }
@@ -1063,7 +1071,7 @@ export function Dashboard({
       }
     }
     return [...lead, ...rest].slice(0, 14)
-  }, [shown])
+  }, [shown, reports])
 
   /**
    * The same posts, split by side.
@@ -1082,6 +1090,21 @@ export function Dashboard({
     () => [...new Set(handles.map((h) => h.platform))],
     [handles],
   )
+
+  /**
+   * A channel filter must not outlive the channel it filters on.
+   *
+   * Deleting the last account on the filtered platform left `platformFilter`
+   * still holding it while the switcher row that would clear it disappeared
+   * with the channel: the desk tracking one YouTube and one Instagram account
+   * taps the Instagram badge, deletes that account, and every remaining row is
+   * filtered out of the list, the headline figures and the boards, with no
+   * control left on screen to press. Clearing the filter here is the only way
+   * back, since nothing else knows the tracked set has changed underneath it.
+   */
+  useEffect(() => {
+    if (platformFilter && !platformsTracked.includes(platformFilter)) setPlatformFilter(null)
+  }, [platformFilter, platformsTracked])
 
   return (
     <m.div
@@ -1673,7 +1696,7 @@ export function Dashboard({
                 nothing scrolls horizontally. */}
             <div className="space-y-3">
               {MEASURES.map((measure) => {
-                const vals = compared.map((h) => measure.get(statsFor(h.snapshots.at(-1))))
+                const vals = compared.map((h) => measure.get(statsFor(h.snapshots.at(-1), reports)))
                 const nums = vals.filter((v): v is number => v != null)
                 const best =
                   measure.better === 'none' || nums.length < 2
@@ -1821,7 +1844,7 @@ export function Dashboard({
             <div className="space-y-3">
               {group.rows.map((h) => {
                 const latest = h.snapshots.at(-1)
-                const s = statsFor(latest)
+                const s = statsFor(latest, reports)
                 const d = deltaFor(h)
                 const auto = AUTO.has(h.platform)
                 const sparkValues = h.snapshots

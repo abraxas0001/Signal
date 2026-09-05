@@ -452,9 +452,17 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                                   typed.
                                 </p>
                               ) : (
-                                <ul className="space-y-0.5">
+                                // A listbox has to own its options directly. The
+                                // ul and its li sat in between and broke that,
+                                // so the options were owned by a list instead
+                                // and a reader was given a listbox with nothing
+                                // in it. Marking the list presentational takes
+                                // the two levels out of the tree and leaves the
+                                // buttons as the listbox's own options, without
+                                // disturbing the markup or the spacing.
+                                <ul role="presentation" className="space-y-0.5">
                                   {results.map((candidate) => (
-                                    <li key={candidate.url}>
+                                    <li key={candidate.url} role="presentation">
                                       <button
                                         role="option"
                                         aria-selected={false}

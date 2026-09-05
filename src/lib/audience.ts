@@ -40,6 +40,15 @@ export interface QuotedComment {
    * rather than being quietly filed as neutral.
    */
   side: 'positive' | 'neutral' | 'negative' | null
+  /**
+   * What this comment is ABOUT, in two to four words, as classify-comments.ts
+   * read it: "railway connectivity", "road condition", "water supply".
+   *
+   * Null for a comment that gives no reason, which is most greetings and
+   * emoji. This is the comment's own subject and never the subject of the
+   * post it sits under, which is a different fact about a different thing.
+   */
+  theme: string | null
   /** Who wrote it, where the platform published a name. */
   author: string | null
   /** Likes on the comment itself. Null where the platform published none. */
@@ -95,6 +104,15 @@ export interface EmotionShare {
 }
 
 export interface AudienceModel {
+  /**
+   * Which accounts these comments came from.
+   *
+   * `own` — the desk's own accounts, the correct basis for "your reception".
+   * `all-tracked` — nothing is marked as the desk's, so this is every account
+   * it follows. The screen must say so rather than captioning a watched
+   * account's comments as the office's own.
+   */
+  basis: 'own' | 'all-tracked'
   commentsRead: number
   /** Own posts whose comments were read, never more than the desk stores. */
   postsRead: number
@@ -106,6 +124,16 @@ export interface AudienceModel {
   /** Weighted mean of the per-account scores, or null when none scored. */
   score: number | null
   platforms: PlatformVoice[]
+  /**
+   * The comments themselves, from BOTH sources, one row per comment.
+   *
+   * A row with a `postUrl` is a comment this desk stores in full, read off a
+   * post it holds. A row without one is a comment an account survey quoted
+   * while counting a much larger set it did not keep. The two are different
+   * populations and a caption over this list has to say which it is counting,
+   * because neither number is "the comments this desk holds": the surveys
+   * counted hundreds more than they quoted.
+   */
   quotes: QuotedComment[]
   praise: ThemeCount[]
   complaints: ThemeCount[]
@@ -113,6 +141,10 @@ export interface AudienceModel {
    * Comments stored whole by the post readings, as against counted by the
    * comment readings. A much smaller number, and the only one that carries a
    * name, a date or a like count.
+   *
+   * Distinct comments, not stored rows: a comment captured twice under one
+   * post is one comment, and a row that was only the platform's furniture was
+   * never one at all.
    */
   storedComments: number
   /** Of those, how many the platform published a name against. */
@@ -139,9 +171,37 @@ export interface AudienceModel {
   /** What each account's reading concluded, in the reading's own sentence. */
   summaries: { platform: TrackedHandle['platform']; handle: string; text: string }[]
   topics: TopicShare[]
+  /**
+   * The topics beyond the six largest, which the ring folds into one honest
+   * "Other topics (N)" segment. Kept so "View all topics" can unfold the
+   * bucket in the legend without redrawing the arcs it was folded into.
+   */
+  topicTail: TopicShare[]
   /** Read posts that carried a topic at all, which the donut is drawn over. */
   topicPosts: number
   emotions: EmotionShare[]
+  /**
+   * The same two panels, split by the account the post was published on.
+   *
+   * The topic ring and the emotion grid are counted over POSTS, and every post
+   * belongs to exactly one account — so both narrow honestly when the rail
+   * selects one. They did not, and the mix genuinely differs: YouTube is 47%
+   * Governance where Twitter/X is 33% Development Works, and Twitter/X reads
+   * 47% Trust where YouTube reads 27% Joy. A frozen ring over a selected
+   * account was answering a question the reader had stopped asking.
+   */
+  byPlatform: Record<
+    string,
+    {
+      topics: TopicShare[]
+      /** The topics folded into "Other topics (N)", same as the model's. */
+      topicTail: TopicShare[]
+      topicPosts: number
+      emotions: EmotionShare[]
+      postsAnalysed: number
+      withComments: number
+    }
+  >
   /** Own posts carrying a full reading, which the emotion half rests on. */
   postsAnalysed: number
   /**
@@ -157,6 +217,7 @@ export interface AudienceModel {
 }
 
 const EMPTY: AudienceModel = {
+  basis: 'own',
   commentsRead: 0,
   postsRead: 0,
   postsStored: 0,
@@ -175,7 +236,9 @@ const EMPTY: AudienceModel = {
   commentLikesOver: 0,
   summaries: [],
   topics: [],
+  topicTail: [],
   topicPosts: 0,
+  byPlatform: {},
   emotions: [],
   postsAnalysed: 0,
   postsWithComments: 0,
@@ -227,7 +290,26 @@ export function audienceOf(
   handles: TrackedHandle[],
   reports: Map<string, Report> | null,
 ): AudienceModel {
-  const own = handles.filter((h) => h.own)
+  /**
+   * WHOSE COMMENTS THIS IS ABOUT — and never "nobody's".
+   *
+   * `own` is the right basis: comments under the desk's own posts are the
+   * desk's reception, and an account it merely watches is somebody else's.
+   *
+   * But this used to `return EMPTY` the moment nothing was marked own, and
+   * that threw away every comment the desk had ever read. An office with four
+   * accounts added as WATCHED — the state a desk lands in when it pastes
+   * addresses without marking them — was told "No comments have been read
+   * yet" over hundreds of stored comments. The words were false and the work
+   * was invisible: the readings were on disk the whole time.
+   *
+   * So the list falls back to every tracked account, and `basis` records
+   * which rule produced it. Showing somebody the comments they collected and
+   * naming whose they are is honest. Claiming none exist is not.
+   */
+  const ownMarked = handles.filter((h) => h.own)
+  const own = ownMarked.length > 0 ? ownMarked : handles
+  const basis: AudienceModel['basis'] = ownMarked.length > 0 ? 'own' : 'all-tracked'
   if (own.length === 0) return EMPTY
 
   /* ── the comment readings ─────────────────────────────────────────────── */
@@ -249,6 +331,26 @@ export function audienceOf(
   const storedPosts = new Map<string, number>(
     own.map((h) => [h.id, (h.snapshots.at(-1)?.posts ?? []).length]),
   )
+
+  /**
+   * Survey quotes still waiting for the comment they are a copy of.
+   *
+   * An account survey and a post reading routinely see the SAME comment: the
+   * survey quotes it having scored it, the post reading stores it whole with
+   * its author, its date and, since classify-comments.ts, its own side and
+   * theme. Two rows for one comment would count that comment twice, so the
+   * stored half claims the survey's row out of this index and fills it in
+   * rather than a second row being pushed.
+   *
+   * Keyed by account as well as text, because the same words under two
+   * different accounts are two different people saying them, and a list of
+   * quoted comments must not answer "who said this" with the wrong account.
+   * A list, not a single entry, because a survey can quote the same sentence
+   * more than once and each copy may have its own comment behind it.
+   */
+  const unclaimed = new Map<string, QuotedComment[]>()
+  const quoteKey = (platform: string, handle: string, text: string): string =>
+    `${platform}\n${handle}\n${text}`
 
   for (const h of own) {
     const st = readStandingCache(h.id)
@@ -285,17 +387,27 @@ export function audienceOf(
       note: null,
     })
     const quoted = (text: string, side: QuotedComment['side']): void => {
-      quotes.push({
-        text: cleanQuote(text),
+      // A "comment" that was only the platform's Like/Reply row cleans to
+      // nothing. It was never a comment, so it is not quoted as one.
+      const clean = cleanQuote(text)
+      if (!clean) return
+      const q: QuotedComment = {
+        text: clean,
         platform: h.platform,
         handle: who,
         side,
+        theme: null,
         author: null,
         likes: null,
         publishedAt: null,
         // An account reading quotes across many posts without recording which.
         postUrl: null,
-      })
+      }
+      quotes.push(q)
+      const key = quoteKey(h.platform, who, clean)
+      const waiting = unclaimed.get(key)
+      if (waiting) waiting.push(q)
+      else unclaimed.set(key, [q])
     }
     for (const text of st.praise) quoted(text, 'positive')
     for (const text of st.criticism) quoted(text, 'negative')
@@ -359,6 +471,24 @@ export function audienceOf(
 
   const emotionWeight = new Map<string, { weight: number; posts: number }>()
   const topicPosts = new Map<string, number>()
+  /** The same tallies again, kept per account so the rail can narrow them. */
+  const perPlat = new Map<
+    string,
+    {
+      topics: Map<string, number>
+      emotions: Map<string, { weight: number; posts: number }>
+      analysed: number
+      withComments: number
+    }
+  >()
+  const platBucket = (name: string) => {
+    let b = perPlat.get(name)
+    if (!b) {
+      b = { topics: new Map(), emotions: new Map(), analysed: 0, withComments: 0 }
+      perPlat.set(name, b)
+    }
+    return b
+  }
   let withComments = 0
 
   /*
@@ -373,20 +503,37 @@ export function audienceOf(
   let likesOver = 0
   let likesSum = 0
   const authors = new Set<string>()
-  /** Stored comments keyed by their text, to enrich a quote that matches. */
-  const detail = new Map<string, { author: string | null; likes: number | null; at: string | null }>()
+  /**
+   * WHICH COMMENTS HAVE ALREADY BEEN COUNTED, by what makes one a comment.
+   *
+   * A comment is identified by the post it sits under, the name against it
+   * and the words in it. Not by its words alone: "🙏" appears under a dozen
+   * posts written by a dozen different people, and they are a dozen comments.
+   * Not by its position in the array either: a scrape that captured one
+   * comment twice under one post stored two rows for one thing, and every
+   * figure over the array counted it twice.
+   */
+  const seen = new Set<string>()
 
   for (const [url, report] of analysed) {
     const analysis = report.analysis
     if (!analysis) continue
     const stored = report.snapshot.comments ?? []
-    if (stored.length > 0) withComments += 1
     const platform = urlPlatform.get(url) ?? null
+    /* Comments, not rows. A post whose stored rows were all Instagram's time
+       chips has no comments on it, and must not be counted among the posts
+       whose emotions the audience supplied. */
+    let real = 0
     for (const c of stored) {
       const text = cleanQuote(c.text ?? '')
+      // Same rule for comments stored against a post reading.
       if (!text) continue
-      storedComments += 1
       const author = c.author?.trim() || null
+      const identity = `${url}\n${(author ?? '').toLowerCase()}\n${text}`
+      if (seen.has(identity)) continue
+      seen.add(identity)
+      real += 1
+      storedComments += 1
       if (author) {
         authoredComments += 1
         authors.add(author.toLowerCase())
@@ -395,29 +542,74 @@ export function audienceOf(
         likesOver += 1
         likesSum += c.likes
       }
-      detail.set(text, { author, likes: c.likes ?? null, at: c.publishedAt ?? null })
+      if (!platform) continue
+
+      /*
+       * ONE COMMENT, ONE ROW, AND THE BETTER READING OF IT WINS.
+       *
+       * This used to skip the stored comment outright whenever any existing
+       * quote carried the identical text. The survey's row was pushed first,
+       * so the survey's label won and the comment's own classification was
+       * thrown away: "Modi ji ki jai ho Jai Hind Jai Bharat Mata ki Jai ho"
+       * was read positive by classify-comments and displayed neutral because
+       * the survey's neutral list held the same words, and a demand to keep
+       * the Palamuru railway stop was read negative and displayed neutral the
+       * same way. The check was also global across every post, so 37 stored
+       * comments vanished from the screen because a DIFFERENT person had
+       * written the same words under a different post.
+       *
+       * The per-comment reading is the better evidence: it was made by
+       * reading that one comment, where the survey's label came from a bulk
+       * pass and does not even record which post it was quoting. So the row
+       * is kept and filled in with everything the stored comment knows, the
+       * side included, and only an unmatched survey quote keeps the survey's
+       * label. Absent stays null: not classified is not the same as neutral.
+       */
+      const survey = unclaimed.get(quoteKey(platform.platform, platform.handle, text))?.shift()
+      if (survey) {
+        if (c.side) survey.side = c.side
+        survey.theme = c.theme ?? null
+        survey.author = author
+        survey.likes = c.likes ?? null
+        survey.publishedAt = c.publishedAt ?? null
+        survey.postUrl = report.snapshot.canonicalUrl || url
+        continue
+      }
+
       // A stored comment nothing scored is still a real comment somebody
       // wrote. It joins the list with a null side rather than being dropped,
       // because dropping it would hide most of what this desk actually holds.
-      if (platform && !quotes.some((q) => q.text === text)) {
-        quotes.push({
-          text,
-          platform: platform.platform,
-          handle: platform.handle,
-          side: null,
-          author,
-          likes: c.likes ?? null,
-          publishedAt: c.publishedAt ?? null,
-          postUrl: report.snapshot.canonicalUrl || url,
-        })
-      }
+      quotes.push({
+        text,
+        platform: platform.platform,
+        handle: platform.handle,
+        side: c.side ?? null,
+        theme: c.theme ?? null,
+        author,
+        likes: c.likes ?? null,
+        publishedAt: c.publishedAt ?? null,
+        postUrl: report.snapshot.canonicalUrl || url,
+      })
+    }
+    if (real > 0) withComments += 1
+    const bucket = platform ? platBucket(platform.platform) : null
+    if (bucket) {
+      bucket.analysed += 1
+      if (real > 0) bucket.withComments += 1
     }
     for (const e of analysis.emotions ?? []) {
       const prev = emotionWeight.get(e.emotion) ?? { weight: 0, posts: 0 }
       emotionWeight.set(e.emotion, { weight: prev.weight + e.weight, posts: prev.posts + 1 })
+      if (bucket) {
+        const bp = bucket.emotions.get(e.emotion) ?? { weight: 0, posts: 0 }
+        bucket.emotions.set(e.emotion, { weight: bp.weight + e.weight, posts: bp.posts + 1 })
+      }
     }
     const primary = analysis.topics?.primary
-    if (primary) topicPosts.set(primary, (topicPosts.get(primary) ?? 0) + 1)
+    if (primary) {
+      topicPosts.set(primary, (topicPosts.get(primary) ?? 0) + 1)
+      if (bucket) bucket.topics.set(primary, (bucket.topics.get(primary) ?? 0) + 1)
+    }
   }
 
   const emotionTotal = [...emotionWeight.values()].reduce((s, e) => s + e.weight, 0)
@@ -443,7 +635,10 @@ export function audienceOf(
   const ranked = [...topicPosts.entries()].sort((a, b) => b[1] - a[1])
   const pctOf = (n: number): number => (topicTotal > 0 ? Math.round((n / topicTotal) * 100) : 0)
   const head = ranked.slice(0, 6)
-  const tail = ranked.slice(6).reduce((s, [, n]) => s + n, 0)
+  const tailTopics: TopicShare[] = ranked
+    .slice(6)
+    .map(([topic, posts]) => ({ topic, posts, pct: pctOf(posts) }))
+  const tail = tailTopics.reduce((s, t) => s + t.posts, 0)
   const topics: TopicShare[] = head.map(([topic, posts]) => ({
     topic,
     posts,
@@ -489,20 +684,59 @@ export function audienceOf(
     }
   })()
 
-  /* A quote the comment reading scored and the post reading also stored is one
-     comment seen twice. Where the text matches, the name and the like count
-     from the second source are attached to the first, so the row can carry a
-     side AND a name instead of one or the other. */
-  for (const q of quotes) {
-    if (q.author !== null) continue
-    const found = detail.get(q.text)
-    if (!found) continue
-    q.author = found.author
-    q.likes = found.likes
-    q.publishedAt = found.at
+  /* The pass that used to sit here attached a name to a survey quote by
+     looking its text up in every stored comment on the desk, across accounts.
+     The loop above now does that against the one comment the quote is
+     actually a copy of, on the same account, so a Facebook quote can no
+     longer be captioned with the name of an Instagram commenter who happened
+     to type the same words. A survey quote nothing matched keeps no name,
+     which is the truth: the survey never recorded one. */
+
+  /* The same two reductions the desk-wide panels use, run once per account.
+     Shares are computed inside each account so a ring drawn for YouTube sums
+     to YouTube's own hundred, never to a slice of the desk's. */
+  const byPlatform: AudienceModel['byPlatform'] = {}
+  for (const [name, b] of perPlat) {
+    const eTotal = [...b.emotions.values()].reduce((s, e) => s + e.weight, 0)
+    const pEmotions: EmotionShare[] = [...b.emotions.entries()]
+      .map(([emotion, v]) => ({
+        emotion,
+        posts: v.posts,
+        pct: eTotal > 0 ? Math.round((v.weight / eTotal) * 100) : 0,
+      }))
+      .filter((e) => e.pct > 0)
+      .sort((a, b2) => b2.pct - a.pct)
+      .slice(0, 6)
+
+    const tTotal = [...b.topics.values()].reduce((s, n) => s + n, 0)
+    const tRanked = [...b.topics.entries()].sort((a, b2) => b2[1] - a[1])
+    const tPct = (n: number): number => (tTotal > 0 ? Math.round((n / tTotal) * 100) : 0)
+    const tHead = tRanked.slice(0, 6)
+    const tTailTopics: TopicShare[] = tRanked
+      .slice(6)
+      .map(([topic, posts]) => ({ topic, posts, pct: tPct(posts) }))
+    const tTail = tTailTopics.reduce((s, t) => s + t.posts, 0)
+    const pTopics: TopicShare[] = tHead.map(([topic, posts]) => ({ topic, posts, pct: tPct(posts) }))
+    if (tTail > 0) {
+      pTopics.push({
+        topic: `Other topics (${tRanked.length - tHead.length})` as TopicShare['topic'],
+        posts: tTail,
+        pct: tPct(tTail),
+      })
+    }
+    byPlatform[name] = {
+      topics: pTopics,
+      topicTail: tTailTopics,
+      topicPosts: tTotal,
+      emotions: pEmotions,
+      postsAnalysed: b.analysed,
+      withComments: b.withComments,
+    }
   }
 
   return {
+    basis,
+    byPlatform,
     storedComments,
     authoredComments,
     distinctAuthors: authors.size,
@@ -526,6 +760,7 @@ export function audienceOf(
     quotes,
     ...sides,
     topics,
+    topicTail: tailTopics,
     topicPosts: topicTotal,
     emotions,
     postsAnalysed: analysed.length,
@@ -535,6 +770,30 @@ export function audienceOf(
 }
 
 /** The verdict the cards lead with. Never a number pretending to be a sentence. */
+/**
+ * The verdict for ONE account, read from that account's own distribution.
+ *
+ * Deliberately NOT the stored score. Facebook's standing on this desk is 100,
+ * which sounds emphatic and rests on two positive comments in seventy-two —
+ * the same account is 97% neutral. Swapping the score in when the rail selects
+ * a platform would have printed "People are warm about you" over the quietest
+ * audience the office has. The shares cannot lie that way: they are counted
+ * over every comment the survey read, so a neutral account reads as neutral.
+ */
+export function voiceVerdict(
+  v: { positive: number; neutral: number; negative: number; commentsRead: number },
+  platform: string,
+): string {
+  if (v.commentsRead === 0) return `No comments have been read on ${platform}.`
+  if (v.neutral >= 60) return `Mostly neutral on ${platform}.`
+  const margin = v.positive - v.negative
+  if (margin > 30) return `People are warm about you on ${platform}.`
+  if (margin > 8) return `Leaning positive on ${platform}.`
+  if (margin < -30) return `People are hostile on ${platform}.`
+  if (margin < -8) return `Leaning negative on ${platform}.`
+  return `Genuinely divided on ${platform}.`
+}
+
 export function audienceVerdict(m: AudienceModel): string {
   if (m.commentsRead === 0) return 'No comments have been read yet.'
   const s = m.score ?? 0

@@ -431,7 +431,7 @@ async function ask(
     // so it is named and skipped rather than left to fail as a URL parse error
     // against an undefined base URL.
     if (!provider.baseUrl) {
-      lastError = `${provider.label} is configured, but the grievance classifier only calls OpenAI-compatible providers. Set GROQ_API_KEY or GEMINI_API_KEY as well.`
+      lastError = `${provider.label} is configured, but the grievance classifier only calls OpenAI-compatible providers. Set GROQ_API_KEY or OPENAI_API_KEY as well.`
       continue
     }
     try {

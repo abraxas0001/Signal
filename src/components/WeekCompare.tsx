@@ -26,6 +26,8 @@ import {
 import { fileFreeAction } from '@/lib/actions'
 import { compact } from '@/lib/utils'
 import { fadeUp, listStagger } from '@/lib/motion'
+import type { Report } from '@shared/types'
+import { loadPostReports } from '@/lib/post-reports'
 
 /**
  * The Explore page behind the dashboard's "Your week against theirs" card.
@@ -41,7 +43,39 @@ import { fadeUp, listStagger } from '@/lib/motion'
 export function WeekCompare({ onClose }: { onClose: () => void }) {
   const reduce = useReducedMotion() === true
   const handles = useMemo(() => listHandles(), [])
-  const week = useMemo(() => weekOf(handles), [handles])
+
+  /**
+   * The stored readings, for the dates the listing scrape did not carry.
+   *
+   * `weekOf` takes them as an optional argument and the dashboard card was
+   * updated to pass them; this screen was not, so the two surfaces computed
+   * DIFFERENT WINNERS from the same data under the same heading. Most stored
+   * posts carry no date on the listing itself, so without this the board
+   * counted a small dated minority: on one desk that reversed who led the
+   * week, and a reader moving from the card to this page saw the verdict
+   * change under them.
+   *
+   * `loadPostReports` caches the file at module level, so this resolves off
+   * the same map the dashboard already loaded rather than fetching a second
+   * copy.
+   */
+  const [reports, setReports] = useState<Map<string, Report> | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadPostReports().then(
+      (map) => {
+        if (alive) setReports(map)
+      },
+      () => {
+        if (alive) setReports(new Map())
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const week = useMemo(() => weekOf(handles, reports), [handles, reports])
 
   const [analysis, setAnalysis] = useState<WeekAnalysis | null>(() =>
     week ? readWeekAnalysisCache(week.label) : null,

@@ -199,10 +199,18 @@ export function principalsOf(roster: DemoRoster): PrincipalEntry[] {
 /**
  * Turn one scraped handle into the shape the dashboard already reads.
  *
- * A handle that failed to read contributes NO snapshot rather than an empty
- * one. A snapshot saying "zero posts, taken just now" is a measurement, and the
- * charts would draw it as a politician who has gone quiet. An absent snapshot
- * is an absent reading, which is the truth.
+ * A handle that failed to read AND holds nothing contributes NO snapshot
+ * rather than an empty one. A snapshot saying "zero posts, taken just now" is
+ * a measurement, and the charts would draw it as a politician who has gone
+ * quiet. An absent snapshot is an absent reading, which is the truth.
+ *
+ * But a failure with a previous good reading still attached is a different
+ * claim, and treating them alike removed a 2.8 lakh-follower page from the
+ * dashboard overnight: one flaky refresh set `failure`, this gate saw the
+ * word and dropped the whole handle, and the desk's biggest account simply
+ * vanished from every card with the total quietly 2.8 lakh lighter. The
+ * truth there is "read on the 31st; today's refresh failed", so the reading
+ * stays on the board and the listing note carries the failure.
  */
 function toTracked(h: DemoHandle, person: DemoPerson, own: boolean): TrackedHandle {
   return {
@@ -215,7 +223,7 @@ function toTracked(h: DemoHandle, person: DemoPerson, own: boolean): TrackedHand
     own,
     label: person.partyTag,
     listingNote: h.failure ? `Could not read: ${h.failure}` : person.role,
-    snapshots: h.failure
+    snapshots: h.failure && h.posts.length === 0 && h.followers === null
       ? []
       : [
           // Archived follower readings first, oldest to newest, each a dated

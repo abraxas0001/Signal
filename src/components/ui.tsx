@@ -510,11 +510,19 @@ export function Avatar({
   name,
   size = 56,
   className,
+  alt = '',
 }: {
   src?: string | null
   name: string
   size?: number
   className?: string
+  /**
+   * Empty by default on purpose: nearly every avatar sits beside the same
+   * name in text, and a reader hearing "D. K. Aruna, D. K. Aruna" is worse
+   * served than one hearing it once. Passed only where the picture is the
+   * claim itself.
+   */
+  alt?: string
 }) {
   const [failed, setFailed] = useState(false)
 
@@ -539,7 +547,7 @@ export function Avatar({
       {show ? (
         <img
           src={src}
-          alt=""
+          alt={alt}
           width={size}
           height={size}
           loading="lazy"

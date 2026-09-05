@@ -214,10 +214,16 @@ export function CompareBoard({
     [reports],
   )
 
+  /** The stored reading for a post, which holds figures the listing lacks. */
+  const reportOf = useMemo(
+    () => (post: TrackedPost): Report | null => reports?.get(post.url) ?? null,
+    [reports],
+  )
+
   const anchor = useMemo(() => boardAnchor(handles, dateOf), [handles, dateOf])
   const people = useMemo(
-    () => boardPeopleOf(handles, standings, notes, window, dateOf),
-    [handles, standings, notes, window, dateOf],
+    () => boardPeopleOf(handles, standings, notes, window, dateOf, reportOf),
+    [handles, standings, notes, window, dateOf, reportOf],
   )
 
   if (people.length < 2) return null
@@ -282,7 +288,7 @@ export function CompareBoard({
       label: mode === 'avg' ? 'Engagement (average per post)' : 'Engagement (total)',
       sub:
         mode === 'avg'
-          ? 'Mean reactions on their newest posts that published any.'
+          ? 'Mean reactions across every post in this window that published any.'
           : 'Reactions summed over every post in this window that published any.',
       cell: (p) => {
         const e = p.engagement
@@ -298,7 +304,10 @@ export function CompareBoard({
                   {compact(headline)}
                 </p>
                 <p className="mt-1 text-[11px] text-ink-3">
-                  {mode === 'avg' ? `average on the last ${e.window}` : `on ${e.window} posts`}
+                  {/* "average on the last N" described a newest-N slice. The
+                      mean is now taken across the window, the same set the
+                      total sums, so both captions name the same thing. */}
+                  {mode === 'avg' ? `average over ${e.window} posts` : `on ${e.window} posts`}
                 </p>
               </div>
               {e.series.length >= 2 && (
@@ -630,10 +639,18 @@ export function CompareBoard({
         </div>
       </div>
 
+      {/* The window moves the post rows and nothing else, so the footer must
+          not claim the whole board is counted over it. Followers come from
+          each account's latest snapshot, and Sentiment, Comment mentions,
+          Praised for and Complained about all come from ONE stored comment
+          reading per account which carries no per-window split — there is
+          nothing to filter, and a split may not be invented to make the
+          picker look alive. So the footer names the divide instead. */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--rule)] px-4 py-2.5 sm:px-5">
         <p className="text-[11px] leading-relaxed text-ink-3">
-          Counted from the readings this desk holds, over {windowLabel(anchor, window)}. A gap names
-          what was not published rather than showing a zero.
+          Post figures cover {windowLabel(anchor, window)}. Followers and the comment rows —
+          sentiment, mentions, praised, complained — are the latest stored reading, whatever the
+          window.
         </p>
         <p className="flex items-center gap-1.5 text-[11px] text-ink-3">
           <Sparkles size={12} className="text-[var(--accent)]" aria-hidden />

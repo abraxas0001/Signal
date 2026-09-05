@@ -92,9 +92,86 @@ export function pluralise(n: number, one: string, many = `${one}s`): string {
  * The sentinel is not a person's word, so it does not survive to the page.
  * The comment around it is left exactly as it was written.
  */
-export function cleanQuote(text: string): string {
-  return text
-    .replace(/<\|[^|]*\|>/g, '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim()
+/**
+ * Is this "title" the platform's own accessibility caption rather than words
+ * the office wrote?
+ *
+ * Instagram and Facebook generate a description for every image and store it
+ * where a caption would go, so a post with no written caption arrives titled
+ * "Photo by DK Aruna on August 31, 2026. May be an image of one or more
+ * people, people standing, dais and text that says ...". That is a machine
+ * describing a picture to a screen reader. Printed as the post's title it
+ * tells the office nothing it cannot see in the thumbnail directly above it,
+ * and it crowds out the reading's own headline, which does say something.
+ *
+ * Matched on the platform's fixed phrasing rather than on length, so a long
+ * caption somebody actually wrote is untouched.
+ */
+export function isPlatformAltText(title: string | null | undefined): boolean {
+  const t = (title ?? '').trim()
+  if (!t) return false
+  return (
+    /^photo (?:by|shared by) .+ on \w+ \d{1,2}, \d{4}/i.test(t) ||
+    /^may be an (?:image|illustration) of/i.test(t) ||
+    /^no photo description available/i.test(t) ||
+    /^photo by /i.test(t)
+  )
 }
+
+export function cleanQuote(text: string): string {
+  const clean = text
+    .replace(/<\|[^|]*\|>/g, '')
+    .replace(COMMENT_PREFIX, '')
+    .replace(COMMENT_CHROME, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  // A row that is nothing BUT the platform's furniture is not a comment at
+  // all, so it cleans to the empty string every caller already skips. Done
+  // last, on the cleaned text, so a real comment that happens to sit behind a
+  // Facebook name-and-age prefix is judged on its own words.
+  return COMMENT_IS_CHROME.test(clean) ? '' : clean
+}
+
+/**
+ * The platform's own furniture, which is not part of what anybody wrote.
+ *
+ * Facebook renders the author, the age and any badge in the SAME text run as
+ * the comment, with no separator between them, so a reading stored
+ * "Karunakarreddy Patel · 22 घंटेమహబూబ్‌నగర్ …" and the desk was shown the
+ * scraper's view of the page rather than the sentence a person typed. A few
+ * comments are nothing but that furniture — a bare Like/Reply row — and clean
+ * to an empty string, which is the correct answer: they were never comments.
+ *
+ * Deliberately narrow. The prefix must look like "<name> · <number> <unit>" at
+ * the very start, and only the two known badge words are removed, so a comment
+ * that merely contains a middle dot keeps every word of its text.
+ */
+const COMMENT_PREFIX =
+  /^[^\n·]{2,40}·\s*\d+\s*(?:घंटे|दिन|मिनट|सप्ताह|सेकंड|साल|महीने|hours?|days?|weeks?|mins?|minutes?|[hdwmy])(?:\s*·\s*(?:टॉप\s*फ़ैन|Top\s*fan))?/u
+
+const COMMENT_CHROME =
+  /(लाइक\s*करें|जवाब\s*दें|अनुवाद\s*देखें|See\s*translation|टॉप\s*फ़ैन|Top\s*fan|GIPHY)/giu
+
+/**
+ * Rows that are the platform's comment LIST furniture, not a comment in it.
+ *
+ * Instagram renders each comment's age as its own text node ("2 d", "19 h",
+ * "64 w") and paints a verified account's badge as the word "Verified" run
+ * straight onto the username ("m_k_krishna_bjpVerified"). The scraper reads
+ * text nodes, so eleven of these landed in the desk's stored comments: reel
+ * DaApzwuOb-p held the seven comments Instagram actually published plus three
+ * of them, and every count over that post read ten. Five carried a classified
+ * side as well, so they voted in the sentiment split, and they were quoted
+ * back to the office verbatim as things people had said.
+ *
+ * Matched against the WHOLE cleaned string rather than removed from inside
+ * one, because both shapes occur inside genuine comments: "3 d" is how a
+ * person writes a deadline and a comment may well name a verified account.
+ * A row consisting of nothing else is furniture; a sentence containing it is
+ * a sentence.
+ *
+ * The username shape is Instagram's own alphabet (letters, digits, full stops
+ * and underscores) so a real one-word comment ending in "Verified" with any
+ * other character in it survives.
+ */
+const COMMENT_IS_CHROME = /^(?:\d+\s*[smhdwy]|[A-Za-z0-9._]{1,30}Verified)$/u

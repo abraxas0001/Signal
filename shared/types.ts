@@ -122,6 +122,22 @@ export interface Comment {
   publishedAt: string | null
   /** A reply to another comment rather than to the post itself. */
   isReply: boolean
+  /**
+   * How this ONE comment reads, and the reason it reads that way.
+   *
+   * The account survey returns a three-way count plus a handful of verbatim
+   * quotes, so 280 comments arrived with 35 of them carrying a side and the
+   * rest showing "Not scored". Every surface that wanted a per-post split, or
+   * a reason a side reads the way it does, had nothing to work from and was
+   * reduced to guessing from the post's own words.
+   *
+   * These are filled by scraper/classify-comments.ts, which reads each
+   * comment on its own. Absent means not yet classified, which is a real
+   * state and never the same as neutral.
+   */
+  side?: 'positive' | 'negative' | 'neutral' | null
+  /** A short phrase for WHY, in the reader's words: "development work". */
+  theme?: string | null
 }
 
 export interface PostSnapshot {

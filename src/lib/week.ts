@@ -1,4 +1,5 @@
-import type { TrackedHandle } from '@/lib/handles'
+import type { TrackedHandle, TrackedPost } from '@/lib/handles'
+import type { Report } from '@shared/types'
 import { scopedKey } from '@/lib/store'
 import { deskKey } from '@/lib/personas'
 import { fetchWithTimeout } from '@/lib/net'
@@ -8,10 +9,24 @@ import { fetchWithTimeout } from '@/lib/net'
  * card that says who won, and the Explore page that says how.
  *
  * Every figure is a count over dated posts in the same seven days, the window
- * anchored to the newest dated post anywhere on the desk — the demo dataset
+ * anchored to the newest dated post anywhere on the desk: the demo dataset
  * is fixed, and a wall-clock week would empty both screens seven days after
  * capture. A person whose stored posts carry no dates cannot be placed in
  * any week and is left off rather than shown at zero.
+ *
+ * A DATE IS LOOKED FOR IN BOTH PLACES THE DESK KEEPS ONE. The collector reads
+ * a publication date off the post listing on Twitter/X and almost nowhere
+ * else: 0 of 293 stored Facebook posts and 13 of 300 Instagram posts carry
+ * one. The full readings in demo-reports.json carry an exact publishedAt for
+ * 61 of the rest, and the neighbouring cards already resolve the date from
+ * both. Reading only the listing's date does not give a cautious answer here,
+ * it gives a wrong one: on the Rahul desk this card read "Narendra Modi leads
+ * this week: 204,621 reactions on 18 posts. You: 192,920 on 6", and over the
+ * dates the app already held the same seven days are Rahul 1,024,844 on 11
+ * against Modi 559,521 on 23. The stated leader was the other man.
+ *
+ * What is still genuinely undated stays out, and `undated` says how many that
+ * is so the card can print the limitation rather than absorb it.
  */
 
 export interface WeekPost {
@@ -48,6 +63,12 @@ export interface PersonWeek {
 export interface WeekModel {
   label: string
   rows: PersonWeek[]
+  /**
+   * Stored posts on these accounts with no publication date in either place,
+   * so they sit in no week at all. Printed on the card: a comparison that
+   * silently drops posts is a verdict about a week nobody can check.
+   */
+  undated: number
 }
 
 export interface WeekAnalysis {
@@ -58,19 +79,44 @@ export interface WeekAnalysis {
 
 const WEEK_MS = 7 * 86_400_000
 
-export function weekOf(handles: TrackedHandle[]): WeekModel | null {
+/**
+ * When a post went up: the listing's own date, else the one its stored full
+ * reading carries. The same resolution ContentInsights and the comparison
+ * board make, so the three surfaces place a post in the same week.
+ */
+function dateOf(p: TrackedPost, reports: Map<string, Report> | null | undefined): string | null {
+  return p.publishedAt ?? reports?.get(p.url)?.snapshot.publishedAt ?? null
+}
+
+export function weekOf(
+  handles: TrackedHandle[],
+  /**
+   * The stored full readings, for the dates the listing scrape did not carry.
+   *
+   * Optional only so a caller that has not got the map to hand still compiles.
+   * Passing nothing is not a neutral choice: it is the narrower count the
+   * header comment shows reversing a verdict, so every caller should hand over
+   * the same map the dashboard holds. WeekCompare.tsx and post-plan.ts do not
+   * yet, and until they do the Weekly page can name a different leader from
+   * the card that links to it.
+   */
+  reports?: Map<string, Report> | null,
+): WeekModel | null {
   // The window's far edge: the newest dated post anywhere.
   let end: number | null = null
   for (const h of handles) {
     for (const p of h.snapshots[h.snapshots.length - 1]?.posts ?? []) {
-      if (!p.publishedAt) continue
-      const t = Date.parse(p.publishedAt)
+      const at = dateOf(p, reports)
+      if (!at) continue
+      const t = Date.parse(at)
       if (Number.isFinite(t) && (end === null || t > end)) end = t
     }
   }
   if (end === null) return null
 
   const byPerson = new Map<string, PersonWeek>()
+  /** Posts that carry no date in either place, so they sit in no week. */
+  let undated = 0
   for (const h of handles) {
     const name = h.displayName || h.handle
     const entry =
@@ -87,9 +133,17 @@ export function weekOf(handles: TrackedHandle[]): WeekModel | null {
         top: [],
       } as PersonWeek)
     for (const p of h.snapshots[h.snapshots.length - 1]?.posts ?? []) {
-      if (!p.publishedAt) continue
-      const t = Date.parse(p.publishedAt)
-      if (!Number.isFinite(t) || t < end - WEEK_MS || t > end) continue
+      const at = dateOf(p, reports)
+      if (!at) {
+        undated += 1
+        continue
+      }
+      const t = Date.parse(at)
+      if (!Number.isFinite(t)) {
+        undated += 1
+        continue
+      }
+      if (t < end - WEEK_MS || t > end) continue
       // A post the platform published nothing for is not a post with no
       // reactions. Only figures that were actually disclosed are summed.
       const published = p.likes != null || p.comments != null || p.shares != null
@@ -120,7 +174,7 @@ export function weekOf(handles: TrackedHandle[]): WeekModel | null {
 
   const day = (t: number): string =>
     new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-  return { label: `${day(end - WEEK_MS)} to ${day(end)}`, rows }
+  return { label: `${day(end - WEEK_MS)} to ${day(end)}`, rows, undated }
 }
 
 /* ── the AI reading, cached per window ───────────────────────────────────── */

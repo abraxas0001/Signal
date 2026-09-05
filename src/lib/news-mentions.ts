@@ -60,6 +60,7 @@ export function mentionFromRecord(r: GrievanceRecord, persona: string): PersonaM
     language: r.language,
     excerpt: r.excerpt,
     place: r.places[0] ?? r.constituency ?? null,
+    topic: r.topic,
     stance: stanceOf(r.sentiment),
     sentiment: r.sentiment,
     fake: r.fake,
@@ -107,9 +108,29 @@ export function newsMentionsOf(store: Store, persona: string): PersonaMention[] 
     out.push(mentionFromRecord(r, persona))
   }
 
-  const at = (m: PersonaMention): number => {
-    const t = Date.parse(m.publishedAt ?? m.seenAt)
+  /**
+   * NEWEST FIRST BY THE ARTICLE'S OWN DATE. A story whose portal printed no
+   * date cannot claim a place among the dated ones — sorting it on its read
+   * time made a dateless cutting the desk opened this morning "today's
+   * news" — so undated rows follow every dated row, ordered among
+   * themselves by when the desk read them. That trailing order is only an
+   * order; no window or figure is ever taken from it.
+   */
+  const at = (m: PersonaMention): number | null => {
+    if (!m.publishedAt) return null
+    const t = Date.parse(m.publishedAt)
+    return Number.isFinite(t) ? t : null
+  }
+  const seen = (m: PersonaMention): number => {
+    const t = Date.parse(m.seenAt)
     return Number.isFinite(t) ? t : 0
   }
-  return out.sort((a, b) => at(b) - at(a))
+  return out.sort((a, b) => {
+    const ta = at(a)
+    const tb = at(b)
+    if (ta !== null && tb !== null) return tb - ta
+    if (ta !== null) return -1
+    if (tb !== null) return 1
+    return seen(b) - seen(a)
+  })
 }

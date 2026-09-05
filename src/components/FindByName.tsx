@@ -54,6 +54,27 @@ interface FoundAccount {
   url: string
 }
 
+/** One profile as `/api/multi-platform-search` returns it. */
+interface RawProfile {
+  platform: string
+  handle: string
+  name?: string | null
+  profileUrl: string
+}
+
+/**
+ * What the search did per platform, verbatim from the server.
+ *
+ * Shown rather than dropped: "found 0" and "never searched" are different
+ * answers, and only one of them means "paste the address yourself".
+ */
+interface Coverage {
+  platform: string
+  route: string
+  note: string
+  found: number
+}
+
 /** Long enough that "d" does not run a search, short enough for "K L". */
 const MIN_QUERY = 3
 /** A keystroke is not a search. Long enough to finish a word, short enough to feel live. */
@@ -81,6 +102,8 @@ export function FindByName({
   const [identity, setIdentity] = useState<Identity | null>(null)
   /** Accounts a search index returned, as against ones the record states. */
   const [found, setFound] = useState<FoundAccount[]>([])
+  /** Per-platform account of what the search reached, and what it did not. */
+  const [coverage, setCoverage] = useState<Coverage[]>([])
   const [resolving, setResolving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -163,16 +186,44 @@ export function FindByName({
       .then((r) => r.json() as Promise<{ identity?: Identity | null; error?: string }>)
       .catch(() => ({ identity: null, error: 'Could not reach the server.' }))
 
-    const searched = fetch(`/api/accounts/search?q=${encodeURIComponent(candidate.name)}`)
-      .then((r) => r.json() as Promise<{ accounts?: FoundAccount[] }>)
-      .then((b) => b.accounts ?? [])
-      .catch(() => [] as FoundAccount[])
+    /**
+     * EVERY PLATFORM, AND WHAT IT COULD NOT REACH.
+     *
+     * This called `/api/accounts/search`, which name-searches YouTube alone.
+     * So looking up a politician on the one screen built for adding accounts
+     * returned six YouTube channels and nothing else — no Facebook page, no
+     * Instagram, no X — with nothing on screen to say the other platforms had
+     * not been searched. A desk owner reasonably concluded the app could not
+     * find their accounts, when it had never looked.
+     *
+     * `/api/multi-platform-search` tries all five and reports per platform
+     * what it did and why it came back empty: Instagram answers a keyless
+     * server HTTP 429, X answers 503 even to Googlebot, Facebook publishes no
+     * name search, LinkedIn shows an authwall. Those are real limits, and a
+     * screen that states them is one a person can act on — by pasting the
+     * address instead — where silence just looks broken.
+     */
+    const searched = fetch(`/api/multi-platform-search?q=${encodeURIComponent(candidate.name)}`)
+      .then((r) => r.json() as Promise<{ profiles?: RawProfile[]; coverage?: Coverage[] }>)
+      .then((b) => ({
+        accounts: (b.profiles ?? []).map(
+          (p): FoundAccount => ({
+            platform: p.platform,
+            handle: p.handle,
+            name: p.name ?? null,
+            url: p.profileUrl,
+          }),
+        ),
+        coverage: b.coverage ?? [],
+      }))
+      .catch(() => ({ accounts: [] as FoundAccount[], coverage: [] as Coverage[] }))
 
     const [a, b] = await Promise.all([stated, searched])
     setResolving(false)
-    setFound(b)
+    setFound(b.accounts)
+    setCoverage(b.coverage)
     if (a.identity) setIdentity(a.identity)
-    else if (b.length === 0) {
+    else if (b.accounts.length === 0) {
       setError(
         a.error ??
           'That page could not be read just now. Paste the profile address instead, or try again.',
@@ -184,6 +235,7 @@ export function FindByName({
     setPicked(null)
     setIdentity(null)
     setFound([])
+    setCoverage([])
     setError(null)
     setQuery('')
     setCandidates([])
@@ -281,21 +333,40 @@ export function FindByName({
                its last options could never be scrolled into reach. */
             className="absolute z-20 mt-2 max-h-[min(20rem,55svh)] w-full overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-1.5 shadow-[var(--e3)]"
           >
+            {/* The row IS the option. It used to be an option wrapping a real
+                button, which is the one arrangement that does not work: an
+                option's contents are presentational, so the button inside it
+                was flattened away and a reader was offered an option it was
+                never told could be activated. The click handler and the whole
+                hit area live on the li now.
+
+                tabIndex keeps the rows reachable by keyboard, exactly as the
+                buttons were. This is not the activedescendant combobox pattern
+                and does not pretend to be: focus really does move into the
+                list, which is what already happened here, so nothing a person
+                had learned about this box changes. */}
             {candidates.map((c) => (
-              <li key={c.url} role="option" aria-selected={picked?.url === c.url}>
-                <button
-                  type="button"
-                  onClick={() => void pick(c)}
-                  className="flex min-h-11 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
-                >
-                  <Avatar src={c.thumbnail} name={c.name} size={36} />
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold text-ink">{c.name}</span>
-                    {c.description && (
-                      <span className="block truncate text-xs text-ink-3">{c.description}</span>
-                    )}
-                  </span>
-                </button>
+              <li
+                key={c.url}
+                role="option"
+                aria-selected={picked?.url === c.url}
+                tabIndex={0}
+                onClick={() => void pick(c)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    void pick(c)
+                  }
+                }}
+                className="flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
+              >
+                <Avatar src={c.thumbnail} name={c.name} size={36} />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-ink">{c.name}</span>
+                  {c.description && (
+                    <span className="block truncate text-xs text-ink-3">{c.description}</span>
+                  )}
+                </span>
               </li>
             ))}
           </ul>
@@ -409,7 +480,7 @@ export function FindByName({
               channels and impersonators alongside the real account. */}
           {untracked.length > 0 && (
             <>
-              <p className="kicker mt-4">Channels YouTube lists for this name</p>
+              <p className="kicker mt-4">Accounts found for this name</p>
               <p className="mt-1 text-xs leading-relaxed text-ink-3">
                 Whether one is theirs is for you to check.
               </p>
@@ -451,6 +522,34 @@ export function FindByName({
               </ul>
             </>
           )}
+
+          {/* ── WHAT THE SEARCH COULD NOT REACH ────────────────────────────
+              "Found nothing" and "never looked" are different answers, and
+              only one of them means "paste the address yourself". Instagram
+              answers a keyless server 429, X answers 503 even to Googlebot,
+              Facebook publishes no name search and LinkedIn shows an
+              authwall — so for four of the five platforms a name search is
+              not a thing that exists, and a screen that stays silent about
+              that reads as an app that cannot find your accounts. */}
+          {coverage.some((c) => c.found === 0) && (
+            <div className="mt-4 border-t border-[var(--border)] pt-3">
+              <p className="kicker">Not searchable by name</p>
+              <ul className="mt-1.5 space-y-1">
+                {coverage
+                  .filter((c) => c.found === 0)
+                  .map((c) => (
+                    <li key={c.platform} className="text-xs leading-relaxed text-ink-3">
+                      <span className="font-semibold text-ink-2">{c.platform}</span> &mdash;{' '}
+                      {c.note}
+                    </li>
+                  ))}
+              </ul>
+              <p className="mt-2 text-xs leading-relaxed text-ink-2">
+                Paste the profile address in the box above and it will be read directly.
+              </p>
+            </div>
+          )}
+
         </div>
       )}
 

@@ -1,5 +1,7 @@
+import type { Report } from '@shared/types'
 import type { Platform } from '@shared/taxonomy'
 import type { Standing, TrackedHandle, TrackedPost } from '@/lib/handles'
+import { reactionsOf } from '@/lib/figures'
 import { recurringTerms, termCount } from '@/lib/terms'
 import { inWindow, windowStart, type WindowId } from '@/lib/window'
 
@@ -49,15 +51,15 @@ export interface BoardPerson {
   unreadPlatforms: Platform[]
 
   engagement: {
-    /** Mean reactions over the newest measured posts in the window. */
+    /** Mean reactions over every measured post in the window — what `total` sums. */
     avg: number | null
-    /** How many posts that mean is over. */
+    /** How many measured posts both the mean and the total are over. */
     window: number
     /** Reactions summed over every measured post in the window. */
     total: number | null
     /** Per-post reactions, oldest to newest, for the sparkline. */
     series: number[]
-    /** Change against the window before this one, as a percentage. */
+    /** Change against the window before, or null where that base cannot carry one. */
     deltaPct: number | null
   }
 
@@ -91,11 +93,32 @@ export interface BoardPerson {
   complained: { term: string; pct: number }[]
 }
 
-const hasReactions = (p: TrackedPost): boolean =>
-  p.likes != null || p.comments != null || p.shares != null
+/**
+ * These two read the LISTING ALONE, and this is the board whose entire job is
+ * comparing the office with its rivals. Her own total came out 28,098 against
+ * the 43,237 the desk holds — 35% understated — because her Instagram reel's
+ * listing row is all-null while its reading holds 15,082 likes, and rivals
+ * with complete listings scored near-correct. The shared merge now supplies
+ * both, off the report the caller already resolves for the date.
+ */
+const hasReactions = (p: TrackedPost, r: Report | null): boolean => reactionsOf(p, r).measured
 
-const reactionsOf = (p: TrackedPost): number =>
-  (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0)
+const reactionSum = (p: TrackedPost, r: Report | null): number => reactionsOf(p, r).total ?? 0
+
+/**
+ * What the change figure demands before it will divide.
+ *
+ * A percentage is only as sound as the base under it. Her Last 30 days read
+ * "↑ 59,842.6%" off ONE earlier post that took one reaction, and Last 6 months
+ * read "↑ 10,146.7%" off twelve averaging five — arithmetic both, findings
+ * neither, and the office has already had one such figure pulled off another
+ * card. So the earlier window must be a real sample AND a real quantity: three
+ * measured posts, the same floor this file makes a post kind clear before it
+ * may speak, and a mean above the point where one post rewrites the answer.
+ * Fail either and there is no delta at all — a hedged number still gets quoted.
+ */
+const MIN_DELTA_POSTS = 3
+const MIN_DELTA_BASE = 50
 
 const personKeyOf = (h: TrackedHandle): string =>
   (h.displayName?.trim() || h.label?.trim() || h.handle).toLowerCase()
@@ -105,6 +128,8 @@ interface PersonPost {
   platform: Platform
   /** publishedAt, or the date a stored report knew when the scrape did not. */
   at: string | null
+  /** The stored reading, which holds figures the listing routinely lacks. */
+  report: Report | null
 }
 
 /** What kind of post this is, from what the reading stored about it. */
@@ -142,6 +167,7 @@ function buildPerson(
   window: WindowId,
   anchor: string | null,
   dateOf: (post: TrackedPost) => string | null,
+  reportOf: (post: TrackedPost) => Report | null,
 ): BoardPerson {
   const name = handles.map((h) => h.displayName?.trim()).find(Boolean) ?? handles[0]!.handle
   const avatarUrl = handles.map((h) => h.avatarUrl).find(Boolean) ?? null
@@ -173,11 +199,12 @@ function buildPerson(
       post,
       platform: h.platform,
       at: dateOf(post),
+      report: reportOf(post),
     })),
   )
   const start = windowStart(anchor, window)
   const inSet = posts.filter((p) => inWindow(p.at, start))
-  const measured = inSet.filter((p) => hasReactions(p.post))
+  const measured = inSet.filter((p) => hasReactions(p.post, p.report))
 
   /* The window before this one, for the change figure. Only where the window
      is bounded and the posts carry dates: a delta against "everything" is not
@@ -187,21 +214,34 @@ function buildPerson(
     const span = Date.parse(anchor ?? start) - Date.parse(start)
     const prevStart = new Date(Date.parse(start) - span).toISOString()
     const prev = posts.filter(
-      (p) => p.at != null && p.at >= prevStart && p.at < start && hasReactions(p.post),
+      (p) => p.at != null && p.at >= prevStart && p.at < start && hasReactions(p.post, p.report),
     )
-    if (prev.length > 0 && measured.length > 0) {
+    /* Both sides have to be means before their difference can be a change:
+       one post against one post is two posts, not a trend. */
+    if (prev.length >= MIN_DELTA_POSTS && measured.length >= MIN_DELTA_POSTS) {
       const mean = (set: PersonPost[]): number =>
-        set.reduce((a, p) => a + reactionsOf(p.post), 0) / set.length
+        set.reduce((a, p) => a + reactionSum(p.post, p.report), 0) / set.length
       const before = mean(prev)
-      if (before > 0) deltaPct = Math.round(((mean(measured) - before) / before) * 1000) / 10
+      if (before >= MIN_DELTA_BASE) {
+        deltaPct = Math.round(((mean(measured) - before) / before) * 1000) / 10
+      }
     }
   }
 
   const dated = measured
     .filter((p) => p.at)
     .sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
-  const recent = (dated.length > 0 ? dated : measured).slice(-6)
-  const series = (dated.length > 0 ? dated : measured).slice(-12).map((p) => reactionsOf(p.post))
+  const series = (dated.length > 0 ? dated : measured).slice(-12).map((p) => reactionSum(p.post, p.report))
+
+  /* THE AVERAGE IS OVER THE WINDOW, because the window is what the reader
+     just pressed. It used to be the mean of the newest six measured posts, so
+     her headline stayed 281 on Last 7 days, Last 30 days, Last 6 months and
+     All time alike while the total beneath it moved — a control that changes
+     one figure and freezes the other reads as broken, and the label
+     ("average per post", over this window) was not describing the six. Mean
+     and total now count the same set, so the count printed under them is true
+     of both. */
+  const measuredTotal = measured.reduce((a, p) => a + reactionSum(p.post, p.report), 0)
 
   /* Sentiment: the comment readings on this person's accounts, weighted by
      how many comments each read. Coverage readings are not a sample of
@@ -252,10 +292,10 @@ function buildPerson(
   for (const [kind, set] of kinds) {
     // Three measured posts before a kind may speak: one lucky video is luck.
     if (set.length < 3) continue
-    const avg = Math.round(set.reduce((a, p) => a + reactionsOf(p.post), 0) / set.length)
+    const avg = Math.round(set.reduce((a, p) => a + reactionSum(p.post, p.report), 0) / set.length)
     if (!bestKind || avg > bestKind.value) {
       // The card shows this kind's own best post: the example behind the mean.
-      const best = [...set].sort((a, b) => reactionsOf(b.post) - reactionsOf(a.post))[0]!
+      const best = [...set].sort((a, b) => reactionSum(b.post, b.report) - reactionSum(a.post, a.report))[0]!
       bestKind = { kind, value: avg, post: asRef(best) }
     }
   }
@@ -286,13 +326,9 @@ function buildPerson(
     totalReach,
     unreadPlatforms: unread,
     engagement: {
-      avg: recent.length
-        ? Math.round(recent.reduce((a, p) => a + reactionsOf(p.post), 0) / recent.length)
-        : null,
-      window: recent.length,
-      total: measured.length
-        ? measured.reduce((a, p) => a + reactionsOf(p.post), 0)
-        : null,
+      avg: measured.length ? Math.round(measuredTotal / measured.length) : null,
+      window: measured.length,
+      total: measured.length ? measuredTotal : null,
       series,
       deltaPct,
     },
@@ -321,6 +357,7 @@ export function boardPeopleOf(
   notes: Record<string, string>,
   window: WindowId,
   dateOf: (post: TrackedPost) => string | null,
+  reportOf: (post: TrackedPost) => Report | null,
 ): BoardPerson[] {
   /* The window is anchored to the newest dated post across everybody, not to
      the clock: readings are taken in batches, and a wall-clock week would
@@ -342,10 +379,10 @@ export function boardPeopleOf(
 
   const people: BoardPerson[] = []
   if (own.length > 0) {
-    people.push(buildPerson('__own__', own, true, standings, notes, window, anchor, dateOf))
+    people.push(buildPerson('__own__', own, true, standings, notes, window, anchor, dateOf, reportOf))
   }
   for (const [key, hs] of groups) {
-    people.push(buildPerson(key, hs, false, standings, notes, window, anchor, dateOf))
+    people.push(buildPerson(key, hs, false, standings, notes, window, anchor, dateOf, reportOf))
   }
 
   const [first, ...rest] = people
